@@ -13,6 +13,7 @@
     📄 回测简单日志_v2.2.txt
     📄 提取日志.py
     📄 日志分析提示词.txt
+    📄 测试akshare.py
     📄 测试easytrader.py
     📄 资金变化图.png
     📂 autoTrade/
@@ -51,8 +52,12 @@
         📂 management/
             📂 commands/
                 📄 full_update_stocks.py
+                📄 migrate_to_pg.py
         📂 service/
             📄 corporate_action_service.py
+            📄 db_service.py
+            📄 email_handler.py
+            📄 email_service.py
             📄 stock_service.py
     📂 logs/
         📄 django.log
@@ -83,6 +88,7 @@
                 📄 run_scheduler.py
         📂 service/
             📄 before_fix_service.py
+            📄 db_utils.py
             📄 decision_order_service.py
             📄 decision_order_service_old.py
             📄 monitor_exit_service.py
@@ -90,6 +96,7 @@
             📄 scheduler_service.py
             📄 simulate_trade.py
             📄 simulate_trade_handler.py
+            📄 simulate_trade_old.py
             📄 trade_handler.py
 
 ========================
@@ -443,6 +450,26 @@ if __name__ == '__main__':
 main()
 ####文件结束####
 
+####测试akshare.py####
+import akshare as ak
+df_normal = ak.stock_zh_a_hist(symbol='sh.600662', period="daily", start_date='2025-01-01', end_date='2025-08-08', adjust="")
+df_hfq = ak.stock_zh_a_hist(symbol='sh.600662', period="daily", start_date='2025-01-01', end_date='2025-08-08', adjust="hfq")
+df_normal_2023 = ak.stock_zh_a_hist(symbol='sh.600662', period="daily", start_date='2023-01-01', end_date='2025-08-08', adjust="")
+df_hfq_2023 = ak.stock_zh_a_hist(symbol='sh.600662', period="daily", start_date='2023-01-01', end_date='2025-08-08', adjust="hfq")
+print(df_hfq)
+print(df_hfq_2023)
+
+# 使用 .loc 通过索引来定位 '2025-08-07' 这一行
+price_hfq_from_2025 = df_hfq.loc['2025-08-07']['收盘']
+price_hfq_from_2023 = df_hfq_2023.loc['2025-08-07']['收盘']
+
+# 打印两种方式获取的后复权价格及其差异
+print(f"以 2025-01-01 为起点，获取的 8月7日 后复权收盘价: {price_hfq_from_2025}")
+print(f"以 2023-01-01 为起点，获取的 8月7日 后复权收盘价: {price_hfq_from_2023}")
+print(f"两种获取方式的价格差异: {price_hfq_from_2025 - price_hfq_from_2023}")
+
+####文件结束####
+
 ####测试easytrader.py####
 import easytrader
 import json
@@ -655,8 +682,12 @@ WSGI_APPLICATION = 'autoTrade.wsgi.application'
 
 DATABASES = {
     'default': {
-        'ENGINE': 'django.db.backends.sqlite3',
-        'NAME': BASE_DIR / 'mainDB.sqlite3',
+        'ENGINE': 'django.db.backends.postgresql',
+        'NAME': 'maindb',          # 你的数据库名
+        'USER': 'xyx',              # 你的用户名
+        'PASSWORD': 'xyx123',       # 你的密码
+        'HOST': '1.15.100.196',     # 你的数据库主机地址
+        'PORT': '5432',             # 你的数据库端口
     }
 }
 
@@ -767,7 +798,24 @@ LOGGING = {
             'handlers': ['console', 'file'],
             'level': 'DEBUG',
             'propagate': False,
+        },
+        # --- 新增日志清理配置 ---
+        'sqlalchemy.engine': {
+            'handlers': ['console', 'file'],
+            'level': 'WARNING',  # <-- 只显示 WARNING 及以上级别的日志，过滤掉SQL语句
+            'propagate': False,
+        },
+        'psycopg2': {
+            'handlers': ['console', 'file'],
+            'level': 'WARNING',  # <-- 过滤掉 psycopg2 的低级别日志
+            'propagate': False,
+        },
+        'apscheduler': {
+            'handlers': ['console', 'file'],
+            'level': 'WARNING', # <-- 过滤掉 apscheduler 的 INFO 日志
+            'propagate': False,
         }
+
     }
 }
  
@@ -968,7 +1016,7 @@ class CorporateAction(models.Model):
         help_text="事件唯一ID"
     )
     stock_code = models.CharField(
-        max_length=10,
+        max_length=50,
         null=False,
         blank=False,
         help_text="股票代码, 格式如 'sh.600000'"
@@ -1356,7 +1404,7 @@ class StockInfo(models.Model):
         SUSPENDED = 'suspended', '停牌'
 
     stock_code = models.CharField(
-        max_length=10, 
+        max_length=50, 
         primary_key=True, 
         help_text="股票代码, 格式如 'sh.600000'"
     )
@@ -1649,7 +1697,8 @@ from . import views
 urlpatterns = [
     path('test', views.test_get),
     path('updateLocalStock', views.update_local_a_shares),
-    path('syncCorporateActions', views.sync_corporate_actions)
+    path('syncCorporateActions', views.sync_corporate_actions),
+    path('sendEmail', views.email_send)
 ]
 
 ####文件结束####
@@ -1660,8 +1709,10 @@ from django.shortcuts import render
 from common.models import StockInfo
 from data_manager.service.stock_service import StockService
 from data_manager.service.corporate_action_service import CorporateActionService
+from data_manager.service.email_service import EmailNotificationService
 from django.views.decorators.http import require_http_methods
 import json
+from datetime import date,datetime
 # Create your views here.
 def test_get(request):
     result={}
@@ -1692,6 +1743,12 @@ def sync_corporate_actions(request):
     service.sync_corporate_actions(start_date=body['startDate'],end_date=body['endDate'])
     return JsonResponse({"result":"success"})
 
+@require_http_methods(["POST"])
+def email_send(request):
+    body= json.loads(request.body)
+    service=EmailNotificationService(t_day=datetime.strptime(body['date'], "%Y-%m-%d").date())
+    service.runEmailSend()
+    return JsonResponse({"result":"success"})
 ####文件结束####
 
 ####data_manager\management\commands\full_update_stocks.py####
@@ -1729,6 +1786,28 @@ class Command(BaseCommand):
         service=SelectionService(datetime.strptime('2025-08-08', "%Y-%m-%d").date())
         service.run_selection()
         total_end_time_2 = time.time()
+
+####文件结束####
+
+####data_manager\management\commands\migrate_to_pg.py####
+# data_manager/management/commands/migrate_to_pg.py
+
+from django.core.management.base import BaseCommand
+from data_manager.service.db_service import DbMigrationService
+
+class Command(BaseCommand):
+    help = '将整个SQLite数据库的结构和数据迁移到PostgreSQL'
+
+    def handle(self, *args, **options):
+        self.stdout.write(self.style.SUCCESS('开始执行数据库迁移任务...'))
+        
+        try:
+            service = DbMigrationService()
+            service.migrate()
+            self.stdout.write(self.style.SUCCESS('数据库迁移任务已成功完成。'))
+        except Exception as e:
+            self.stdout.write(self.style.ERROR(f'数据库迁移失败: {e}'))
+
 
 ####文件结束####
 
@@ -1931,6 +2010,597 @@ class CorporateActionService:
         self._fetch_and_save_split_events(stock_codes, start_date, end_date)
 
         logger.info("所有股权事件同步任务已全部完成。")
+
+####文件结束####
+
+####data_manager\service\db_service.py####
+# data_manager/service/db_service.py
+
+import logging
+import time
+import pandas as pd
+from sqlalchemy import create_engine, text
+from django.apps import apps
+from django.db import connections
+from django.conf import settings
+from collections import deque
+
+logger = logging.getLogger(__name__)
+
+class DbMigrationService:
+    """
+    一个健壮的服务，用于将数据从源数据库（SQLite）迁移到目标数据库（PostgreSQL）。
+    它能自动处理表依赖关系，并使用分块读写来处理大数据表。
+    """
+    def __init__(self):
+        # 从 Django settings 获取目标数据库配置
+        pg_config = settings.DATABASES['default']
+        self.pg_uri = f"postgresql+psycopg2://{pg_config['USER']}:{pg_config['PASSWORD']}@{pg_config['HOST']}:{pg_config['PORT']}/{pg_config['NAME']}"
+        
+        # 源数据库路径
+        sqlite_path = settings.BASE_DIR / 'mainDB.sqlite3'
+        self.sqlite_uri = f"sqlite:///{sqlite_path}"
+        
+        self.chunk_size = 50000  # 每次处理5万行，防止内存溢出
+
+    def _get_migration_order(self) -> list:
+        """
+        通过拓扑排序分析 Django 模型之间的依赖关系，生成正确的迁移顺序。
+        父表（被外键引用的表）会排在子表（有外键的表）前面。
+        """
+        all_models = apps.get_models()
+        model_map = {model: model._meta.db_table for model in all_models}
+        
+        # 构建依赖图和入度计数
+        dependencies = {model: set() for model in all_models}
+        in_degree = {model: 0 for model in all_models}
+
+        for model in all_models:
+            for field in model._meta.get_fields():
+                if field.is_relation and field.many_to_one and field.related_model in model_map:
+                    # 如果 model 依赖于 related_model
+                    related_model = field.related_model
+                    if model in dependencies[related_model]:
+                        continue
+                    dependencies[related_model].add(model)
+                    in_degree[model] += 1
+        
+        # 拓扑排序
+        queue = deque([model for model in all_models if in_degree[model] == 0])
+        sorted_models = []
+        
+        while queue:
+            model = queue.popleft()
+            sorted_models.append(model)
+            
+            for dependent_model in dependencies[model]:
+                in_degree[dependent_model] -= 1
+                if in_degree[dependent_model] == 0:
+                    queue.append(dependent_model)
+
+        if len(sorted_models) != len(all_models):
+            raise Exception("数据库模型存在循环依赖，无法进行拓扑排序！")
+            
+        logger.info(f"计算出模型迁移顺序: {[model._meta.db_table for model in sorted_models]}")
+        return sorted_models
+
+    def migrate(self):
+        """
+        执行完整的数据库迁移流程。
+        """
+        logger.info("===== 开始数据库迁移：SQLite -> PostgreSQL =====")
+        start_total_time = time.time()
+
+        try:
+            migration_order = self._get_migration_order()
+            
+            source_engine = create_engine(self.sqlite_uri)
+            target_engine = create_engine(self.pg_uri)
+
+            with target_engine.connect() as pg_conn:
+                for model in migration_order:
+                    table_name = model._meta.db_table
+                    logger.info(f"--- 正在迁移表: {table_name} ---")
+                    start_table_time = time.time()
+
+                    try:
+                        # 1. 清空目标表并重置自增ID，保证幂等性
+                        logger.info(f"清空目标表 {table_name}...")
+                        # 使用 text() 来确保SQL语句被正确处理
+                        truncate_sql = text(f'TRUNCATE TABLE public."{table_name}" RESTART IDENTITY CASCADE;')
+                        pg_conn.execute(truncate_sql)
+                        pg_conn.commit() # TRUNCATE 需要显式提交
+
+                        # 2. 分块读取源数据并写入目标库
+                        query = f'SELECT * FROM "{table_name}";'
+                        total_rows = 0
+                        for chunk_df in pd.read_sql_query(query, source_engine, chunksize=self.chunk_size):
+                            
+                            # 修正数据类型问题：Pandas有时会将bool转为int，需要转回来
+                            for col in chunk_df.columns:
+                                model_field = model._meta.get_field(col)
+                                if model_field.get_internal_type() == 'BooleanField':
+                                    chunk_df[col] = chunk_df[col].astype(bool)
+
+                            chunk_df.to_sql(
+                                name=table_name,
+                                con=target_engine,
+                                if_exists='append',
+                                index=False,
+                                method='multi',
+                                schema='public' # 显式指定 schema
+                            )
+                            total_rows += len(chunk_df)
+                            logger.info(f"已迁移 {total_rows} 行...")
+                        
+                        table_duration = time.time() - start_table_time
+                        logger.info(f"表 {table_name} 迁移完成，共 {total_rows} 行，耗时 {table_duration:.2f} 秒。")
+
+                    except Exception as e:
+                        logger.error(f"迁移表 {table_name} 时发生错误: {e}", exc_info=True)
+                        pg_conn.rollback() # 如果出错则回滚
+                        raise  # 重新抛出异常，中断整个迁移过程
+
+        except Exception as e:
+            logger.critical(f"数据库迁移过程中发生严重错误，任务终止: {e}", exc_info=True)
+            return
+
+        total_duration = time.time() - start_total_time
+        logger.info(f"===== 数据库迁移成功完成！总耗时: {total_duration:.2f} 秒 =====")
+
+
+####文件结束####
+
+####data_manager\service\email_handler.py####
+# data_manager/service/email_handler.py
+
+import smtplib
+import logging
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
+from email.header import Header
+
+logger = logging.getLogger(__name__)
+
+class EmailHandler:
+    """
+    一个通用的邮件发送处理器。
+    它封装了SMTP协议的细节，只向上层提供一个简单的send_email接口。
+    所有配置项都在类的起始区域定义，方便统一管理。
+    """
+
+    # ==========================================================================
+    # SMTP 配置区域 - 请根据您的邮箱服务商填充以下信息
+    # 强烈建议在生产环境中使用环境变量或安全的配置管理方式，而非硬编码
+    # 对于多数邮箱，您可能需要使用“应用专用密码”而非您的登录密码
+    # ==========================================================================
+    SMTP_SERVER = 'smtp.qq.com'  # 例如: 'smtp.qq.com' 或 'smtp.gmail.com'
+    SMTP_PORT = 465                   # SSL加密端口通常为 465
+    SMTP_USER = '876858298@qq.com' # 您的邮箱登录账号
+    SMTP_PASSWORD = 'eoyktuuifrmxbdba'  # 您的邮箱授权码或密码
+    SENDER_EMAIL = '876858298@qq.com' # 发件人邮箱地址
+    SENDER_NAME = '量化交易预案推送'          # 发件人显示名称
+    # ==========================================================================
+
+    def send_email(self, recipients: list[str], subject: str, html_content: str) -> bool:
+        """
+        发送一封HTML格式的邮件给一个或多个收件人。
+
+        :param recipients: 目标邮箱地址的列表, e.g., ['user1@example.com', 'user2@example.com']
+        :param subject: 邮件主题
+        :param html_content: 邮件正文 (HTML格式)
+        :return: True 如果发送成功, False 如果失败
+        """
+        if not all([self.SMTP_SERVER, self.SMTP_PORT, self.SMTP_USER, self.SMTP_PASSWORD, self.SENDER_EMAIL]):
+            logger.critical("SMTP配置不完整，无法发送邮件。请检查 EmailHandler 中的配置项。")
+            return False
+
+        if not recipients:
+            logger.warning("收件人列表为空，邮件未发送。")
+            return False
+
+        # 创建一个带附件的实例
+        message = MIMEMultipart('alternative')
+        message['From'] = f'"{Header(self.SENDER_NAME, "utf-8").encode()}" <{self.SENDER_EMAIL}>'
+        message['To'] = ", ".join(recipients)
+        message['Subject'] = Header(subject, 'utf-8')
+
+        # 邮件正文内容
+        html_part = MIMEText(html_content, 'html', 'utf-8')
+        message.attach(html_part)
+        server = None  # 初始化server变量
+        try:
+            logger.info(f"准备通过 {self.SMTP_SERVER}:{self.SMTP_PORT} 发送邮件至 {recipients}...")
+            
+            # 1. 手动建立连接
+            server = smtplib.SMTP_SSL(self.SMTP_SERVER, self.SMTP_PORT)
+            server.login(self.SMTP_USER, self.SMTP_PASSWORD)
+            server.sendmail(self.SENDER_EMAIL, recipients, message.as_string())
+            
+            logger.info(f"邮件发送成功！主题: '{subject}'")
+            return True
+            
+        except smtplib.SMTPException as e:
+            logger.error(f"发送邮件时发生SMTP错误: {e}", exc_info=True)
+            return False
+        except Exception as e:
+            logger.error(f"发送邮件时发生未知错误: {e}", exc_info=True)
+            return False
+        finally:
+            # 2. 在finally块中确保关闭连接
+            if server:
+                try:
+                    # 3. 对quit()命令进行独立的异常处理
+                    server.quit()
+                except smtplib.SMTPResponseException as e:
+                    # 优雅地处理服务器提前关闭连接的情况
+                    logger.warning(f"关闭SMTP连接时发生响应异常 (通常无害): {e}")
+                except Exception as e:
+                    logger.error(f"关闭SMTP连接时发生未知错误: {e}", exc_info=True)
+
+
+####文件结束####
+
+####data_manager\service\email_service.py####
+# data_manager/service/email_service.py
+
+import logging
+from datetime import date, timedelta
+from decimal import Decimal
+
+from django.utils import timezone
+from django.db import transaction
+
+# 内部模块导入
+from .email_handler import EmailHandler
+
+# Django模型导入
+from common.models import (
+    DailyFactorValues, DailyTradingPlan, DailyQuotes, StockInfo,
+    Position, TradeLog
+)
+from selection_manager.service.selection_service import MARKET_INDICATOR_CODE
+from trade_manager.service.decision_order_service import DecisionOrderService
+from trade_manager.service.simulate_trade_handler import SimulateTradeHandler
+from trade_manager.service.simulate_trade import SimulateTradeService
+
+
+logger = logging.getLogger(__name__)
+
+class EmailNotificationService:
+    """
+    封装了在T日盘前（如9:10）向指定邮箱推送T-1日预案的业务逻辑。
+    """
+
+    def __init__(self, t_day: date):
+        """
+        初始化邮件通知服务。
+        :param t_day: T日，即预案执行日。
+        """
+        self.t_day = t_day
+        try:
+            # 获取T日之前的最后一个交易日作为T-1日
+            self.t_minus_1_day = DailyQuotes.objects.filter(
+                trade_date__lt=self.t_day
+            ).latest('trade_date').trade_date
+        except DailyQuotes.DoesNotExist:
+            raise ValueError(f"无法找到 {self.t_day} 的前一个交易日(T-1)，服务无法初始化。")
+
+        self.email_handler = EmailHandler()
+        # 从EmailHandler的配置中直接读取收件人列表
+        self.recipients = self.email_handler.recipients if hasattr(self.email_handler, 'recipients') else ['876858298@qq.com','850696281@qq.com']
+
+
+    def runEmailSend(self):
+        """
+        一键执行邮件发送的主方法。
+        """
+        logger.info(f"开始为T日({self.t_day})生成预案推送邮件...")
+        # 【核心修改】先找到真正需要处理的预案日期
+        plan_date_to_process = self._find_latest_pending_plan_date()
+        if not plan_date_to_process:
+            logger.warning(f"从T日({self.t_day})回溯，未找到任何待处理的交易预案，邮件发送任务终止。")
+            return
+        # 1. 获取所有需要的数据
+        market_data = self._get_market_regime_data()
+        # 【核心修改】将找到的日期传递给下一步
+        plan_details = self._get_trading_plan_details(plan_date_to_process)
+        if not plan_details:
+            logger.warning(f"预案日({plan_date_to_process})的预案详情为空，邮件发送任务终止。")
+            return
+        # 2. 生成HTML内容
+        html_content = self._format_html_content(market_data, plan_details)
+        # 3. 发送邮件
+        subject = f"【交易预案】{self.t_day.strftime('%Y-%m-%d')} 盘前确认 (数据源: {plan_date_to_process.strftime('%Y-%m-%d')})"
+        self.email_handler.send_email(self.recipients, subject, html_content)
+
+    def _get_market_regime_data(self) -> dict:
+        """获取昨日M值及近10日M值历史"""
+        try:
+            # 获取T-1日及之前的10个交易日
+            trade_dates = list(DailyQuotes.objects.filter(trade_date__lte=self.t_minus_1_day)
+                               .values_list('trade_date', flat=True)
+                               .distinct().order_by('-trade_date')[:10])
+            trade_dates.reverse()
+
+            m_values_qs = DailyFactorValues.objects.filter(
+                stock_code_id=MARKET_INDICATOR_CODE,
+                factor_code_id='dynamic_M_VALUE',
+                trade_date__in=trade_dates
+            ).order_by('-trade_date')
+
+            m_values_map = {fv.trade_date: fv.raw_value for fv in m_values_qs}
+
+            yesterday_m = m_values_map.get(self.t_minus_1_day, Decimal('NaN'))
+            history_m = [{'date': d, 'value': m_values_map.get(d, Decimal('NaN'))} for d in trade_dates]
+
+            return {'yesterday_m': yesterday_m, 'history_m': history_m}
+
+        except Exception as e:
+            logger.error(f"获取M值数据时出错: {e}", exc_info=True)
+            return {'yesterday_m': Decimal('NaN'), 'history_m': []}
+
+    def _get_trading_plan_details(self, plan_date: date) -> list[dict]:
+        """获取T日交易预案及相关的所有详细信息"""
+        plans = DailyTradingPlan.objects.filter(plan_date=plan_date, status=DailyTradingPlan.StatusChoices.PENDING).order_by('rank')
+        if not plans.exists():
+            return []
+
+        detailed_plans = []
+        for plan in plans:
+            stock_code = plan.stock_code_id
+            logger.debug(f"正在处理预案股票: {stock_code}")
+            try:
+                # 获取止盈止损率
+                rates = self._calculate_profit_loss_rates(stock_code)
+                # 获取历史行情
+                history = self._get_stock_historical_data(stock_code)
+
+                detailed_plans.append({
+                    'plan': plan,
+                    'stock_info': plan.stock_code, # StockInfo object
+                    'rates': rates,
+                    'history': history
+                })
+            except Exception as e:
+                logger.error(f"处理股票 {stock_code} 的预案详情时失败: {e}", exc_info=True)
+                continue # 跳过这个出错的股票
+
+        return detailed_plans
+
+    def _calculate_profit_loss_rates(self, stock_code: str) -> dict:
+        """
+        通过创建临时数据库记录来复用现有止盈止损计算逻辑。
+        整个过程在单个数据库事务中完成，确保安全。
+        """
+        tp_rate, sl_rate = Decimal('NaN'), Decimal('NaN')
+        try:
+            # 【新增步骤1】: 获取T-1日收盘价作为基准
+            try:
+                t_minus_1_quote = DailyQuotes.objects.get(stock_code_id=stock_code, trade_date=self.t_minus_1_day)
+                base_price = t_minus_1_quote.close
+                if base_price <= 0:
+                    raise ValueError("T-1日收盘价无效")
+            except DailyQuotes.DoesNotExist:
+                logger.error(f"无法找到 {stock_code} 在 {self.t_minus_1_day} 的行情数据，无法计算止盈止损率。")
+                return {'tp_rate': tp_rate, 'sl_rate': sl_rate}
+            except ValueError as e:
+                logger.error(f"股票 {stock_code} 在 {self.t_minus_1_day} 的收盘价不合法: {e}")
+                return {'tp_rate': tp_rate, 'sl_rate': sl_rate}
+            with transaction.atomic():
+                # 【修改步骤2】: 使用获取到的base_price创建临时记录
+                temp_position = Position.objects.create(
+                    stock_code_id=stock_code,
+                    entry_price=base_price, # 使用T-1收盘价
+                    quantity=100,
+                    entry_datetime=timezone.now(),
+                    status=Position.StatusChoices.OPEN,
+                    current_stop_loss=Decimal('0.00'),
+                    current_take_profit=Decimal('0.00')
+                )
+                temp_trade_log = TradeLog.objects.create(
+                    position=temp_position,
+                    stock_code_id=stock_code,
+                    trade_datetime=timezone.now(),
+                    trade_type=TradeLog.TradeTypeChoices.BUY,
+                    status=TradeLog.StatusChoices.FILLED,
+                    price=base_price, # 使用T-1收盘价
+                    quantity=100,
+                    commission=0,
+                    stamp_duty=0
+                )
+                # 调用服务进行计算 (这部分不变)
+                dummy_sim_service = SimulateTradeService()
+                dummy_handler = SimulateTradeHandler(dummy_sim_service)
+                decision_service = DecisionOrderService(handler=dummy_handler, execution_date=self.t_day)
+                decision_service.calculate_stop_profit_loss(trade_id=temp_trade_log.trade_id)
+                temp_position.refresh_from_db()
+                # 【修改步骤3】: 使用base_price作为分母计算比率
+                take_profit_price = temp_position.current_take_profit
+                stop_loss_price = temp_position.current_stop_loss
+                if take_profit_price > 0:
+                    tp_rate = (take_profit_price / base_price) - 1
+                if stop_loss_price > 0:
+                    sl_rate = 1 - (stop_loss_price / base_price)
+                # 回滚事务，清除临时数据 (这部分不变)
+                transaction.set_rollback(True)
+        except Exception as e:
+            logger.error(f"为 {stock_code} 计算止盈止损率时发生严重错误: {e}", exc_info=True)
+            transaction.set_rollback(True)
+        logger.debug(f"{stock_code} (基准价: {base_price:.2f}) -> TP Rate: {tp_rate:.4%}, SL Rate: {sl_rate:.4%}")
+        return {'tp_rate': tp_rate, 'sl_rate': sl_rate}
+
+
+    def _get_stock_historical_data(self, stock_code: str) -> list[dict]:
+        """获取指定股票近10个交易日的历史行情"""
+        trade_dates = list(DailyQuotes.objects.filter(trade_date__lte=self.t_minus_1_day)
+                           .values_list('trade_date', flat=True)
+                           .distinct().order_by('-trade_date')[:10])
+        trade_dates.reverse()
+
+        quotes = DailyQuotes.objects.filter(
+            stock_code_id=stock_code,
+            trade_date__in=trade_dates
+        ).order_by('trade_date')
+
+        history = []
+        prev_close = None
+        for quote in quotes:
+            change_pct = Decimal('0.0')
+            if prev_close and prev_close > 0:
+                change_pct = (quote.close / prev_close) - 1
+            
+            history.append({
+                'date': quote.trade_date,
+                'open': quote.open,
+                'high': quote.high,
+                'low': quote.low,
+                'close': quote.close,
+                'hfq_close': quote.hfq_close,
+                'change_pct': change_pct
+            })
+            prev_close = quote.close
+        return history
+
+    def _format_html_content(self, market_data: dict, plan_details: list[dict]) -> str:
+        """将所有数据格式化为美观的HTML字符串"""
+        
+        # --- CSS样式 ---
+        style = """
+        <style>
+            body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; line-height: 1.6; color: #333; background-color: #f8f9fa; margin: 0; padding: 20px; }
+            .container { max-width: 800px; margin: auto; background: #fff; padding: 25px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.05); }
+            h2 { color: #0056b3; border-bottom: 2px solid #0056b3; padding-bottom: 10px; margin-top: 30px; }
+            h3 { color: #17a2b8; margin-top: 25px; }
+            table { width: 100%; border-collapse: collapse; margin-top: 15px; font-size: 14px; }
+            th, td { border: 1px solid #dee2e6; padding: 10px; text-align: left; }
+            th { background-color: #e9ecef; font-weight: 600; }
+            tr:nth-child(even) { background-color: #f8f9fa; }
+            .summary { font-size: 16px; font-weight: bold; margin-bottom: 20px; }
+            .red { color: #dc3545; }
+            .green { color: #28a745; }
+            .footer { margin-top: 30px; font-size: 12px; color: #6c757d; text-align: center; }
+        </style>
+        """
+
+        # --- HTML头部 ---
+        html = f"""
+        <!DOCTYPE html>
+        <html lang="zh-CN">
+        <head>
+            <meta charset="UTF-8">
+            <title>交易预案确认</title>
+            {style}
+        </head>
+        <body>
+            <div class="container">
+                <h2>T日 ({self.t_day.strftime('%Y-%m-%d')}) 交易预案盘前确认</h2>
+        """
+
+        # --- 大盘情况 ---
+        yesterday_m_str = f"{market_data['yesterday_m']:.4f}" if not market_data['yesterday_m'].is_nan() else "N/A"
+        html += f"""
+        <h3>[大盘情况]</h3>
+        <p class="summary">昨日M值: <span class="{'red' if market_data.get('yesterday_m', 0) > 0 else 'green'}">{yesterday_m_str}</span></p>
+        <table>
+            <thead><tr><th>日期</th><th>M值</th></tr></thead>
+            <tbody>
+        """
+        for item in reversed(market_data['history_m']):
+            m_val_str = f"{item['value']:.4f}" if not item['value'].is_nan() else "N/A"
+            html += f"<tr><td>{item['date'].strftime('%Y-%m-%d')}</td><td>{m_val_str}</td></tr>"
+        html += "</tbody></table>"
+
+        # --- 选股预案 ---
+        html += "<h3>[选股预案]</h3>"
+        html += """
+        <table>
+            <thead>
+                <tr>
+                    <th>排名</th>
+                    <th>股票代码</th>
+                    <th>股票名称</th>
+                    <th>可接受开盘区间</th>
+                    <th>预期止盈率</th>
+                    <th>预期止损率</th>
+                </tr>
+            </thead>
+            <tbody>
+        """
+        for detail in plan_details:
+            plan = detail['plan']
+            stock_info = detail['stock_info']
+            rates = detail['rates']
+            tp_rate_str = f"{rates['tp_rate']:.2%}" if not rates['tp_rate'].is_nan() else "N/A"
+            sl_rate_str = f"{rates['sl_rate']:.2%}" if not rates['sl_rate'].is_nan() else "N/A"
+            html += f"""
+            <tr>
+                <td>{plan.rank}</td>
+                <td>{stock_info.stock_code}</td>
+                <td>{stock_info.stock_name}</td>
+                <td>{plan.miop:.2f} - {plan.maop:.2f}</td>
+                <td class="red">{tp_rate_str}</td>
+                <td class="green">{sl_rate_str}</td>
+            </tr>
+            """
+        html += "</tbody></table>"
+
+        # --- 各股票历史行情 ---
+        for detail in plan_details:
+            stock_info = detail['stock_info']
+            history = detail['history']
+            html += f"<h4>{stock_info.stock_name} ({stock_info.stock_code}) - 近10日行情</h4>"
+            html += """
+            <table>
+                <thead>
+                    <tr>
+                        <th>日期</th>
+                        <th>开盘价</th>
+                        <th>最高价</th>
+                        <th>最低价</th>
+                        <th>收盘价</th>
+                        <th>后复权收盘</th>
+                        <th>涨幅</th>
+                    </tr>
+                </thead>
+                <tbody>
+            """
+            for item in reversed(history):
+                color_class = 'red' if item['change_pct'] > 0 else ('green' if item['change_pct'] < 0 else '')
+                html += f"""
+                <tr>
+                    <td>{item['date'].strftime('%Y-%m-%d')}</td>
+                    <td>{item['open']:.2f}</td>
+                    <td>{item['high']:.2f}</td>
+                    <td>{item['low']:.2f}</td>
+                    <td>{item['close']:.2f}</td>
+                    <td>{item['hfq_close']:.4f}</td>
+                    <td class="{color_class}">{item['change_pct']:.2%}</td>
+                </tr>
+                """
+            html += "</tbody></table>"
+
+        # --- HTML尾部 ---
+        html += """
+                <p class="footer">本邮件由策略交易系统自动生成，仅供参考，请在交易前最终确认。</p>
+            </div>
+        </body>
+        </html>
+        """
+        return html
+    def _find_latest_pending_plan_date(self) -> date | None:
+        """从T日开始向前回溯，查找最新的一个包含待执行预案的日期"""
+        # 设置一个合理的回溯上限，例如14天
+        for i in range(14):
+            check_date = self.t_day - timedelta(days=i)
+            if DailyTradingPlan.objects.filter(
+                plan_date=check_date,
+                status=DailyTradingPlan.StatusChoices.PENDING
+            ).exists():
+                logger.info(f"找到待执行的交易预案，预案生成日为: {check_date}")
+                return check_date
+        logger.warning(f"在过去14天内未找到任何待执行的交易预案。")
+        return None
 
 ####文件结束####
 
@@ -4731,6 +5401,66 @@ class BeforeFixService:
 
 ####文件结束####
 
+####trade_manager\service\db_utils.py####
+# trade_manager/service/db_utils.py
+
+import contextlib
+import logging
+import threading
+from django.db import connections
+from django.db.backends.signals import connection_created
+
+logger = logging.getLogger(__name__)
+
+# 使用线程局部存储来安全地在多线程环境中传递 schema 名称
+_db_context = threading.local()
+
+def backtest_schema_handler(sender, connection, **kwargs):
+    """
+    Django `connection_created` 信号的处理器。
+    当一个新的数据库连接被创建时，此函数会被调用。
+    它会检查当前线程是否在 `use_backtest_schema` 上下文中，
+    如果是，则立即为这个新连接设置正确的 search_path。
+    """
+    if hasattr(_db_context, 'schema_name') and _db_context.schema_name:
+        schema_name = _db_context.schema_name
+        logger.debug(f"新数据库连接创建，为其设置 search_path -> {schema_name}, public")
+        with connection.cursor() as cursor:
+            # 使用参数化查询防止SQL注入
+            cursor.execute("SET search_path TO %s, public;", [schema_name])
+
+# 将信号处理器连接到 `connection_created` 信号
+# dispatch_uid 确保即使代码被多次导入，信号处理器也只连接一次
+connection_created.connect(backtest_schema_handler, dispatch_uid="set_backtest_search_path")
+
+@contextlib.contextmanager
+def use_backtest_schema(schema_name: str):
+    """
+    一个上下文管理器，用于在特定代码块内将所有数据库操作重定向到指定的 schema。
+
+    用法:
+    with use_backtest_schema('my_backtest_schema'):
+        # 此处所有的 Django ORM 操作都会在 'my_backtest_schema' 中进行
+        MyModel.objects.create(...)
+    """
+    # 进入 with 块时，设置线程局部变量
+    _db_context.schema_name = schema_name
+    # 强制关闭当前线程的现有连接，以确保下一个查询会创建一个新连接，从而触发信号处理器
+    connections['default'].close()
+    try:
+        # 将控制权交还给 with 块内的代码
+        yield
+    finally:
+        # 退出 with 块时（无论成功还是异常），清理线程局部变量
+        if hasattr(_db_context, 'schema_name'):
+            del _db_context.schema_name
+        # 再次关闭连接，以便后续操作能恢复到默认的 search_path
+        connections['default'].close()
+        logger.debug("已退出回测 schema 上下文，恢复默认 search_path。")
+
+
+####文件结束####
+
 ####trade_manager\service\decision_order_service.py####
 # trade_manager/service/decision_order_service.py
 # 版本: 2.0 - M(t)驱动的动态风险管理
@@ -5995,6 +6725,8 @@ from decimal import Decimal
 
 from selection_manager.service.selection_service import SelectionService
 from data_manager.service.corporate_action_service import CorporateActionService
+from data_manager.service.stock_service import StockService
+from data_manager.service.email_service import EmailNotificationService
 from trade_manager.service.before_fix_service import BeforeFixService
 from trade_manager.service.decision_order_service import DecisionOrderService
 from trade_manager.service.monitor_exit_service import MonitorExitService
@@ -6061,11 +6793,15 @@ def daily_check():
     return True
 
 def selection_job():
+    
+
     t_minus_1 = date.today() - timedelta(days=1)
-    if not trading_calendar.is_trading_day(t_minus_1):
-        logger.info(f"昨日({t_minus_1})不是交易日，不执行选股任务。")
+    if not trading_calendar.is_trading_day(date.today()):
+        logger.info(f"今日({date.today()})不是交易日，不执行选股任务。")
         return
-    service = SelectionService(trade_date=t_minus_1, mode='realtime')
+    service = StockService()
+    service.update_local_a_shares(start_date=date.today().strftime('%Y-%m-%d'),end_date=date.today().strftime('%Y-%m-%d'))
+    service = SelectionService(trade_date=date.today(), mode='realtime')
     service.run_selection()
 
 def premarket_fix_job():
@@ -6218,6 +6954,13 @@ def cleanup_intraday_jobs():
     except Exception:
         pass
 
+# 邮件发送任务
+def email_jobs():
+    """每天发送计划邮件"""
+    today = date.today()
+    service = EmailNotificationService(today)
+    service.runEmailSend()
+
 
 def start():
     """启动调度器的主函数"""
@@ -6230,19 +6973,20 @@ def start():
         return
 
     # 添加任务
-    scheduler.add_job(run_job_wrapper, 'cron', day='*', hour=18, minute=0, args=[selection_job, '日终选股'])
-    scheduler.add_job(run_job_wrapper, 'cron', day='*', hour=8, minute=30, args=[premarket_fix_job, '盘前校准'])
-    scheduler.add_job(run_job_wrapper, 'cron', day='*', hour=9, minute=25, second=5, args=[opening_decision_job, '开盘决策'])
+    scheduler.add_job(run_job_wrapper, 'cron', day='*', hour=22, minute=0, args=[selection_job, '日终选股'])
+    scheduler.add_job(run_job_wrapper, 'cron', day='*', hour=6, minute=30, args=[premarket_fix_job, '盘前校准'])
+    scheduler.add_job(run_job_wrapper, 'cron', day='*', hour=7, minute=0, args=[email_jobs, '预案推送'])
+    #scheduler.add_job(run_job_wrapper, 'cron', day='*', hour=9, minute=25, second=5, args=[opening_decision_job, '开盘决策'])
     
     # --- 每日动态任务的调度器 ---
     # 在每个交易日的开盘前（例如9:00）安排好当天的盘中任务
-    scheduler.add_job(schedule_intraday_jobs, 'cron', day='*', hour=9, minute=0)
+    #scheduler.add_job(schedule_intraday_jobs, 'cron', day='*', hour=9, minute=0)
     #在收盘后清理
-    scheduler.add_job(cleanup_intraday_jobs, 'cron', day='*', hour=15, minute=5)
+    #scheduler.add_job(cleanup_intraday_jobs, 'cron', day='*', hour=15, minute=5)
     
     # 数据和连接管理任务
     scheduler.add_job(run_job_wrapper, 'cron', day='*', hour=6, minute=0, args=[update_corporate_actions_job, '更新除权除息'])
-    scheduler.add_job(run_job_wrapper, 'cron', day='*', hour=15, minute=30, args=[disconnect_job, '断开连接'])
+    #scheduler.add_job(run_job_wrapper, 'cron', day='*', hour=15, minute=30, args=[disconnect_job, '断开连接'])
 
     logger.info("APScheduler 已配置完成，准备在后台启动...")
     scheduler.start()
@@ -6250,6 +6994,404 @@ def start():
 ####文件结束####
 
 ####trade_manager\service\simulate_trade.py####
+# trade_manager/service/simulate_trade.py
+
+import logging
+from datetime import date, timedelta, datetime
+from decimal import Decimal
+import numpy as np
+import pandas as pd
+from django.db import connections, transaction
+from django.core.management import call_command
+
+# 内部模块导入
+from common.models import (
+    DailyFactorValues, DailyTradingPlan, Position, TradeLog, SystemLog,
+    StrategyParameters, DailyQuotes, CorporateAction
+)
+from selection_manager.service.selection_service import SelectionService
+from trade_manager.service.before_fix_service import BeforeFixService
+from trade_manager.service.decision_order_service import DecisionOrderService
+from trade_manager.service.monitor_exit_service import MonitorExitService
+from .simulate_trade_handler import SimulateTradeHandler
+from .db_utils import use_backtest_schema  # <-- 导入新的工具
+
+logger = logging.getLogger(__name__)
+
+class SimulateTradeService:
+    """
+    回测实施服务 (V2 - PostgreSQL 动态 Schema 版)。
+    """
+    COMMISSION_RATE = Decimal('0.0002854')
+    MIN_COMMISSION = Decimal('5')
+    STAMP_DUTY_RATE = Decimal('0.001')
+    SELL_SLIPPAGE_RATE = Decimal('0.002')
+    ANNUAL_RISK_FREE_RATE = Decimal('0.015')
+    TRADING_DAYS_PER_YEAR = 252
+
+    def __init__(self):
+        self.start_date: date = None
+        self.end_date: date = None
+        self.current_date: date = None
+        self.initial_capital = Decimal('0.0')
+        self.cash_balance = Decimal('0.0')
+        self.portfolio_history = []
+        self.last_buy_trade_id = None
+        # self.original_db_config 不再需要
+
+    def _setup_backtest_schema(self, schema_name: str):
+        """
+        在新 schema 中创建表结构并复制基础数据。
+        此函数必须在 `use_backtest_schema` 上下文中调用。
+        """
+        logger.info(f"--- 1. 在 Schema '{schema_name}' 中准备回测环境 ---")
+        
+        # 1. 创建所有表结构
+        logger.info("正在新 Schema 中创建表结构 (执行 migrate)...")
+        call_command('migrate')
+        logger.info("表结构创建完成。")
+
+        # 2. 定义需要从 public schema 复制的基础数据表
+        tables_to_copy = [
+            'tb_stock_info', 'tb_daily_quotes', 'tb_corporate_actions',
+            'tb_factor_definitions', 'tb_strategy_parameters', 'tb_daily_factor_values'
+        ]
+        
+        logger.info(f"准备从 'public' schema 复制基础数据到 '{schema_name}'...")
+        with connections['default'].cursor() as cursor:
+            for table_name in tables_to_copy:
+                logger.info(f"  - 正在复制表: {table_name}")
+                # 使用 INSERT INTO ... SELECT * ... 高效复制数据
+                sql = f'INSERT INTO "{schema_name}"."{table_name}" SELECT * FROM public."{table_name}";'
+                cursor.execute(sql)
+        logger.info("基础数据复制完成。")
+
+        # 3. 初始化资金
+        params = {p.param_name: p.param_value for p in StrategyParameters.objects.all()}
+        max_positions = int(params.get('MAX_POSITIONS', Decimal('5')))
+        max_capital_per_pos = params.get('MAX_CAPITAL_PER_POSITION', Decimal('10000'))
+        self.initial_capital = Decimal('150000') # 按你要求写死
+        self.cash_balance = self.initial_capital
+        logger.info(f"初始资金已设定为: {self.initial_capital:.2f}")
+
+    def run_backtest(self, start_date: str, end_date: str) -> dict:
+        self.start_date = date.fromisoformat(start_date)
+        self.end_date = date.fromisoformat(end_date)
+
+        # 1. 生成唯一的 schema 名称
+        schema_name = f"backtest_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+        logger.info(f"为本次回测创建临时 Schema: {schema_name}")
+
+        try:
+            # 2. 创建 Schema
+            with connections['default'].cursor() as cursor:
+                cursor.execute(f'CREATE SCHEMA IF NOT EXISTS "{schema_name}";')
+
+            # 3. 进入动态 Schema 上下文
+            with use_backtest_schema(schema_name):
+                # 3.1 在新 schema 中准备环境（建表、复制数据）
+                self._setup_backtest_schema(schema_name)
+
+                # 3.2 执行回测主循环 (这部分逻辑基本不变)
+                handler = SimulateTradeHandler(self)
+                trading_days = self._get_trading_days()
+                if not trading_days:
+                    logger.error("在指定日期范围内未找到任何交易日，回测终止。")
+                    return {}
+
+                baseline_date = trading_days[0] - timedelta(days=1)
+                self.portfolio_history.append({'date': baseline_date, 'total_value': self.initial_capital})
+
+                logger.info(f"--- 2. 开始日度回测循环 ({len(trading_days)}天) ---")
+                for i, current_day in enumerate(trading_days):
+                    self.current_date = current_day
+                    logger.info(f"\n{'='*20} 模拟日: {self.current_date} ({i+1}/{len(trading_days)}) {'='*20}")
+
+                    # ... (原有的回测循环逻辑，无需修改) ...
+                    prev_trading_day = trading_days[i-1] if i > 0 else None
+                    if prev_trading_day:
+                        logger.info(f"-> [T-1 选股] 基于 {prev_trading_day} 的数据...")
+                        selection_service = SelectionService(trade_date=prev_trading_day, mode='backtest')
+                        selection_service.run_selection()
+
+                    logger.info("-> [T日 盘前校准] ...")
+                    before_fix_service = BeforeFixService(execution_date=self.current_date)
+                    before_fix_service.run()
+                    
+                    # ... (分红逻辑) ...
+                    dividend_events = CorporateAction.objects.filter(
+                        ex_dividend_date=self.current_date, event_type=CorporateAction.EventType.DIVIDEND
+                    )
+                    events_by_stock = {}
+                    for event in dividend_events:
+                        events_by_stock.setdefault(event.stock_code, []).append(event)
+                    if events_by_stock:
+                        open_positions_for_dividend = Position.objects.filter(
+                            stock_code_id__in=events_by_stock.keys(),
+                            status=Position.StatusChoices.OPEN
+                        )
+                        for pos in open_positions_for_dividend:
+                            stock_events = events_by_stock.get(pos.stock_code_id, [])
+                            for event in stock_events:
+                                dividend_amount = event.dividend_per_share * pos.quantity
+                                self.cash_balance += dividend_amount
+                                logger.info(f"除息事件: 持仓ID {pos.position_id} ({pos.stock_code_id}) 获得分红 {dividend_amount:.2f}，现金余额更新为 {self.cash_balance:.2f}")
+
+                    logger.info("-> [T日 开盘决策与买入] ...")
+                    decision_order_service = DecisionOrderService(handler=handler, execution_date=self.current_date)
+                    decision_order_service.adjust_trading_plan_daily()
+                    
+                    while True:
+                        open_positions_count = Position.objects.filter(status=Position.StatusChoices.OPEN).count()
+                        max_pos = decision_order_service.current_max_positions
+                        if open_positions_count >= max_pos:
+                            break
+                        
+                        self.last_buy_trade_id = None
+                        decision_order_service.execute_orders()
+                        
+                        if self.last_buy_trade_id:
+                            decision_order_service.calculate_stop_profit_loss(self.last_buy_trade_id)
+                        else:
+                            break
+
+                    monitor_exit_service = MonitorExitService(handler=handler, execution_date=self.current_date)
+
+                    logger.info("-> [T日 盘中监控] 模拟价格跌至最低点...")
+                    handler.current_price_node = 'LOW'
+                    monitor_exit_service.monitor_and_exit_positions()
+
+                    logger.info("-> [T日 盘中监控] 模拟价格涨至最高点...")
+                    handler.current_price_node = 'HIGH'
+                    monitor_exit_service.monitor_and_exit_positions()
+
+                    self._calculate_daily_portfolio_value()
+
+                logger.info("--- 3. 回测循环结束 ---")
+                return self._calculate_performance_metrics()
+
+        except Exception as e:
+            logger.critical(f"回测过程中发生严重错误: {e}", exc_info=True)
+            return {"error": str(e)}
+        # `finally` 块不再需要，因为上下文管理器会自动处理清理工作
+
+    # _get_trading_days, _calculate_daily_portfolio_value, _calculate_performance_metrics 方法保持不变
+    def _get_trading_days(self) -> list[date]:
+        dates = DailyQuotes.objects.filter(
+            trade_date__gte=self.start_date,
+            trade_date__lte=self.end_date
+        ).values_list('trade_date', flat=True).distinct().order_by('trade_date')
+        return list(dates)
+
+    def _calculate_daily_portfolio_value(self):
+        open_positions = Position.objects.filter(status=Position.StatusChoices.OPEN)
+        market_value = Decimal('0.0')
+        for pos in open_positions:
+            try:
+                quote = DailyQuotes.objects.get(
+                    stock_code_id=pos.stock_code_id,
+                    trade_date=self.current_date
+                )
+                market_value += quote.close * pos.quantity
+            except DailyQuotes.DoesNotExist:
+                market_value += pos.entry_price * pos.quantity
+        
+        total_value = self.cash_balance + market_value
+        self.portfolio_history.append({
+            'date': self.current_date,
+            'total_value': total_value
+        })
+        logger.info(f"--- 日终结算 ({self.current_date}) ---")
+        logger.info(f"现金: {self.cash_balance:.2f}, 持仓市值: {market_value:.2f}, 总资产: {total_value:.2f}")
+
+    def _calculate_performance_metrics(self) -> dict:
+        logger.info("--- 4. 计算回测性能指标 ---")
+        if not self.portfolio_history:
+            return {}
+
+        df = pd.DataFrame(self.portfolio_history)
+        df['total_value'] = df['total_value'].astype(float)
+        df['daily_return'] = df['total_value'].pct_change().fillna(0)
+        
+        final_value = float(df['total_value'].iloc[-1])
+        total_return_amount = final_value - float(self.initial_capital)
+        total_return_rate = (final_value / float(self.initial_capital)) - 1
+
+        mean_daily_return = df['daily_return'].mean()
+        std_daily_return = df['daily_return'].std()
+        
+        if std_daily_return == 0 or np.isnan(std_daily_return):
+            sharpe_ratio = 0.0
+        else:
+            daily_risk_free_rate = (1 + self.ANNUAL_RISK_FREE_RATE) ** Decimal(1/self.TRADING_DAYS_PER_YEAR) - 1
+            sharpe_ratio = (mean_daily_return - float(daily_risk_free_rate)) / std_daily_return
+            sharpe_ratio *= np.sqrt(self.TRADING_DAYS_PER_YEAR)
+
+        result = {
+            'total_return_amount': round(total_return_amount, 2),
+            'total_return_rate': round(total_return_rate, 4),
+            'sharpe_ratio': round(float(sharpe_ratio), 4)
+        }
+        logger.info(f"回测结果: {result}")
+        return result
+
+####文件结束####
+
+####trade_manager\service\simulate_trade_handler.py####
+# trade_manager/service/simulate_trade_handler.py
+
+import logging
+from datetime import time
+from decimal import Decimal, ROUND_HALF_UP
+
+from django.db import transaction
+from django.utils import timezone
+
+from .trade_handler import ITradeHandler
+from common.models import Position, TradeLog, DailyQuotes
+
+from typing import TYPE_CHECKING, Literal
+if TYPE_CHECKING:
+    from .simulate_trade import SimulateTradeService
+
+logger = logging.getLogger(__name__)
+
+class SimulateTradeHandler(ITradeHandler):
+    """
+    模拟交易处理器 (SimulateTradeHandler)。
+    """
+
+    def __init__(self, service: 'SimulateTradeService'):
+        self.service = service
+        self.current_price_node: Literal['OPEN', 'LOW', 'HIGH', 'CLOSE'] = 'CLOSE'
+
+    def get_opening_price(self, stock_code: str) -> Decimal:
+        try:
+            quote = DailyQuotes.objects.get(
+                stock_code_id=stock_code,
+                trade_date=self.service.current_date
+            )
+            return quote.open
+        except DailyQuotes.DoesNotExist:
+            logger.warning(f"[回测] 无法在 {self.service.current_date} 找到 {stock_code} 的行情数据，返回0。")
+            return Decimal('0.00')
+
+    def get_realtime_price(self, stock_code: str) -> Decimal | None:
+        try:
+            quote = DailyQuotes.objects.get(
+                stock_code_id=stock_code,
+                trade_date=self.service.current_date
+            )
+            if self.current_price_node == 'LOW':
+                return quote.low
+            elif self.current_price_node == 'HIGH':
+                return quote.high
+            else:
+                logger.warning(f"[回测] 在非法的价格节点 {self.current_price_node} 调用了 get_realtime_price。")
+                return quote.close
+        except DailyQuotes.DoesNotExist:
+            logger.warning(f"[回测] 无法在 {self.service.current_date} 找到 {stock_code} 的行情数据，返回 None。")
+            return None
+
+    def get_available_balance(self) -> Decimal:
+        return self.service.cash_balance
+
+    @transaction.atomic
+    def place_buy_order(self, stock_code: str, price: Decimal, quantity: int) -> None:
+        amount = price * quantity
+        commission = max(amount * self.service.COMMISSION_RATE, self.service.MIN_COMMISSION)
+        total_cost = amount + commission
+
+        if self.service.cash_balance < total_cost:
+            msg = f"[回测] 资金不足！尝试买入 {stock_code} 需 {total_cost:.2f}，但现金仅剩 {self.service.cash_balance:.2f}。"
+            logger.error(msg)
+            raise ValueError(msg)
+
+        self.service.cash_balance -= total_cost
+        logger.info(f"[回测] 买入 {stock_code} {quantity}股 @{price:.2f}, "
+                    f"花费: {amount:.2f}, 佣金: {commission:.2f}, "
+                    f"现金余额: {self.service.cash_balance:.2f}")
+
+        # 细节优化：使用更真实的开盘时间
+        entry_time = time(9, 30, 1)
+        entry_datetime = timezone.make_aware(
+            timezone.datetime.combine(self.service.current_date, entry_time)
+        )
+
+        new_position = Position.objects.create(
+            stock_code_id=stock_code,
+            entry_datetime=entry_datetime,
+            entry_price=price,
+            quantity=quantity,
+            current_stop_loss=Decimal('0.00'),
+            current_take_profit=Decimal('0.00'),
+            status=Position.StatusChoices.OPEN
+        )
+
+        trade_log = TradeLog.objects.create(
+            position=new_position,
+            stock_code_id=stock_code,
+            trade_datetime=entry_datetime,
+            trade_type=TradeLog.TradeTypeChoices.BUY,
+            order_type=TradeLog.OrderTypeChoices.LIMIT,
+            price=price,
+            quantity=quantity,
+            commission=commission,
+            stamp_duty=Decimal('0.00'),
+            reason=TradeLog.ReasonChoices.ENTRY,
+            status=TradeLog.StatusChoices.FILLED
+        )
+        
+        self.service.last_buy_trade_id = trade_log.trade_id
+
+    @transaction.atomic
+    def sell_stock_by_market_price(self, position: Position, reason: str) -> None:
+        if reason == TradeLog.ReasonChoices.STOP_LOSS:
+            trigger_price = position.current_stop_loss
+        elif reason == TradeLog.ReasonChoices.TAKE_PROFIT:
+            trigger_price = position.current_take_profit
+        else:
+            trigger_price = self.get_opening_price(position.stock_code_id)
+
+        sell_price = trigger_price * (Decimal('1.0') - self.service.SELL_SLIPPAGE_RATE)
+        sell_price = sell_price.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+
+        amount = sell_price * position.quantity
+        commission = max(amount * self.service.COMMISSION_RATE, self.service.MIN_COMMISSION)
+        stamp_duty = amount * self.service.STAMP_DUTY_RATE
+        net_income = amount - commission - stamp_duty
+
+        self.service.cash_balance += net_income
+        logger.info(f"[回测] 卖出 {position.stock_code_id} {position.quantity}股 @{sell_price:.2f} (触发价: {trigger_price:.2f}), "
+                    f"收入: {amount:.2f}, 佣金: {commission:.2f}, 印花税: {stamp_duty:.2f}, "
+                    f"现金余额: {self.service.cash_balance:.2f}")
+
+        position.status = Position.StatusChoices.CLOSED
+        position.save()
+
+        # 细节优化：使用更真实的卖出时间，例如下午2:57
+        sell_time = time(14, 57, 0)
+        sell_datetime = timezone.make_aware(
+            timezone.datetime.combine(self.service.current_date, sell_time)
+        )
+
+        TradeLog.objects.create(
+            position=position,
+            stock_code_id=position.stock_code_id,
+            trade_datetime=sell_datetime,
+            trade_type=TradeLog.TradeTypeChoices.SELL,
+            order_type=TradeLog.OrderTypeChoices.MARKET,
+            price=sell_price,
+            quantity=position.quantity,
+            commission=commission,
+            stamp_duty=stamp_duty,
+            reason=reason,
+            status=TradeLog.StatusChoices.FILLED
+        )
+
+####文件结束####
+
+####trade_manager\service\simulate_trade_old.py####
 # trade_manager/service/simulate_trade.py
 
 import logging
@@ -6539,160 +7681,6 @@ class SimulateTradeService:
         finally:
             # 确保无论成功还是失败，都清理环境
             self._cleanup_environment()
-
-####文件结束####
-
-####trade_manager\service\simulate_trade_handler.py####
-# trade_manager/service/simulate_trade_handler.py
-
-import logging
-from datetime import time
-from decimal import Decimal, ROUND_HALF_UP
-
-from django.db import transaction
-from django.utils import timezone
-
-from .trade_handler import ITradeHandler
-from common.models import Position, TradeLog, DailyQuotes
-
-from typing import TYPE_CHECKING, Literal
-if TYPE_CHECKING:
-    from .simulate_trade import SimulateTradeService
-
-logger = logging.getLogger(__name__)
-
-class SimulateTradeHandler(ITradeHandler):
-    """
-    模拟交易处理器 (SimulateTradeHandler)。
-    """
-
-    def __init__(self, service: 'SimulateTradeService'):
-        self.service = service
-        self.current_price_node: Literal['OPEN', 'LOW', 'HIGH', 'CLOSE'] = 'CLOSE'
-
-    def get_opening_price(self, stock_code: str) -> Decimal:
-        try:
-            quote = DailyQuotes.objects.get(
-                stock_code_id=stock_code,
-                trade_date=self.service.current_date
-            )
-            return quote.open
-        except DailyQuotes.DoesNotExist:
-            logger.warning(f"[回测] 无法在 {self.service.current_date} 找到 {stock_code} 的行情数据，返回0。")
-            return Decimal('0.00')
-
-    def get_realtime_price(self, stock_code: str) -> Decimal | None:
-        try:
-            quote = DailyQuotes.objects.get(
-                stock_code_id=stock_code,
-                trade_date=self.service.current_date
-            )
-            if self.current_price_node == 'LOW':
-                return quote.low
-            elif self.current_price_node == 'HIGH':
-                return quote.high
-            else:
-                logger.warning(f"[回测] 在非法的价格节点 {self.current_price_node} 调用了 get_realtime_price。")
-                return quote.close
-        except DailyQuotes.DoesNotExist:
-            logger.warning(f"[回测] 无法在 {self.service.current_date} 找到 {stock_code} 的行情数据，返回 None。")
-            return None
-
-    def get_available_balance(self) -> Decimal:
-        return self.service.cash_balance
-
-    @transaction.atomic
-    def place_buy_order(self, stock_code: str, price: Decimal, quantity: int) -> None:
-        amount = price * quantity
-        commission = max(amount * self.service.COMMISSION_RATE, self.service.MIN_COMMISSION)
-        total_cost = amount + commission
-
-        if self.service.cash_balance < total_cost:
-            msg = f"[回测] 资金不足！尝试买入 {stock_code} 需 {total_cost:.2f}，但现金仅剩 {self.service.cash_balance:.2f}。"
-            logger.error(msg)
-            raise ValueError(msg)
-
-        self.service.cash_balance -= total_cost
-        logger.info(f"[回测] 买入 {stock_code} {quantity}股 @{price:.2f}, "
-                    f"花费: {amount:.2f}, 佣金: {commission:.2f}, "
-                    f"现金余额: {self.service.cash_balance:.2f}")
-
-        # 细节优化：使用更真实的开盘时间
-        entry_time = time(9, 30, 1)
-        entry_datetime = timezone.make_aware(
-            timezone.datetime.combine(self.service.current_date, entry_time)
-        )
-
-        new_position = Position.objects.create(
-            stock_code_id=stock_code,
-            entry_datetime=entry_datetime,
-            entry_price=price,
-            quantity=quantity,
-            current_stop_loss=Decimal('0.00'),
-            current_take_profit=Decimal('0.00'),
-            status=Position.StatusChoices.OPEN
-        )
-
-        trade_log = TradeLog.objects.create(
-            position=new_position,
-            stock_code_id=stock_code,
-            trade_datetime=entry_datetime,
-            trade_type=TradeLog.TradeTypeChoices.BUY,
-            order_type=TradeLog.OrderTypeChoices.LIMIT,
-            price=price,
-            quantity=quantity,
-            commission=commission,
-            stamp_duty=Decimal('0.00'),
-            reason=TradeLog.ReasonChoices.ENTRY,
-            status=TradeLog.StatusChoices.FILLED
-        )
-        
-        self.service.last_buy_trade_id = trade_log.trade_id
-
-    @transaction.atomic
-    def sell_stock_by_market_price(self, position: Position, reason: str) -> None:
-        if reason == TradeLog.ReasonChoices.STOP_LOSS:
-            trigger_price = position.current_stop_loss
-        elif reason == TradeLog.ReasonChoices.TAKE_PROFIT:
-            trigger_price = position.current_take_profit
-        else:
-            trigger_price = self.get_opening_price(position.stock_code_id)
-
-        sell_price = trigger_price * (Decimal('1.0') - self.service.SELL_SLIPPAGE_RATE)
-        sell_price = sell_price.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
-
-        amount = sell_price * position.quantity
-        commission = max(amount * self.service.COMMISSION_RATE, self.service.MIN_COMMISSION)
-        stamp_duty = amount * self.service.STAMP_DUTY_RATE
-        net_income = amount - commission - stamp_duty
-
-        self.service.cash_balance += net_income
-        logger.info(f"[回测] 卖出 {position.stock_code_id} {position.quantity}股 @{sell_price:.2f} (触发价: {trigger_price:.2f}), "
-                    f"收入: {amount:.2f}, 佣金: {commission:.2f}, 印花税: {stamp_duty:.2f}, "
-                    f"现金余额: {self.service.cash_balance:.2f}")
-
-        position.status = Position.StatusChoices.CLOSED
-        position.save()
-
-        # 细节优化：使用更真实的卖出时间，例如下午2:57
-        sell_time = time(14, 57, 0)
-        sell_datetime = timezone.make_aware(
-            timezone.datetime.combine(self.service.current_date, sell_time)
-        )
-
-        TradeLog.objects.create(
-            position=position,
-            stock_code_id=position.stock_code_id,
-            trade_datetime=sell_datetime,
-            trade_type=TradeLog.TradeTypeChoices.SELL,
-            order_type=TradeLog.OrderTypeChoices.MARKET,
-            price=sell_price,
-            quantity=position.quantity,
-            commission=commission,
-            stamp_duty=stamp_duty,
-            reason=reason,
-            status=TradeLog.StatusChoices.FILLED
-        )
 
 ####文件结束####
 

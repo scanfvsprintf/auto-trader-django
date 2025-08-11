@@ -12,7 +12,7 @@ class StockInfo(models.Model):
         SUSPENDED = 'suspended', '停牌'
 
     stock_code = models.CharField(
-        max_length=10, 
+        max_length=50, 
         primary_key=True, 
         help_text="股票代码, 格式如 'sh.600000'"
     )

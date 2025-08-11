@@ -78,8 +78,12 @@ WSGI_APPLICATION = 'autoTrade.wsgi.application'
 
 DATABASES = {
     'default': {
-        'ENGINE': 'django.db.backends.sqlite3',
-        'NAME': BASE_DIR / 'mainDB.sqlite3',
+        'ENGINE': 'django.db.backends.postgresql',
+        'NAME': 'maindb',          # 你的数据库名
+        'USER': 'xyx',              # 你的用户名
+        'PASSWORD': 'xyx123',       # 你的密码
+        'HOST': '1.15.100.196',     # 你的数据库主机地址
+        'PORT': '5432',             # 你的数据库端口
     }
 }
 
@@ -190,7 +194,24 @@ LOGGING = {
             'handlers': ['console', 'file'],
             'level': 'DEBUG',
             'propagate': False,
+        },
+        # --- 新增日志清理配置 ---
+        'sqlalchemy.engine': {
+            'handlers': ['console', 'file'],
+            'level': 'WARNING',  # <-- 只显示 WARNING 及以上级别的日志，过滤掉SQL语句
+            'propagate': False,
+        },
+        'psycopg2': {
+            'handlers': ['console', 'file'],
+            'level': 'WARNING',  # <-- 过滤掉 psycopg2 的低级别日志
+            'propagate': False,
+        },
+        'apscheduler': {
+            'handlers': ['console', 'file'],
+            'level': 'WARNING', # <-- 过滤掉 apscheduler 的 INFO 日志
+            'propagate': False,
         }
+
     }
 }
  

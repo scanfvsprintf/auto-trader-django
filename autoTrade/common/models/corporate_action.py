@@ -29,7 +29,7 @@ class CorporateAction(models.Model):
         help_text="事件唯一ID"
     )
     stock_code = models.CharField(
-        max_length=10,
+        max_length=50,
         null=False,
         blank=False,
         help_text="股票代码, 格式如 'sh.600000'"
