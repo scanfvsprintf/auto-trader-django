@@ -1,0 +1,45 @@
+{
+	"info": {
+		"_postman_id": "0282426a-9e88-4c4f-9812-b534f13f0493",
+		"name": "量化",
+		"schema": "https://schema.getpostman.com/json/collection/v2.0.0/collection.json"
+	},
+	"item": [
+		{
+			"name": "发起选股",
+			"request": {
+				"method": "POST",
+				"header": [],
+				"body": {
+					"mode": "raw",
+					"raw": "{\r\n    \"date\":\"2025-07-31\",\r\n    \"mode\":\"realtime\"\r\n}",
+					"options": {
+						"raw": {
+							"language": "json"
+						}
+					}
+				},
+				"url": "http://127.0.0.1:8081/selectionManager/runSelection"
+			},
+			"response": []
+		},
+		{
+			"name": "初始化股票",
+			"request": {
+				"method": "POST",
+				"header": [],
+				"body": {
+					"mode": "raw",
+					"raw": "{\r\n    \"stockCodes\":[\r\n        \"sh.601727\",\r\n        \"sh.600104\",\r\n        \"sh.600644\",\r\n        \"sz.002881\",\r\n        \"sz.300442\",\r\n        \"sz.300348\",\r\n        \"sz.002065\",\r\n        \"sz.002123\",\r\n        \"sz.003005\",\r\n        \"sh.600126\",\r\n        \"sz.000034\",\r\n        \"sh.603636\",\r\n        \"sz.000818\",\r\n        \"sz.300229\",\r\n        \"sz.002230\",\r\n        \"sz.002456\",\r\n        \"sz.000791\",\r\n        \"sz.002766\",\r\n        \"sz.002226\",\r\n        \"sh.600875\",\r\n        \"sh.600730\",\r\n        \"sh.600686\",\r\n        \"sz.000099\",\r\n        \"sz.002085\",\r\n        \"sz.001696\",\r\n        \"sh.601993\",\r\n        \"sh.600839\",\r\n        \"sz.000625\",\r\n        \"sz.300059\",\r\n        \"sz.300766\",\r\n        \"sz.000021\",\r\n        \"sz.002156\",\r\n        \"sz.300623\",\r\n        \"sz.300046\",\r\n        \"sh.601658\",\r\n        \"sz.300440\",\r\n        \"sh.603019\"\r\n    ],\r\n    \"startDate\":\"2025-01-01\",\r\n    \"endDate\":\"2025-08-01\"\r\n}",
+					"options": {
+						"raw": {
+							"language": "json"
+						}
+					}
+				},
+				"url": "http://127.0.0.1:8081/dataManager/updateLocalStock"
+			},
+			"response": []
+		}
+	]
+}

@@ -1,0 +1,12 @@
+
+{
+"easytrader": {
+    "client_type": "ht_client", 
+    "user": "user.json", 
+    "client_path": "C:\\htzqzyb2\\xiadan.exe"
+},
+"scheduler": {
+    "status": "real" 
+},
+"trading_mode": "real_simulation_observation"
+}
