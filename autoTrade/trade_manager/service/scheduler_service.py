@@ -260,7 +260,7 @@ def start():
         return
 
     # 添加任务
-    scheduler.add_job(run_job_wrapper, 'cron', day='*', hour=22, minute=0, args=[selection_job, '日终选股'])
+    scheduler.add_job(run_job_wrapper, 'cron', day='*', hour=19, minute=0, args=[selection_job, '日终选股'])
     scheduler.add_job(run_job_wrapper, 'cron', day='*', hour=6, minute=30, args=[premarket_fix_job, '盘前校准'])
     scheduler.add_job(run_job_wrapper, 'cron', day='*', hour=7, minute=0, args=[email_jobs, '预案推送'])
     #scheduler.add_job(run_job_wrapper, 'cron', day='*', hour=9, minute=25, second=5, args=[opening_decision_job, '开盘决策'])
@@ -274,16 +274,16 @@ def start():
     # 数据和连接管理任务
     scheduler.add_job(run_job_wrapper, 'cron', day='*', hour=6, minute=0, args=[update_corporate_actions_job, '更新除权除息'])
     #scheduler.add_job(run_job_wrapper, 'cron', day='*', hour=15, minute=30, args=[disconnect_job, '断开连接'])
-    today_str = date.today().isoformat()
-    scheduler.add_job(
-        run_job_wrapper, 
-        'interval', 
-        seconds=10, 
-        start_date=f'{today_str} 07:30:00', 
-        end_date=f'{today_str} 19:30:00',
-        args=[update_order_status_job, '更新订单状态'],
-        id='job_id_order_status', # **给任务一个唯一的ID**
-        replace_existing=True
-    )
+    # today_str = date.today().isoformat()
+    # scheduler.add_job(
+    #     run_job_wrapper, 
+    #     'interval', 
+    #     seconds=10, 
+    #     start_date=f'{today_str} 07:30:00', 
+    #     end_date=f'{today_str} 19:30:00',
+    #     args=[update_order_status_job, '更新订单状态'],
+    #     id='job_id_order_status', # **给任务一个唯一的ID**
+    #     replace_existing=True
+    # )
     logger.info("APScheduler 已配置完成，准备在后台启动...")
     scheduler.start()
