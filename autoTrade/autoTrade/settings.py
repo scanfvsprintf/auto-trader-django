@@ -12,20 +12,27 @@ https://docs.djangoproject.com/en/5.2/ref/settings/
 
 from pathlib import Path
 import os
+import dotenv
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
+dotenv.load_dotenv(os.path.join(BASE_DIR, '.env'))
 
 
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/5.2/howto/deployment/checklist/
 
 # SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = 'django-insecure-30$wdh0=83tt^5@ed_1y@magp52^70&j)n_14nlwms-hpanwp+'
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
 
-ALLOWED_HOSTS = []
+SECRET_KEY = os.getenv('SECRET_KEY', 'default-secret-key-for-dev')
+ENVIRONMENT = os.getenv('ENVIRONMENT', 'development')
+DEBUG = (ENVIRONMENT == 'development')
+if ENVIRONMENT == 'production':
+    # 请将 'your_domain.com' 和服务器的公网/内网IP填入
+    ALLOWED_HOSTS = ['your_domain.com', '1.15.100.196', '10.0.4.15','10.0.12.10']
+else:
+    ALLOWED_HOSTS = []
 
 
 # Application definition
@@ -79,11 +86,17 @@ WSGI_APPLICATION = 'autoTrade.wsgi.application'
 DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.postgresql',
-        'NAME': 'maindb',          # 你的数据库名
-        'USER': 'xyx',              # 你的用户名
-        'PASSWORD': 'xyx123',       # 你的密码
-        'HOST': '1.15.100.196',     # 你的数据库主机地址
-        'PORT': '5432',             # 你的数据库端口
+        'NAME': os.getenv('DB_NAME', 'maindb'),
+        'USER': os.getenv('DB_USER', 'xyx'),
+        'PASSWORD': os.getenv('DB_PASSWORD', 'xyx123'),
+        'HOST': os.getenv('DB_HOST', 'localhost'), # 默认使用 localhost
+        'PORT': os.getenv('DB_PORT', '5432'),
+        'OPTIONS': {
+            'keepalives': 1,
+            'keepalives_idle': 60,
+            'keepalives_interval': 10,
+            'keepalives_count': 6,
+        }
     }
 }
 
@@ -156,10 +169,10 @@ LOGGING = {
         },
         # 输出到文件
         'file': {
-            'level': 'INFO',  # 处理 INFO 及以上级别的日志
-            'class': 'logging.handlers.RotatingFileHandler',
+            'level': 'DEBUG',  # 处理 INFO 及以上级别的日志
+            'class': 'concurrent_log_handler.ConcurrentRotatingFileHandler',
             'filename': os.path.join(BASE_DIR, 'logs/django.log'), # 日志文件路径
-            'maxBytes': 1024 * 1024 * 5,  # 5 MB
+            'maxBytes': 1024 * 1024 * 10,  # 5 MB
             'backupCount': 5, # 最多保留 5 个备份文件
             'formatter': 'verbose', # 使用 verbose 格式
         },

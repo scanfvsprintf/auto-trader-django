@@ -1,8 +1,9 @@
 ======= 项目文件树 =======
 
 📂 ./
+    📄 .env
+    📄 .env.example
     📄 config.json
-    📄 mainDB.sqlite3
     📄 manage.py
     📄 requirements.txt
     📄 trade_report.html
@@ -108,10 +109,11 @@
 """Django's command-line utility for administrative tasks."""
 import os
 import sys
-
+import dotenv
 
 def main():
     """Run administrative tasks."""
+    dotenv.load_dotenv()
     os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'autoTrade.settings')
     try:
         from django.core.management import execute_from_command_line
@@ -616,20 +618,27 @@ https://docs.djangoproject.com/en/5.2/ref/settings/
 
 from pathlib import Path
 import os
+import dotenv
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
+dotenv.load_dotenv(os.path.join(BASE_DIR, '.env'))
 
 
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/5.2/howto/deployment/checklist/
 
 # SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = 'django-insecure-30$wdh0=83tt^5@ed_1y@magp52^70&j)n_14nlwms-hpanwp+'
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
 
-ALLOWED_HOSTS = []
+SECRET_KEY = os.getenv('SECRET_KEY', 'default-secret-key-for-dev')
+ENVIRONMENT = os.getenv('ENVIRONMENT', 'development')
+DEBUG = (ENVIRONMENT == 'development')
+if ENVIRONMENT == 'production':
+    # 请将 'your_domain.com' 和服务器的公网/内网IP填入
+    ALLOWED_HOSTS = ['your_domain.com', '1.15.100.196', '10.0.4.15','10.0.12.10']
+else:
+    ALLOWED_HOSTS = []
 
 
 # Application definition
@@ -683,11 +692,17 @@ WSGI_APPLICATION = 'autoTrade.wsgi.application'
 DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.postgresql',
-        'NAME': 'maindb',          # 你的数据库名
-        'USER': 'xyx',              # 你的用户名
-        'PASSWORD': 'xyx123',       # 你的密码
-        'HOST': '1.15.100.196',     # 你的数据库主机地址
-        'PORT': '5432',             # 你的数据库端口
+        'NAME': os.getenv('DB_NAME', 'maindb'),
+        'USER': os.getenv('DB_USER', 'xyx'),
+        'PASSWORD': os.getenv('DB_PASSWORD', 'xyx123'),
+        'HOST': os.getenv('DB_HOST', 'localhost'), # 默认使用 localhost
+        'PORT': os.getenv('DB_PORT', '5432'),
+        'OPTIONS': {
+            'keepalives': 1,
+            'keepalives_idle': 60,
+            'keepalives_interval': 10,
+            'keepalives_count': 6,
+        }
     }
 }
 
@@ -2099,6 +2114,11 @@ class DbMigrationService:
 
             with target_engine.connect() as pg_conn:
                 for model in migration_order:
+                    if not(model._meta.db_table =='tb_daily_factor_values' or model._meta.db_table =='tb_daily_trading_plan' or model._meta.db_table =='tb_trade_log'):
+                        logger.info(f"跳过表 {model}")
+                        continue
+                    else:
+                        logger.info(f"执行表 {model}")
                     table_name = model._meta.db_table
                     logger.info(f"--- 正在迁移表: {table_name} ---")
                     start_table_time = time.time()
@@ -4975,19 +4995,21 @@ class TradeManagerConfig(AppConfig):
     name = 'trade_manager'
 
     def ready(self):
-        # 关键修正：通过检查环境变量 RUN_MAIN 来防止调度器在重载主进程中启动两次
-        # 这个环境变量是 Django 的 autoreloader 在启动子进程时设置的。
-        # 我们只想在运行实际应用的子进程中启动调度器。
-        if os.environ.get('RUN_MAIN'):
-            logger.info("检测到 Django 应用工作进程，准备初始化调度器...")
-            from .service import scheduler_service
-            # 确保调度器只启动一次
-            if not scheduler_service.scheduler.running:
-                 scheduler_service.start()
-            else:
-                 logger.warning("调度器已在运行，跳过重复启动。")
-        else:
-            logger.info("检测到 Django 管理或重载主进程，跳过调度器初始化。")
+        # # 关键修正：通过检查环境变量 RUN_MAIN 来防止调度器在重载主进程中启动两次
+        # # 这个环境变量是 Django 的 autoreloader 在启动子进程时设置的。
+        # # 我们只想在运行实际应用的子进程中启动调度器。
+        # if os.environ.get('RUN_MAIN'):
+        #     logger.info("检测到 Django 应用工作进程，准备初始化调度器...")
+        #     from .service import scheduler_service
+        #     # 确保调度器只启动一次
+        #     if not scheduler_service.scheduler.running:
+        #          scheduler_service.start()
+        #     else:
+        #          logger.warning("调度器已在运行，跳过重复启动。")
+        # else:
+        #     logger.info("检测到 Django 管理或重载主进程，跳过调度器初始化。")
+        return
+
 
 ####文件结束####
 
@@ -5077,13 +5099,27 @@ def simulate_trade(request):
 
 from django.core.management.base import BaseCommand
 from trade_manager.service import scheduler_service
-
+import logging
+import time
+logger = logging.getLogger(__name__)
 class Command(BaseCommand):
     help = '启动自动化交易的 APScheduler 调度器'
 
     def handle(self, *args, **options):
         self.stdout.write(self.style.SUCCESS('正在启动调度器服务...'))
-        scheduler_service.start_scheduler()
+        scheduler_service.start()
+        try:
+            # 这是关键：让主进程进入一个无限循环，以防止脚本退出
+            # 这样后台的调度器线程才能一直存活
+            while True:
+                time.sleep(1)  # 每秒检查一次，降低CPU占用
+        except (KeyboardInterrupt, SystemExit):
+            # 当接收到退出信号时（如Ctrl+C或uWSGI的停止命令）
+            # 优雅地关闭调度器
+            logger.info("接收到退出信号，正在关闭调度器...")
+            scheduler_service.scheduler.shutdown()
+            logger.info("调度器已成功关闭。")
+            self.stdout.write(self.style.SUCCESS('调度器服务已优雅地停止。'))
         self.stdout.write(self.style.SUCCESS('调度器服务已停止。'))
 
 
@@ -6987,7 +7023,6 @@ def start():
     # 数据和连接管理任务
     scheduler.add_job(run_job_wrapper, 'cron', day='*', hour=6, minute=0, args=[update_corporate_actions_job, '更新除权除息'])
     #scheduler.add_job(run_job_wrapper, 'cron', day='*', hour=15, minute=30, args=[disconnect_job, '断开连接'])
-
     logger.info("APScheduler 已配置完成，准备在后台启动...")
     scheduler.start()
 

@@ -274,6 +274,5 @@ def start():
     # 数据和连接管理任务
     scheduler.add_job(run_job_wrapper, 'cron', day='*', hour=6, minute=0, args=[update_corporate_actions_job, '更新除权除息'])
     #scheduler.add_job(run_job_wrapper, 'cron', day='*', hour=15, minute=30, args=[disconnect_job, '断开连接'])
-
     logger.info("APScheduler 已配置完成，准备在后台启动...")
     scheduler.start()
