@@ -8,6 +8,7 @@
     📄 requirements.txt
     📄 trade_report.html
     📄 user.json
+    📄 uwsgi.ini
     📄 交易变化.html
     📄 回测简单日志.txt
     📄 回测简单日志_v2.1.txt
@@ -61,6 +62,7 @@
             📄 email_service.py
             📄 stock_service.py
     📂 logs/
+        📄 .__django.lock
         📄 django.log
     📂 selection_manager/
         📄 __init__.py
@@ -775,10 +777,10 @@ LOGGING = {
         },
         # 输出到文件
         'file': {
-            'level': 'INFO',  # 处理 INFO 及以上级别的日志
-            'class': 'logging.handlers.RotatingFileHandler',
+            'level': 'DEBUG',  # 处理 INFO 及以上级别的日志
+            'class': 'concurrent_log_handler.ConcurrentRotatingFileHandler',
             'filename': os.path.join(BASE_DIR, 'logs/django.log'), # 日志文件路径
-            'maxBytes': 1024 * 1024 * 5,  # 5 MB
+            'maxBytes': 1024 * 1024 * 10,  # 5 MB
             'backupCount': 5, # 最多保留 5 个备份文件
             'formatter': 'verbose', # 使用 verbose 格式
         },
@@ -7023,6 +7025,17 @@ def start():
     # 数据和连接管理任务
     scheduler.add_job(run_job_wrapper, 'cron', day='*', hour=6, minute=0, args=[update_corporate_actions_job, '更新除权除息'])
     #scheduler.add_job(run_job_wrapper, 'cron', day='*', hour=15, minute=30, args=[disconnect_job, '断开连接'])
+    today_str = date.today().isoformat()
+    scheduler.add_job(
+        run_job_wrapper, 
+        'interval', 
+        seconds=10, 
+        start_date=f'{today_str} 09:30:00', 
+        end_date=f'{today_str} 17:30:00',
+        args=[update_order_status_job, '更新订单状态'],
+        id='job_id_order_status', # **给任务一个唯一的ID**
+        replace_existing=True
+    )
     logger.info("APScheduler 已配置完成，准备在后台启动...")
     scheduler.start()
 

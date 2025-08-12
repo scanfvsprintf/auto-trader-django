@@ -279,8 +279,8 @@ def start():
         run_job_wrapper, 
         'interval', 
         seconds=10, 
-        start_date=f'{today_str} 09:30:00', 
-        end_date=f'{today_str} 17:30:00',
+        start_date=f'{today_str} 07:30:00', 
+        end_date=f'{today_str} 18:30:00',
         args=[update_order_status_job, '更新订单状态'],
         id='job_id_order_status', # **给任务一个唯一的ID**
         replace_existing=True
