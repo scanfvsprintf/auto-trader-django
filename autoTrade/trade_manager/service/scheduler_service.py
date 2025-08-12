@@ -274,12 +274,13 @@ def start():
     # 数据和连接管理任务
     scheduler.add_job(run_job_wrapper, 'cron', day='*', hour=6, minute=0, args=[update_corporate_actions_job, '更新除权除息'])
     #scheduler.add_job(run_job_wrapper, 'cron', day='*', hour=15, minute=30, args=[disconnect_job, '断开连接'])
+    today_str = date.today().isoformat()
     scheduler.add_job(
         run_job_wrapper, 
         'interval', 
         seconds=10, 
-        start_date=f'2025-08-12 09:30:00', 
-        end_date=f'2025-08-12  17:00:00', 
+        start_date=f'{today_str} 09:30:00', 
+        end_date=f'{today_str} 17:30:00',
         args=[update_order_status_job, '更新订单状态'],
         id='job_id_order_status', # **给任务一个唯一的ID**
         replace_existing=True
