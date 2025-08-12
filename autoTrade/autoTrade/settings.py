@@ -32,7 +32,7 @@ if ENVIRONMENT == 'production':
     # 请将 'your_domain.com' 和服务器的公网/内网IP填入
     ALLOWED_HOSTS = ['your_domain.com', '1.15.100.196', '10.0.4.15','10.0.12.10','127.0.0.1','0.0.0.0']
 else:
-    ALLOWED_HOSTS = []
+    ALLOWED_HOSTS = ['*']
 
 
 # Application definition

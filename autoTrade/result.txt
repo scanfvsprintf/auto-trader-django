@@ -61,9 +61,6 @@
             📄 email_handler.py
             📄 email_service.py
             📄 stock_service.py
-    📂 logs/
-        📄 .__django.lock
-        📄 django.log
     📂 selection_manager/
         📄 __init__.py
         📄 admin.py
@@ -101,6 +98,9 @@
             📄 simulate_trade_handler.py
             📄 simulate_trade_old.py
             📄 trade_handler.py
+    📂 logs/
+        📄 .__django.lock
+        📄 django.log
 
 ========================
 
@@ -638,7 +638,7 @@ ENVIRONMENT = os.getenv('ENVIRONMENT', 'development')
 DEBUG = (ENVIRONMENT == 'development')
 if ENVIRONMENT == 'production':
     # 请将 'your_domain.com' 和服务器的公网/内网IP填入
-    ALLOWED_HOSTS = ['your_domain.com', '1.15.100.196', '10.0.4.15','10.0.12.10']
+    ALLOWED_HOSTS = ['your_domain.com', '1.15.100.196', '10.0.4.15','10.0.12.10','127.0.0.1','0.0.0.0']
 else:
     ALLOWED_HOSTS = []
 
@@ -733,7 +733,7 @@ AUTH_PASSWORD_VALIDATORS = [
 
 LANGUAGE_CODE = 'en-us'
 
-TIME_ZONE = 'UTC'
+TIME_ZONE = 'Asia/Shanghai'
 
 USE_I18N = True
 
@@ -1737,13 +1737,13 @@ def test_get(request):
         result=  {'method':'get'}
     if request.method=='POST':
         result= {'methods':'post'}
-    service=StockService()
-    service.clear_all_data()
-    service.update_local_a_shares(start_date="2025-01-01",end_date="2025-08-04")
-    service.update_local_a_shares(start_date="2024-01-01",end_date="2024-12-31")
-    service.update_local_a_shares(start_date="2023-01-01",end_date="2023-12-31")
-    service.update_local_a_shares(start_date="2022-01-01",end_date="2022-12-31")
-    service.update_local_a_shares(start_date="2021-01-01",end_date="2021-12-31")
+    # service=StockService()
+    # service.clear_all_data()
+    # service.update_local_a_shares(start_date="2025-01-01",end_date="2025-08-04")
+    # service.update_local_a_shares(start_date="2024-01-01",end_date="2024-12-31")
+    # service.update_local_a_shares(start_date="2023-01-01",end_date="2023-12-31")
+    # service.update_local_a_shares(start_date="2022-01-01",end_date="2022-12-31")
+    # service.update_local_a_shares(start_date="2021-01-01",end_date="2021-12-31")
     return JsonResponse(result)
 
 @require_http_methods(["POST"])
@@ -7011,7 +7011,7 @@ def start():
         return
 
     # 添加任务
-    scheduler.add_job(run_job_wrapper, 'cron', day='*', hour=22, minute=0, args=[selection_job, '日终选股'])
+    scheduler.add_job(run_job_wrapper, 'cron', day='*', hour=19, minute=0, args=[selection_job, '日终选股'])
     scheduler.add_job(run_job_wrapper, 'cron', day='*', hour=6, minute=30, args=[premarket_fix_job, '盘前校准'])
     scheduler.add_job(run_job_wrapper, 'cron', day='*', hour=7, minute=0, args=[email_jobs, '预案推送'])
     #scheduler.add_job(run_job_wrapper, 'cron', day='*', hour=9, minute=25, second=5, args=[opening_decision_job, '开盘决策'])
@@ -7025,17 +7025,17 @@ def start():
     # 数据和连接管理任务
     scheduler.add_job(run_job_wrapper, 'cron', day='*', hour=6, minute=0, args=[update_corporate_actions_job, '更新除权除息'])
     #scheduler.add_job(run_job_wrapper, 'cron', day='*', hour=15, minute=30, args=[disconnect_job, '断开连接'])
-    today_str = date.today().isoformat()
-    scheduler.add_job(
-        run_job_wrapper, 
-        'interval', 
-        seconds=10, 
-        start_date=f'{today_str} 09:30:00', 
-        end_date=f'{today_str} 17:30:00',
-        args=[update_order_status_job, '更新订单状态'],
-        id='job_id_order_status', # **给任务一个唯一的ID**
-        replace_existing=True
-    )
+    # today_str = date.today().isoformat()
+    # scheduler.add_job(
+    #     run_job_wrapper, 
+    #     'interval', 
+    #     seconds=10, 
+    #     start_date=f'{today_str} 07:30:00', 
+    #     end_date=f'{today_str} 19:30:00',
+    #     args=[update_order_status_job, '更新订单状态'],
+    #     id='job_id_order_status', # **给任务一个唯一的ID**
+    #     replace_existing=True
+    # )
     logger.info("APScheduler 已配置完成，准备在后台启动...")
     scheduler.start()
 
