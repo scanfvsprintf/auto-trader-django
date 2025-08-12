@@ -14,13 +14,13 @@ def test_get(request):
         result=  {'method':'get'}
     if request.method=='POST':
         result= {'methods':'post'}
-    service=StockService()
-    service.clear_all_data()
-    service.update_local_a_shares(start_date="2025-01-01",end_date="2025-08-04")
-    service.update_local_a_shares(start_date="2024-01-01",end_date="2024-12-31")
-    service.update_local_a_shares(start_date="2023-01-01",end_date="2023-12-31")
-    service.update_local_a_shares(start_date="2022-01-01",end_date="2022-12-31")
-    service.update_local_a_shares(start_date="2021-01-01",end_date="2021-12-31")
+    # service=StockService()
+    # service.clear_all_data()
+    # service.update_local_a_shares(start_date="2025-01-01",end_date="2025-08-04")
+    # service.update_local_a_shares(start_date="2024-01-01",end_date="2024-12-31")
+    # service.update_local_a_shares(start_date="2023-01-01",end_date="2023-12-31")
+    # service.update_local_a_shares(start_date="2022-01-01",end_date="2022-12-31")
+    # service.update_local_a_shares(start_date="2021-01-01",end_date="2021-12-31")
     return JsonResponse(result)
 
 @require_http_methods(["POST"])
