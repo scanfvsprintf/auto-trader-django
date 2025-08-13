@@ -7,8 +7,7 @@
 
 # --- 配置区 ---
 # 请根据你的项目路径修改
-PROJECT_DIR="
-/root/autoTrade/auto-trader-django/autoTrade" 
+PROJECT_DIR="/root/autoTrade/auto-trader-django/autoTrade" 
 # uwsgi的pid文件路径，请与你的uwsgi.ini配置保持一致
 UWSGI_PID_FILE="/tmp/autoTrade.pid"
 # Python解释器路径
