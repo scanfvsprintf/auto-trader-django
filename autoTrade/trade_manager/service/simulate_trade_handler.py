@@ -149,15 +149,19 @@ class SimulateTradeHandler(ITradeHandler):
             m_value = None
         
         # 获取因子得分
-        factor_scores_qs = DailyFactorValues.objects.filter(
+        # 步骤1: 先获取该股票当天的所有因子值
+        all_factor_scores_qs = DailyFactorValues.objects.filter(
             stock_code_id=position.stock_code_id,
             trade_date=t_minus_1
-        ).exclude(factor_code_id__startswith='dynamic_M') # 排除M值本身
+        )
         
-        scores_str = "|".join([
-            f"{f.factor_code_id}:{f.norm_score:.2f}" 
-            for f in factor_scores_qs
-        ])
+        # 步骤2: 在 Python 层面进行过滤和格式化
+        scores_list = []
+        for f in all_factor_scores_qs:
+            # 直接在字符串上判断，不再依赖数据库查询
+            if not f.factor_code_id.startswith('dynamic_M'):
+                scores_list.append(f"{f.factor_code_id}:{f.norm_score:.2f}")
+        scores_str = "|".join(scores_list)
         
         # 获取止盈止损率 (在调用此函数时，Position应已被更新)
         profit_rate = (position.current_take_profit / position.entry_price) - 1 if position.entry_price > 0 else 0
