@@ -212,7 +212,7 @@ class SimulateTradeHandler(ITradeHandler):
             stock_name=position.stock_code.stock_name,
             trade_date=self.service.current_date,
             direction=BacktestOperationLog.Direction.SELL,
-            exit_reason=reason,
+            exit_reason=exit_reason_for_log,
             profit_rate=profit_rate,
             loss_rate=loss_rate,
             buy_date_m_value=m_value,
