@@ -248,13 +248,14 @@ class SimulateTradeService:
                     handler.current_price_node = 'HIGH'
                     monitor_exit_service.monitor_and_exit_positions()
 
-                    self._record_daily_log()
+                    
 
 
                     logger.info(f"-> [T日 盘后选股] 基于 {self.current_date} 的数据为下一交易日做准备...")
                     selection_service = SelectionService(trade_date=self.current_date, mode='backtest')
                     selection_service.run_selection()
-
+                    
+                    self._record_daily_log()
 
                     # --- 邮件发送逻辑 ---
                     is_last_day = (i == len(trading_days) - 1)
