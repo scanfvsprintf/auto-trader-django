@@ -211,11 +211,6 @@ class SimulateTradeService:
                     self.current_date = current_day
                     logger.info(f"\n{'='*20} 模拟日: {self.current_date} ({i+1}/{len(trading_days)}) {'='*20}")
 
-                    prev_trading_day = trading_days[i-1] if i > 0 else None
-                    if prev_trading_day:
-                        logger.info(f"-> [T-1 选股] 基于 {prev_trading_day} 的数据...")
-                        selection_service = SelectionService(trade_date=prev_trading_day, mode='backtest')
-                        selection_service.run_selection()
 
                     logger.info("-> [T日 盘前校准] ...")
                     before_fix_service = BeforeFixService(execution_date=self.current_date)
@@ -250,6 +245,12 @@ class SimulateTradeService:
 
                     self._record_daily_log()
 
+
+                    logger.info(f"-> [T日 盘后选股] 基于 {self.current_date} 的数据为下一交易日做准备...")
+                    selection_service = SelectionService(trade_date=self.current_date, mode='backtest')
+                    selection_service.run_selection()
+
+                    
                     # --- 邮件发送逻辑 ---
                     is_last_day = (i == len(trading_days) - 1)
                     current_month = current_day.month
