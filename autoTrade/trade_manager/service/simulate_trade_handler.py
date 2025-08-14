@@ -90,8 +90,7 @@ class SimulateTradeHandler(ITradeHandler):
         
         self.service.last_buy_trade_id = trade_log.trade_id
 
-        # --- 新增: 记录买入操作日志 ---
-        self._record_buy_operation(new_position)
+        
 
     @transaction.atomic
     def sell_stock_by_market_price(self, position: Position, reason: str) -> None:

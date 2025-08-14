@@ -34,6 +34,7 @@
         📄 views.py
         📂 models/
             📄 __init__.py
+            📄 backtest_logs.py
             📄 corporate_action.py
             📄 daily_factor_values.py
             📄 daily_quotes.py
@@ -56,6 +57,7 @@
             📂 commands/
                 📄 full_update_stocks.py
                 📄 migrate_to_pg.py
+                📄 reset_sequences.py
         📂 service/
             📄 corporate_action_service.py
             📄 db_service.py
@@ -89,8 +91,10 @@
         📄 views.py
         📂 management/
             📂 commands/
+                📄 run_backtest.py
                 📄 run_scheduler.py
         📂 service/
+            📄 backtest_reporter.py
             📄 before_fix_service.py
             📄 db_utils.py
             📄 decision_order_service.py
@@ -1135,6 +1139,166 @@ __all__ = [
 
 ####文件结束####
 
+####common\models\backtest_logs.py####
+# ==============================================================================
+# 描述: 定义回测日志相关的新模型。
+# ==============================================================================
+from django.db import models
+
+class BacktestDailyLog(models.Model):
+    """
+    回测每日日志表
+    
+    说明: 记录每一次回测运行中，每个交易日结束后的资金、持仓和市场状态。
+    这张表用于生成资金曲线图和关键的回撤指标。
+    """
+    backtest_run_id = models.CharField(
+        max_length=50,
+        db_index=True,
+        help_text="回测运行的唯一标识符, 如 'backtest_20231027_153000'"
+    )
+    trade_date = models.DateField(
+        help_text="交易日期"
+    )
+    total_assets = models.DecimalField(
+        max_digits=20,
+        decimal_places=4,
+        help_text="当日日终总资产 (现金 + 持仓市值)"
+    )
+    cash = models.DecimalField(
+        max_digits=20,
+        decimal_places=4,
+        help_text="当日日终现金余额"
+    )
+    holdings_value = models.DecimalField(
+        max_digits=20,
+        decimal_places=4,
+        help_text="当日日终持仓市值"
+    )
+    market_m_value = models.DecimalField(
+        max_digits=18,
+        decimal_places=10,
+        null=True,
+        blank=True,
+        help_text="当日的市场状态M(t)值"
+    )
+    created_at = models.DateTimeField(
+        auto_now_add=True,
+        help_text="记录创建时间"
+    )
+
+    class Meta:
+        db_table = 'tb_trade_manager_backtest_daily_log'
+        verbose_name = '回测每日日志'
+        verbose_name_plural = verbose_name
+        ordering = ['backtest_run_id', 'trade_date']
+        # 为常用查询添加索引
+        indexes = [
+            models.Index(fields=['backtest_run_id', 'trade_date']),
+        ]
+
+class BacktestOperationLog(models.Model):
+    """
+    回测操作记录表
+    
+    说明: 增量记录回测过程中的每一次买入和卖出操作。
+    这张表用于计算胜率、收益贡献等交易层面的指标。
+    """
+    class Direction(models.TextChoices):
+        BUY = 'BUY', '买入'
+        SELL = 'SELL', '卖出'
+
+    class ExitReason(models.TextChoices):
+        TAKE_PROFIT = 'TAKE_PROFIT', '止盈'
+        STOP_LOSS = 'STOP_LOSS', '止损'
+
+    backtest_run_id = models.CharField(
+        max_length=50,
+        db_index=True,
+        help_text="回测运行的唯一标识符"
+    )
+    position_id_ref = models.BigIntegerField(
+        db_index=True,
+        help_text="关联的持仓ID (tb_positions.position_id)，用于反查"
+    )
+    stock_code = models.CharField(
+        max_length=50,
+        help_text="股票代码, 如 'sh.600000'"
+    )
+    stock_name = models.CharField(
+        max_length=50,
+        help_text="股票名称"
+    )
+    trade_date = models.DateField(
+        help_text="交易发生的日期"
+    )
+    direction = models.CharField(
+        max_length=10,
+        choices=Direction.choices,
+        help_text="买卖方向"
+    )
+    exit_reason = models.CharField(
+        max_length=20,
+        choices=ExitReason.choices,
+        null=True,
+        blank=True,
+        help_text="止盈/止损方向 (仅卖出时有效)"
+    )
+    profit_rate = models.DecimalField(
+        max_digits=10,
+        decimal_places=4,
+        null=True,
+        blank=True,
+        help_text="该笔交易设置的止盈率"
+    )
+    loss_rate = models.DecimalField(
+        max_digits=10,
+        decimal_places=4,
+        null=True,
+        blank=True,
+        help_text="该笔交易设置的止损率"
+    )
+    buy_date_m_value = models.DecimalField(
+        max_digits=18,
+        decimal_places=10,
+        null=True,
+        blank=True,
+        help_text="买入决策所依据的T-1日市场M(t)值"
+    )
+    factor_scores = models.TextField(
+        help_text="买入时各因子得分, 格式: factor1:score1|factor2:score2"
+    )
+    price = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        help_text="成交价格"
+    )
+    quantity = models.BigIntegerField(
+        help_text="成交数量"
+    )
+    amount = models.DecimalField(
+        max_digits=20,
+        decimal_places=4,
+        help_text="成交总金额"
+    )
+    created_at = models.DateTimeField(
+        auto_now_add=True,
+        help_text="记录创建时间"
+    )
+
+    class Meta:
+        db_table = 'tb_trade_manager_backtest_operation_log'
+        verbose_name = '回测操作记录'
+        verbose_name_plural = verbose_name
+        ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['backtest_run_id', 'stock_code']),
+            models.Index(fields=['backtest_run_id', 'position_id_ref']),
+        ]
+
+
+####文件结束####
+
 ####common\models\corporate_action.py####
 from django.db import models
 
@@ -1959,6 +2123,62 @@ class Command(BaseCommand):
         except Exception as e:
             self.stdout.write(self.style.ERROR(f'数据库迁移失败: {e}'))
 
+
+####文件结束####
+
+####data_manager\management\commands\reset_sequences.py####
+# data_manager/management/commands/reset_sequences.py (V2 - 修正版)
+import logging
+from django.core.management.base import BaseCommand
+from django.db import connection, models
+from django.apps import apps
+
+logger = logging.getLogger(__name__)
+
+class Command(BaseCommand):
+    help = 'Resets PostgreSQL sequences for integer AutoFields to the max value of their primary key columns.'
+
+    def handle(self, *args, **options):
+        self.stdout.write(self.style.SUCCESS('===== 开始智能重置数据库序列 (仅处理自增整数主键) ====='))
+        
+        all_models = apps.get_models()
+        
+        with connection.cursor() as cursor:
+            for model in all_models:
+                table_name = model._meta.db_table
+                pk_field = model._meta.pk
+                
+                # --- 核心修正：增加类型检查 ---
+                # 1. 检查主键是否存在且是否为自增字段
+                if not pk_field or not isinstance(pk_field, models.AutoField):
+                    self.stdout.write(f'正在处理表: {table_name} ... ' + self.style.WARNING('跳过 (主键非自增整数)'))
+                    continue
+
+                # 2. 如果是自增字段，其内部类型一定是整数，可以安全处理
+                pk_name = pk_field.name
+                sequence_name = f"{table_name}_{pk_name}_seq"
+                
+                self.stdout.write(f'正在处理表: {table_name} (序列: {sequence_name}) ... ', ending='')
+                
+                try:
+                    # SQL to get the max PK value.
+                    # COALESCE is still useful for empty tables.
+                    # The third argument 'false' in setval means the next value will be max_id + 1
+                    # No change needed here as we've already filtered for integer PKs.
+                    sql = f"""
+                    SELECT setval('"{sequence_name}"', (SELECT COALESCE(MAX("{pk_name}"), 1) FROM "{table_name}"), false);
+                    """
+                    cursor.execute(sql)
+                    self.stdout.write(self.style.SUCCESS('OK'))
+                except Exception as e:
+                    # 捕获其他可能的错误，例如序列真的不存在
+                    if "does not exist" in str(e):
+                        self.stdout.write(self.style.WARNING(f'跳过 (序列不存在)'))
+                    else:
+                        self.stdout.write(self.style.ERROR(f'失败: {e}'))
+                        logger.error(f"重置序列 {sequence_name} 失败: {e}", exc_info=True)
+
+        self.stdout.write(self.style.SUCCESS('\n===== 数据库序列智能重置完毕 ====='))
 
 ####文件结束####
 
@@ -5230,6 +5450,68 @@ def simulate_trade(request):
         return JsonResponse(result)
 ####文件结束####
 
+####trade_manager\management\commands\run_backtest.py####
+# ==============================================================================
+# 文件 2/5: trade_manager/management/commands/run_backtest.py (新增)
+# 描述: 用于从命令行启动回测的 Command 文件。
+# ==============================================================================
+from django.core.management.base import BaseCommand, CommandParser
+from trade_manager.service.simulate_trade import SimulateTradeService
+from decimal import Decimal
+
+class Command(BaseCommand):
+    help = '运行一个完整的交易策略回测'
+
+    def add_arguments(self, parser: CommandParser):
+        parser.add_argument(
+            '--start',
+            type=str,
+            required=True,
+            help='回测起始日期 (格式: YYYY-MM-DD)'
+        )
+        parser.add_argument(
+            '--end',
+            type=str,
+            required=True,
+            help='回测结束日期 (格式: YYYY-MM-DD)'
+        )
+        parser.add_argument(
+            '--capital',
+            type=Decimal,
+            required=True,
+            help='初始资金'
+        )
+
+    def handle(self, *args, **options):
+        start_date = options['start']
+        end_date = options['end']
+        initial_capital = options['capital']
+
+        self.stdout.write(self.style.SUCCESS(f'===== 开始执行回测任务 ====='))
+        self.stdout.write(f'  - 起始日期: {start_date}')
+        self.stdout.write(f'  - 结束日期: {end_date}')
+        self.stdout.write(f'  - 初始资金: {initial_capital:.2f}')
+
+        try:
+            service = SimulateTradeService()
+            # 注意：我们将所有参数都传递给 run_backtest 方法
+            result = service.run_backtest(
+                start_date=start_date,
+                end_date=end_date,
+                initial_capital=initial_capital
+            )
+            
+            self.stdout.write(self.style.SUCCESS('\n===== 回测执行完毕 ====='))
+            self.stdout.write(f'最终性能指标: {result}')
+
+        except Exception as e:
+            self.stdout.write(self.style.ERROR(f'回测过程中发生严重错误: {e}'))
+            # 在生产环境中，可能需要更详细的错误处理和日志记录
+            raise e
+
+
+####文件结束####
+
 ####trade_manager\management\commands\run_scheduler.py####
 # trade_manager/management/commands/run_scheduler.py
 
@@ -5257,6 +5539,339 @@ class Command(BaseCommand):
             logger.info("调度器已成功关闭。")
             self.stdout.write(self.style.SUCCESS('调度器服务已优雅地停止。'))
         self.stdout.write(self.style.SUCCESS('调度器服务已停止。'))
+
+
+####文件结束####
+
+####trade_manager\service\backtest_reporter.py####
+# ==============================================================================
+# 文件 3/5: trade_manager/service/backtest_reporter.py (新增)
+# 描述: 负责生成和发送回测邮件报告的模块。
+# ==============================================================================
+import base64
+import io
+import logging
+from datetime import date
+from decimal import Decimal
+import matplotlib
+matplotlib.use('Agg')
+import matplotlib.pyplot as plt
+import matplotlib.dates as mdates
+
+import pandas as pd
+from django.db import connections
+
+from common.models.backtest_logs import BacktestDailyLog, BacktestOperationLog
+from common.models.positions import Position
+from data_manager.service.email_handler import EmailHandler
+
+logger = logging.getLogger(__name__)
+
+class BacktestReporter:
+    """
+    回测报告生成与发送器。
+    """
+    def __init__(self, schema_name: str, start_date: date, current_date: date, initial_capital: Decimal):
+        self.schema_name = schema_name
+        self.start_date = start_date
+        self.current_date = current_date
+        self.initial_capital = initial_capital
+        self.email_handler = EmailHandler()
+        self.recipients = ['876858298@qq.com']#'850696281@qq.com','285173686@qq.com'
+    def _execute_query(self, query: str, params: list = None) -> list[dict]:
+        """在指定 schema 中执行原生 SQL 查询并返回结果"""
+        with connections['default'].cursor() as cursor:
+            cursor.execute(f'SET search_path TO "{self.schema_name}", public;')
+            cursor.execute(query, params or [])
+            columns = [col[0] for col in cursor.description]
+            return [dict(zip(columns, row)) for row in cursor.fetchall()]
+
+    def _generate_report_data(self) -> dict:
+        """准备邮件报告所需的所有数据"""
+        data = {}
+
+        # 1. 关键指标
+        daily_logs = self._execute_query(
+            f"SELECT trade_date, total_assets FROM {BacktestDailyLog._meta.db_table} ORDER BY trade_date"
+        )
+        df_daily = pd.DataFrame(daily_logs)
+        df_daily['total_assets'] = df_daily['total_assets'].astype(float)
+        
+        # 胜率
+        sell_ops = self._execute_query(
+            f"SELECT exit_reason FROM {BacktestOperationLog._meta.db_table} WHERE direction = 'SELL'"
+        )
+        if sell_ops:
+            total_sells = len(sell_ops)
+            profit_sells = sum(1 for op in sell_ops if op['exit_reason'] == 'TAKE_PROFIT')
+            data['win_rate'] = profit_sells / total_sells if total_sells > 0 else 0.0
+        else:
+            data['win_rate'] = 0.0
+        
+        # 最大回撤
+        df_daily['peak'] = df_daily['total_assets'].cummax()
+        df_daily['drawdown'] = (df_daily['total_assets'] - df_daily['peak']) / df_daily['peak']
+        data['max_drawdown'] = df_daily['drawdown'].min() if not df_daily.empty else 0.0
+
+        # 年化收益率
+        final_assets = float(df_daily['total_assets'].iloc[-1]) if not df_daily.empty else float(self.initial_capital)
+        days_passed = (self.current_date - self.start_date).days
+        if days_passed > 0:
+            data['annualized_return'] = ((final_assets / float(self.initial_capital)) ** (365.0 / days_passed)) - 1
+        else:
+            data['annualized_return'] = 0.0
+
+        # 2. 资金曲线图数据
+        data['plot_data'] = self._execute_query(
+            f"SELECT trade_date, total_assets, market_m_value FROM {BacktestDailyLog._meta.db_table} ORDER BY trade_date"
+        )
+
+        # 3. 当前持仓
+        data['current_holdings'] = self._execute_query(
+            f"""
+            SELECT p.stock_code, si.stock_name, p.entry_price, p.quantity, 
+                   p.current_take_profit, p.current_stop_loss, dq.close as current_price
+            FROM {Position._meta.db_table} p
+            JOIN public.tb_stock_info si ON p.stock_code = si.stock_code
+            LEFT JOIN public.tb_daily_quotes dq ON p.stock_code = dq.stock_code AND dq.trade_date = %s
+            WHERE p.status = 'open'
+            """, [self.current_date]
+        )
+        for h in data['current_holdings']:
+            h['profit_rate'] = (h['current_take_profit'] / h['entry_price']) - 1 if h['entry_price'] > 0 else 0
+            h['loss_rate'] = 1 - (h['current_stop_loss'] / h['entry_price']) if h['entry_price'] > 0 else 0
+
+        # 4. 收益排名
+        all_ops = self._execute_query(f"SELECT stock_code, stock_name, direction, amount FROM {BacktestOperationLog._meta.db_table}")
+        profits = {}
+        for op in all_ops:
+            key = (op['stock_code'], op['stock_name'])
+            if op['direction'] == 'BUY':
+                profits[key] = profits.get(key, 0) - op['amount']
+            else: # SELL
+                profits[key] = profits.get(key, 0) + op['amount']
+        # 总收益 = 已实现盈亏 + 未实现盈亏
+        #        = (卖出总额 - 买入总额) + (当前市值 - 持仓成本)
+        #        = (卖出总额) - (已平仓部分的买入成本) + (当前市值)
+        # 之前的循环已经计算了 (卖出总额 - 全部买入成本)，所以我们只需加上当前市值即可。
+        for holding in data['current_holdings']:
+            key = (holding['stock_code'], holding['stock_name'])
+            
+            # 处理当天可能没有行情数据的情况，若无当前价则按入场价计算，浮动盈亏为0
+            current_price = holding['current_price'] or holding['entry_price']
+            
+            # 计算当前持仓的总市值
+            current_market_value = holding['quantity'] * current_price
+            
+            # 将当前市值加到该股票的累计收益中
+            profits[key] = profits.get(key, 0) + current_market_value
+        profit_list = [{'stock_code': k[0], 'stock_name': k[1], 'profit': v} for k, v in profits.items()]
+        data['profit_ranking'] = sorted(profit_list, key=lambda x: x['profit'], reverse=True)
+
+        return data
+
+    def _generate_plot_base64(self, plot_data: list[dict]) -> str:
+        if not plot_data:
+            return ""
+        
+        try:
+            plt.rcParams['font.sans-serif'] = ['SimHei', 'Microsoft YaHei']
+            plt.rcParams['axes.unicode_minus'] = False
+        except Exception as e:
+            pass
+        
+        try:
+            df = pd.DataFrame(plot_data)
+            # 确保数据类型正确
+            df['trade_date'] = pd.to_datetime(df['trade_date'])
+            df['total_assets'] = pd.to_numeric(df['total_assets'])
+            df['market_m_value'] = pd.to_numeric(df['market_m_value'])
+
+            if df.empty:
+                return ""
+
+            plt.style.use('seaborn-v0_8-whitegrid')
+            fig, ax1 = plt.subplots(figsize=(14, 7))
+
+            # 绘制主曲线
+            ax1.plot(df['trade_date'], df['total_assets'], color='dodgerblue', label='money', linewidth=2)
+            ax1.set_xlabel('date', fontsize=12)
+            ax1.set_ylabel('money', color='dodgerblue', fontsize=12)
+            ax1.tick_params(axis='y', labelcolor='dodgerblue')
+            ax1.yaxis.set_major_formatter(plt.FuncFormatter(lambda x, p: format(int(x), ',')))
+
+            # 绘制副坐标轴曲线
+            ax2 = ax1.twinx()
+            ax2.plot(df['trade_date'], df['market_m_value'], color='coral', linestyle='--', label='M', alpha=0.7)
+            ax2.set_ylabel('M', color='coral', fontsize=12)
+            ax2.tick_params(axis='y', labelcolor='coral')
+            ax2.axhline(0, color='grey', linestyle=':', linewidth=1)
+
+            # ======================= 主要修改点 =======================
+            # 1. 更健壮和简化的X轴刻度逻辑
+            num_days = (df['trade_date'].max() - df['trade_date'].min()).days
+            
+            if num_days <= 60:  # 2个月以内，按周显示
+                locator = mdates.WeekdayLocator(byweekday=mdates.MO)
+                formatter = mdates.DateFormatter('%m-%d')
+            elif num_days <= 365 * 2: # 2年以内，按季度显示
+                locator = mdates.MonthLocator(interval=3)
+                formatter = mdates.DateFormatter('%Y-%m')
+            elif num_days <= 365 * 5: # 5年以内，按半年显示
+                locator = mdates.MonthLocator(interval=6)
+                formatter = mdates.DateFormatter('%Y-%m')
+            else:  # 超过5年，按年显示
+                locator = mdates.YearLocator()
+                formatter = mdates.DateFormatter('%Y')
+            
+            ax1.xaxis.set_major_locator(locator)
+            ax1.xaxis.set_major_formatter(formatter)
+
+            # 2. 移除 fig.autofmt_xdate()，并手动设置标签旋转，避免冲突
+            plt.setp(ax1.get_xticklabels(), rotation=30, ha='right')
+            # ========================================================
+
+            fig.suptitle('Money-M(t)', fontsize=16, weight='bold')
+            fig.legend(loc='upper left', bbox_to_anchor=(0.1, 0.9))
+            
+            # 使用 tight_layout 替代
+            plt.tight_layout(rect=[0, 0, 1, 0.96])
+
+            # 保存图像到内存
+            buf = io.BytesIO()
+            plt.savefig(buf, format='png', dpi=100)
+            plt.close(fig)
+            buf.seek(0)
+            return base64.b64encode(buf.getvalue()).decode('utf-8')
+        finally:
+            pass
+
+
+
+    def _format_html_content(self, data: dict, plot_base64: str) -> str:
+        
+        # ======================= 修复颜色逻辑 =======================
+        # 修复：盈利 (value > 0) 为绿色，亏损 (value < 0) 为红色
+        def get_row_style(value):
+            if value > 0:
+                return 'style="background-color: #e9f5e9; color: #1e7e34;"'  # 绿色背景，深绿色文字
+            elif value < 0:
+                return 'style="background-color: #fdeaea; color: #c82333;"'  # 红色背景，深红色文字
+            else:
+                return '' # 中性
+        # ==========================================================
+        # Part 1: Key Metrics
+        html = f"""
+        <h2>关键指标 (截至 {self.current_date.strftime('%Y-%m-%d')})</h2>
+        <table class="summary-table">
+            <tr>
+                <th>胜率</th><td>{data['win_rate']:.2%}</td>
+                <th>最大回撤</th><td style="color: #c82333;">{data['max_drawdown']:.2%}</td>
+                <th>年化收益率</th><td>{data['annualized_return']:.2%}</td>
+            </tr>
+        </table>
+        """
+        # Part 2: Plot
+        html += f"""
+        <h2>资金与M值变化趋势</h2>
+        <div style="text-align: center;">
+            <img src="data:image/png;base64,{plot_base64}" alt="Performance Chart" style="max-width: 100%;">
+        </div>
+        """
+        # Part 3: Current Holdings
+        html += "<h2>当前持仓情况</h2>"
+        if data['current_holdings']:
+            html += """
+            <table class="data-table">
+                <thead><tr><th>股票代码</th><th>股票名称</th><th>入场价</th><th>当前价</th><th>浮动盈亏</th><th>止盈价格</th><th>止损价格</th><th>预设止盈率</th><th>预设止损率</th></tr></thead>
+                <tbody>
+            """
+            for h in data['current_holdings']:
+                current_price = h['current_price'] or h['entry_price']
+                profit_loss = current_price - h['entry_price']
+                profit_loss_rate = (current_price / h['entry_price'] - 1) if h['entry_price'] else 0
+                style = get_row_style(profit_loss)
+                html += f"""
+                <tr {style}>
+                    <td>{h['stock_code']}</td>
+                    <td>{h['stock_name']}</td>
+                    <td>{h['entry_price']:.2f}</td>
+                    <td>{current_price:.2f}</td>
+                    <td>{profit_loss_rate:.2%}</td>
+                    <td>{h['current_take_profit']:.2f}</td>
+                    <td>{h['current_stop_loss']:.2f}</td>
+                    <td>{h['profit_rate']:.2%}</td>
+                    <td>{h['loss_rate']:.2%}</td>
+                </tr>
+                """
+            html += "</tbody></table>"
+        else:
+            html += "<p>当前无持仓。</p>"
+        # Part 4: Profit Ranking
+        html += "<h2>各股累计收益排名</h2>"
+        if data['profit_ranking']:
+            html += """
+            <table class="data-table">
+                <thead><tr><th>排名</th><th>股票代码</th><th>股票名称</th><th>累计收益(元)</th></tr></thead>
+                <tbody>
+            """
+            for i, p in enumerate(data['profit_ranking'], 1):
+                # 这里复用上面修改好的颜色逻辑
+                style = get_row_style(p['profit'])
+                html += f"""
+                <tr {style}>
+                    <td>{i}</td>
+                    <td>{p['stock_code']}</td>
+                    <td>{p['stock_name']}</td>
+                    <td>{p['profit']:,.2f}</td>
+                </tr>
+                """
+            html += "</tbody></table>"
+        else:
+            html += "<p>暂无已平仓的交易。</p>"
+        # Final HTML structure (保持不变)
+        final_html = f"""
+        <!DOCTYPE html>
+        <html lang="zh-CN">
+        <head>
+            <meta charset="UTF-8">
+            <title>回测报告</title>
+            <style>
+                body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; margin: 20px; background-color: #f4f7f6; color: #333; }}
+                h2 {{ color: #0056b3; border-bottom: 2px solid #e0e0e0; padding-bottom: 8px; margin-top: 30px; }}
+                table {{ width: 100%; border-collapse: collapse; margin-top: 15px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }}
+                th, td {{ padding: 12px 15px; text-align: left; border-bottom: 1px solid #ddd; }}
+                th {{ background-color: #f8f9fa; }}
+                .summary-table th {{ width: 15%; background-color: #e9ecef; }}
+                .summary-table td {{ font-weight: bold; font-size: 1.1em; }}
+                .data-table tbody tr:hover {{ background-color: #f1f1f1; }}
+            </style>
+        </head>
+        <body>
+            <h1>回测进度报告: {self.start_date}~{self.current_date}回测</h1>
+            {html}
+        </body>
+        </html>
+        """
+        return final_html
+
+    def send_report(self):
+        """生成并发送报告邮件"""
+        logger.info(f"[{self.schema_name}] 正在生成截至 {self.current_date} 的回测报告...")
+        try:
+            report_data = self._generate_report_data()
+            plot_base64 = self._generate_plot_base64(report_data.get('plot_data', []))
+            html_content = self._format_html_content(report_data, plot_base64)
+            subject = f"回测报告 ({self.start_date}~{self.current_date}) - {self.current_date.strftime('%Y-%m-%d')}"
+            
+            self.email_handler.send_email(
+                recipients=self.recipients,
+                subject=subject,
+                html_content=html_content
+            )
+            logger.info(f"[{self.start_date}~{self.current_date}] 回测报告邮件已成功发送。")
+        except Exception as e:
+            logger.error(f"[{self.start_date}~{self.current_date}] 生成或发送回测报告时失败: {e}", exc_info=True)
 
 
 ####文件结束####
@@ -7176,6 +7791,10 @@ def start():
 ####文件结束####
 
 ####trade_manager\service\simulate_trade.py####
+# ==============================================================================
+# 文件 4/5: trade_manager/service/simulate_trade.py (修改)
+# 描述: 核心回测服务，集成日志记录和邮件发送。
+# ==============================================================================
 # trade_manager/service/simulate_trade.py
 
 import logging
@@ -7191,25 +7810,26 @@ from common.models import (
     DailyFactorValues, DailyTradingPlan, Position, TradeLog, SystemLog,
     StrategyParameters, DailyQuotes, CorporateAction
 )
-from selection_manager.service.selection_service import SelectionService
+# 新增导入
+from common.models.backtest_logs import BacktestDailyLog, BacktestOperationLog 
+from selection_manager.service.selection_service import SelectionService, MARKET_INDICATOR_CODE
 from trade_manager.service.before_fix_service import BeforeFixService
 from trade_manager.service.decision_order_service import DecisionOrderService
 from trade_manager.service.monitor_exit_service import MonitorExitService
 from .simulate_trade_handler import SimulateTradeHandler
-from .db_utils import use_backtest_schema  # <-- 导入新的工具
+from .db_utils import use_backtest_schema
+from .backtest_reporter import BacktestReporter # 新增导入
 
 logger = logging.getLogger(__name__)
 
 class SimulateTradeService:
     """
-    回测实施服务 (V2 - PostgreSQL 动态 Schema 版)。
+    回测实施服务 (V3 - 集成日志与报告)。
     """
     COMMISSION_RATE = Decimal('0.0002854')
     MIN_COMMISSION = Decimal('5')
     STAMP_DUTY_RATE = Decimal('0.001')
     SELL_SLIPPAGE_RATE = Decimal('0.002')
-    ANNUAL_RISK_FREE_RATE = Decimal('0.015')
-    TRADING_DAYS_PER_YEAR = 252
 
     def __init__(self):
         self.start_date: date = None
@@ -7219,105 +7839,177 @@ class SimulateTradeService:
         self.cash_balance = Decimal('0.0')
         self.portfolio_history = []
         self.last_buy_trade_id = None
-        # self.original_db_config 不再需要
+        self.backtest_run_id: str = None # 新增：回测唯一ID
 
-    def _setup_backtest_schema(self, schema_name: str):
-        """
-        在新 schema 中创建表结构并复制基础数据。
-        此函数必须在 `use_backtest_schema` 上下文中调用。
-        """
+    def _setup_backtest_schema(self, schema_name: str, initial_capital: Decimal):
         logger.info(f"--- 1. 在 Schema '{schema_name}' 中准备回测环境 ---")
         
-        # 1. 创建所有表结构
         logger.info("正在新 Schema 中创建表结构 (执行 migrate)...")
-        call_command('migrate')
-        logger.info("表结构创建完成。")
+        with connections['default'].cursor() as cursor:
+            logger.info(f"临时隔离 search_path 到 '{schema_name}' 以便运行 migrate 命令。")
+            cursor.execute(f'SET search_path TO "{schema_name}";')
+            
+            logger.info("正在新 Schema 中创建表结构 (执行 migrate)...")
+            # 在这个隔离的环境下，migrate 看不到 public.django_migrations，因此会创建所有表。
+            call_command('migrate')
+            logger.info("表结构创建完成。")
 
-        # 2. 定义需要从 public schema 复制的基础数据表
         tables_to_copy = [
             'tb_stock_info', 'tb_daily_quotes', 'tb_corporate_actions',
-            'tb_factor_definitions', 'tb_strategy_parameters', 'tb_daily_factor_values'
+            'tb_factor_definitions', 'tb_strategy_parameters', 
+            'tb_daily_factor_values','tb_daily_trading_plan'
         ]
         
         logger.info(f"准备从 'public' schema 复制基础数据到 '{schema_name}'...")
-        with connections['default'].cursor() as cursor:
+        with transaction.atomic(), connections['default'].cursor() as cursor:
+            cursor.execute(f'SET search_path TO "{schema_name}";')
             for table_name in tables_to_copy:
-                logger.info(f"  - 正在复制表: {table_name}")
-                # 使用 INSERT INTO ... SELECT * ... 高效复制数据
-                sql = f'INSERT INTO "{schema_name}"."{table_name}" SELECT * FROM public."{table_name}";'
+                logger.info(f"  - 正在处理表: {table_name}")
+                # 1. 区分并获取 "普通索引" 和 "约束"
+                # =========================================================================
+                # 1a. 获取普通索引 (不包括由 UNIQUE 或 PRIMARY KEY 约束创建的索引)
+                logger.info(f"    - 正在获取 '{table_name}' 的普通索引...")
+                cursor.execute("""
+                    SELECT indexdef
+                    FROM pg_indexes
+                    WHERE schemaname = %s AND tablename = %s
+                    AND indexname NOT IN (
+                        SELECT conname FROM pg_constraint WHERE conrelid = %s::regclass
+                    );
+                """, [schema_name, table_name, f'"{schema_name}"."{table_name}"'])
+                plain_indexes_to_recreate = [row[0] for row in cursor.fetchall()]
+                # 1b. 获取约束 (外键和唯一约束)
+                logger.info(f"    - 正在获取 '{table_name}' 的外键和唯一约束...")
+                cursor.execute("""
+                    SELECT 'ALTER TABLE ' || quote_ident(conrelid::regclass::text) || ' ADD CONSTRAINT ' || quote_ident(conname) || ' ' || pg_get_constraintdef(oid)
+                    FROM pg_constraint
+                    WHERE contype IN ('f', 'u') AND conrelid = %s::regclass;
+                """, [f'"{schema_name}"."{table_name}"'])
+                constraints_to_recreate = [row[0] for row in cursor.fetchall()]
+                # 2. 删除索引和约束 (删除约束会自动删除其底层索引)
+                # =========================================================================
+                # 2a. 删除约束
+                for const_def in constraints_to_recreate:
+                    const_name = const_def.split('ADD CONSTRAINT ')[1].split(' ')[0]
+                    logger.info(f"      - 删除约束: {const_name}")
+                    cursor.execute(f'ALTER TABLE "{table_name}" DROP CONSTRAINT IF EXISTS {const_name};')
+                
+                # 2b. 删除普通索引
+                for index_def in plain_indexes_to_recreate:
+                    # 从 "CREATE INDEX index_name ON ..." 中提取 index_name
+                    try:
+                        index_name = index_def.split(' ')[2]
+                        logger.info(f"      - 删除索引: {index_name}")
+                        cursor.execute(f'DROP INDEX IF EXISTS "{index_name}";')
+                    except IndexError:
+                        logger.warning(f"无法从 '{index_def}' 解析索引名称，跳过删除。")
+                # 3. 高效复制数据 (现在非常快)
+                # =========================================================================
+                logger.info(f"    - 正在从 public.{table_name} 复制数据...")
+                sql = f'INSERT INTO "{table_name}" SELECT * FROM public."{table_name}";'
                 cursor.execute(sql)
-        logger.info("基础数据复制完成。")
+                logger.info(f"    - 数据复制完成。")
+                # 4. 重建索引和约束
+                # =========================================================================
+                logger.info(f"    - 正在重建 '{table_name}' 的索引和约束...")
+                # 4a. 重建普通索引
+                for index_def in plain_indexes_to_recreate:
+                    logger.info(f"      - 重建索引: {index_def}")
+                    cursor.execute(index_def)
+                
+                # 4b. 重建约束 (这会自动重建它们的底层索引)
+                for const_def in constraints_to_recreate:
+                    logger.info(f"      - 重建约束: {const_def}")
+                    cursor.execute(const_def)
 
-        # 3. 初始化资金
-        params = {p.param_name: p.param_value for p in StrategyParameters.objects.all()}
-        max_positions = int(params.get('MAX_POSITIONS', Decimal('5')))
-        max_capital_per_pos = params.get('MAX_CAPITAL_PER_POSITION', Decimal('10000'))
-        self.initial_capital = Decimal('150000') # 按你要求写死
+                # =========================================================================
+                # 5. 重置自增主键序列 (解决主键冲突的关键)
+                # =========================================================================
+                # 自动查找并更新当前表的自增序列
+                find_serial_sql = """
+                    SELECT 
+                        a.attname, 
+                        pg_get_serial_sequence(
+                            quote_ident(n.nspname) || '.' || quote_ident(c.relname), 
+                            a.attname
+                        )
+                    FROM 
+                        pg_class c
+                    JOIN 
+                        pg_attribute a ON a.attrelid = c.oid
+                    JOIN 
+                        pg_namespace n ON c.relnamespace = n.oid -- 通过namespace OID关联
+                    WHERE 
+                        n.nspname = %s      -- 参数1: schema的名称
+                        AND c.relname = %s  -- 参数2: 表的名称
+                        AND a.attnum > 0 
+                        AND NOT a.attisdropped
+                        AND pg_get_serial_sequence(quote_ident(n.nspname) || '.' || quote_ident(c.relname), a.attname) IS NOT NULL;
+                """
+                cursor.execute(find_serial_sql, [schema_name, table_name])
+                serial_columns = cursor.fetchall()
+
+                for column_name, sequence_name in serial_columns:
+                    logger.info(f"    - 发现自增列 '{column_name}'，正在重置其序列 '{sequence_name}'...")
+                    
+                    # 将序列的下一个值设置为 (表中该列的最大值 + 1)，如果表为空则设置为1
+                    update_sequence_sql = f"""
+                        SELECT setval(
+                            '{sequence_name}', 
+                            COALESCE((SELECT MAX("{column_name}") FROM "{table_name}"), 0) + 1, 
+                            true
+                        )
+                    """
+                    cursor.execute(update_sequence_sql)
+                    logger.info(f"    - 序列 '{sequence_name}' 已更新。")
+
+                
+        logger.info("基础数据复制完成。")
+        # with connections['default'].cursor() as cursor:
+        #     for table_name in tables_to_copy:
+        #         logger.info(f"  - 正在复制表: {table_name}")
+        #         sql = f'INSERT INTO "{schema_name}"."{table_name}" SELECT * FROM public."{table_name}";'
+        #         cursor.execute(sql)
+        # logger.info("基础数据复制完成。")
+
+        self.initial_capital = initial_capital
         self.cash_balance = self.initial_capital
         logger.info(f"初始资金已设定为: {self.initial_capital:.2f}")
 
-    def run_backtest(self, start_date: str, end_date: str) -> dict:
+    def run_backtest(self, start_date: str, end_date: str, initial_capital: Decimal) -> dict:
         self.start_date = date.fromisoformat(start_date)
         self.end_date = date.fromisoformat(end_date)
-
-        # 1. 生成唯一的 schema 名称
-        schema_name = f"backtest_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
-        logger.info(f"为本次回测创建临时 Schema: {schema_name}")
+        self.backtest_run_id = f"backtest_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+        
+        logger.info(f"为本次回测创建临时 Schema: {self.backtest_run_id}")
 
         try:
-            # 2. 创建 Schema
             with connections['default'].cursor() as cursor:
-                cursor.execute(f'CREATE SCHEMA IF NOT EXISTS "{schema_name}";')
+                cursor.execute(f'CREATE SCHEMA IF NOT EXISTS "{self.backtest_run_id}";')
 
-            # 3. 进入动态 Schema 上下文
-            with use_backtest_schema(schema_name):
-                # 3.1 在新 schema 中准备环境（建表、复制数据）
-                self._setup_backtest_schema(schema_name)
+            with use_backtest_schema(self.backtest_run_id):
+                self._setup_backtest_schema(self.backtest_run_id, initial_capital)
 
-                # 3.2 执行回测主循环 (这部分逻辑基本不变)
                 handler = SimulateTradeHandler(self)
                 trading_days = self._get_trading_days()
                 if not trading_days:
                     logger.error("在指定日期范围内未找到任何交易日，回测终止。")
                     return {}
 
-                baseline_date = trading_days[0] - timedelta(days=1)
-                self.portfolio_history.append({'date': baseline_date, 'total_value': self.initial_capital})
-
                 logger.info(f"--- 2. 开始日度回测循环 ({len(trading_days)}天) ---")
+                
+                last_sent_month = None # 用于邮件触发
+
                 for i, current_day in enumerate(trading_days):
                     self.current_date = current_day
                     logger.info(f"\n{'='*20} 模拟日: {self.current_date} ({i+1}/{len(trading_days)}) {'='*20}")
 
-                    # ... (原有的回测循环逻辑，无需修改) ...
-                    prev_trading_day = trading_days[i-1] if i > 0 else None
-                    if prev_trading_day:
-                        logger.info(f"-> [T-1 选股] 基于 {prev_trading_day} 的数据...")
-                        selection_service = SelectionService(trade_date=prev_trading_day, mode='backtest')
-                        selection_service.run_selection()
 
                     logger.info("-> [T日 盘前校准] ...")
                     before_fix_service = BeforeFixService(execution_date=self.current_date)
                     before_fix_service.run()
                     
-                    # ... (分红逻辑) ...
-                    dividend_events = CorporateAction.objects.filter(
-                        ex_dividend_date=self.current_date, event_type=CorporateAction.EventType.DIVIDEND
-                    )
-                    events_by_stock = {}
-                    for event in dividend_events:
-                        events_by_stock.setdefault(event.stock_code, []).append(event)
-                    if events_by_stock:
-                        open_positions_for_dividend = Position.objects.filter(
-                            stock_code_id__in=events_by_stock.keys(),
-                            status=Position.StatusChoices.OPEN
-                        )
-                        for pos in open_positions_for_dividend:
-                            stock_events = events_by_stock.get(pos.stock_code_id, [])
-                            for event in stock_events:
-                                dividend_amount = event.dividend_per_share * pos.quantity
-                                self.cash_balance += dividend_amount
-                                logger.info(f"除息事件: 持仓ID {pos.position_id} ({pos.stock_code_id}) 获得分红 {dividend_amount:.2f}，现金余额更新为 {self.cash_balance:.2f}")
+                    self._handle_dividends()
 
                     logger.info("-> [T日 开盘决策与买入] ...")
                     decision_order_service = DecisionOrderService(handler=handler, execution_date=self.current_date)
@@ -7326,8 +8018,7 @@ class SimulateTradeService:
                     while True:
                         open_positions_count = Position.objects.filter(status=Position.StatusChoices.OPEN).count()
                         max_pos = decision_order_service.current_max_positions
-                        if open_positions_count >= max_pos:
-                            break
+                        if open_positions_count >= max_pos: break
                         
                         self.last_buy_trade_id = None
                         decision_order_service.execute_orders()
@@ -7338,16 +8029,44 @@ class SimulateTradeService:
                             break
 
                     monitor_exit_service = MonitorExitService(handler=handler, execution_date=self.current_date)
-
                     logger.info("-> [T日 盘中监控] 模拟价格跌至最低点...")
                     handler.current_price_node = 'LOW'
                     monitor_exit_service.monitor_and_exit_positions()
-
                     logger.info("-> [T日 盘中监控] 模拟价格涨至最高点...")
                     handler.current_price_node = 'HIGH'
                     monitor_exit_service.monitor_and_exit_positions()
 
-                    self._calculate_daily_portfolio_value()
+                    self._record_daily_log()
+
+
+                    logger.info(f"-> [T日 盘后选股] 基于 {self.current_date} 的数据为下一交易日做准备...")
+                    selection_service = SelectionService(trade_date=self.current_date, mode='backtest')
+                    selection_service.run_selection()
+
+                    
+                    # --- 邮件发送逻辑 ---
+                    is_last_day = (i == len(trading_days) - 1)
+                    current_month = current_day.month
+                    send_mail_flag = False
+
+                    if is_last_day:
+                        send_mail_flag = True
+                        logger.info("回测结束，触发最终邮件报告。")
+                    elif last_sent_month is not None and current_month != last_sent_month:
+                        send_mail_flag = True
+                        logger.info(f"月份从 {last_sent_month} 变为 {current_month}，触发月度邮件报告。")
+                    
+                    if send_mail_flag:
+                        reporter = BacktestReporter(
+                            schema_name=self.backtest_run_id,
+                            start_date=self.start_date,
+                            current_date=self.current_date,
+                            initial_capital=self.initial_capital
+                        )
+                        reporter.send_report()
+                    
+                    last_sent_month = current_month
+                    # --- 邮件发送逻辑结束 ---
 
                 logger.info("--- 3. 回测循环结束 ---")
                 return self._calculate_performance_metrics()
@@ -7355,9 +8074,7 @@ class SimulateTradeService:
         except Exception as e:
             logger.critical(f"回测过程中发生严重错误: {e}", exc_info=True)
             return {"error": str(e)}
-        # `finally` 块不再需要，因为上下文管理器会自动处理清理工作
 
-    # _get_trading_days, _calculate_daily_portfolio_value, _calculate_performance_metrics 方法保持不变
     def _get_trading_days(self) -> list[date]:
         dates = DailyQuotes.objects.filter(
             trade_date__gte=self.start_date,
@@ -7365,72 +8082,109 @@ class SimulateTradeService:
         ).values_list('trade_date', flat=True).distinct().order_by('trade_date')
         return list(dates)
 
-    def _calculate_daily_portfolio_value(self):
+    def _handle_dividends(self):
+        dividend_events = CorporateAction.objects.filter(
+            ex_dividend_date=self.current_date, event_type=CorporateAction.EventType.DIVIDEND
+        )
+        if not dividend_events.exists(): return
+
+        events_by_stock = {}
+        for event in dividend_events:
+            events_by_stock.setdefault(event.stock_code, []).append(event)
+        
+        open_positions = Position.objects.filter(
+            stock_code_id__in=events_by_stock.keys(), status=Position.StatusChoices.OPEN
+        )
+        for pos in open_positions:
+            for event in events_by_stock.get(pos.stock_code_id, []):
+                dividend_amount = event.dividend_per_share * pos.quantity
+                self.cash_balance += dividend_amount
+                logger.info(f"除息事件: 持仓ID {pos.position_id} ({pos.stock_code_id}) 获得分红 {dividend_amount:.2f}")
+
+    def _record_daily_log(self):
         open_positions = Position.objects.filter(status=Position.StatusChoices.OPEN)
         market_value = Decimal('0.0')
         for pos in open_positions:
             try:
-                quote = DailyQuotes.objects.get(
-                    stock_code_id=pos.stock_code_id,
-                    trade_date=self.current_date
-                )
+                quote = DailyQuotes.objects.get(stock_code_id=pos.stock_code_id, trade_date=self.current_date)
                 market_value += quote.close * pos.quantity
             except DailyQuotes.DoesNotExist:
                 market_value += pos.entry_price * pos.quantity
         
-        total_value = self.cash_balance + market_value
-        self.portfolio_history.append({
-            'date': self.current_date,
-            'total_value': total_value
-        })
+        total_assets = self.cash_balance + market_value
+
+        try:
+            m_value_obj = DailyFactorValues.objects.get(
+                stock_code_id=MARKET_INDICATOR_CODE,
+                factor_code_id='dynamic_M_VALUE',
+                trade_date=self.current_date
+            )
+            m_value = m_value_obj.raw_value
+        except DailyFactorValues.DoesNotExist:
+            m_value = None
+
+        BacktestDailyLog.objects.create(
+            backtest_run_id=self.backtest_run_id,
+            trade_date=self.current_date,
+            total_assets=total_assets,
+            cash=self.cash_balance,
+            holdings_value=market_value,
+            market_m_value=m_value
+        )
         logger.info(f"--- 日终结算 ({self.current_date}) ---")
-        logger.info(f"现金: {self.cash_balance:.2f}, 持仓市值: {market_value:.2f}, 总资产: {total_value:.2f}")
+        logger.info(f"现金: {self.cash_balance:.2f}, 持仓市值: {market_value:.2f}, 总资产: {total_assets:.2f}, M值: {m_value}")
 
     def _calculate_performance_metrics(self) -> dict:
         logger.info("--- 4. 计算回测性能指标 ---")
-        if not self.portfolio_history:
+        daily_logs = BacktestDailyLog.objects.filter(backtest_run_id=self.backtest_run_id).order_by('trade_date')
+        if not daily_logs.exists():
             return {}
 
-        df = pd.DataFrame(self.portfolio_history)
-        df['total_value'] = df['total_value'].astype(float)
-        df['daily_return'] = df['total_value'].pct_change().fillna(0)
+        df = pd.DataFrame(list(daily_logs.values('total_assets')))
+        df['total_assets'] = df['total_assets'].astype(float)
         
-        final_value = float(df['total_value'].iloc[-1])
-        total_return_amount = final_value - float(self.initial_capital)
+        final_value = df['total_assets'].iloc[-1]
         total_return_rate = (final_value / float(self.initial_capital)) - 1
-
-        mean_daily_return = df['daily_return'].mean()
-        std_daily_return = df['daily_return'].std()
         
-        if std_daily_return == 0 or np.isnan(std_daily_return):
-            sharpe_ratio = 0.0
+        total_days = (self.end_date - self.start_date).days
+        if total_days > 0:
+            annualized_return = ((final_value / float(self.initial_capital)) ** (365.0 / total_days)) - 1
         else:
-            daily_risk_free_rate = (1 + self.ANNUAL_RISK_FREE_RATE) ** Decimal(1/self.TRADING_DAYS_PER_YEAR) - 1
-            sharpe_ratio = (mean_daily_return - float(daily_risk_free_rate)) / std_daily_return
-            sharpe_ratio *= np.sqrt(self.TRADING_DAYS_PER_YEAR)
+            annualized_return = 0.0
+
+        df['peak'] = df['total_assets'].cummax()
+        df['drawdown'] = (df['total_assets'] - df['peak']) / df['peak']
+        max_drawdown = df['drawdown'].min()
 
         result = {
-            'total_return_amount': round(total_return_amount, 2),
-            'total_return_rate': round(total_return_rate, 4),
-            'sharpe_ratio': round(float(sharpe_ratio), 4)
+            'total_return_rate': f"{total_return_rate:.2%}",
+            'annualized_return': f"{annualized_return:.2%}",
+            'max_drawdown': f"{max_drawdown:.2%}"
         }
-        logger.info(f"回测结果: {result}")
+        logger.info(f"最终回测结果: {result}")
         return result
+
 
 ####文件结束####
 
 ####trade_manager\service\simulate_trade_handler.py####
+# ==============================================================================
+# 文件 5/5: trade_manager/service/simulate_trade_handler.py (修改)
+# 描述: 模拟交易处理器，集成操作日志记录。
+# ==============================================================================
 # trade_manager/service/simulate_trade_handler.py
 
 import logging
-from datetime import time
+from datetime import time, timedelta
 from decimal import Decimal, ROUND_HALF_UP
-
+from datetime import date, timedelta, datetime
 from django.db import transaction
 from django.utils import timezone
 
 from .trade_handler import ITradeHandler
-from common.models import Position, TradeLog, DailyQuotes
+from common.models import Position, TradeLog, DailyQuotes, StockInfo, DailyFactorValues
+from common.models.backtest_logs import BacktestOperationLog # 新增导入
+from selection_manager.service.selection_service import MARKET_INDICATOR_CODE # 新增导入
 
 from typing import TYPE_CHECKING, Literal
 if TYPE_CHECKING:
@@ -7440,7 +8194,7 @@ logger = logging.getLogger(__name__)
 
 class SimulateTradeHandler(ITradeHandler):
     """
-    模拟交易处理器 (SimulateTradeHandler)。
+    模拟交易处理器 (SimulateTradeHandler) - 集成操作日志。
     """
 
     def __init__(self, service: 'SimulateTradeService'):
@@ -7469,10 +8223,8 @@ class SimulateTradeHandler(ITradeHandler):
             elif self.current_price_node == 'HIGH':
                 return quote.high
             else:
-                logger.warning(f"[回测] 在非法的价格节点 {self.current_price_node} 调用了 get_realtime_price。")
                 return quote.close
         except DailyQuotes.DoesNotExist:
-            logger.warning(f"[回测] 无法在 {self.service.current_date} 找到 {stock_code} 的行情数据，返回 None。")
             return None
 
     def get_available_balance(self) -> Decimal:
@@ -7485,57 +8237,40 @@ class SimulateTradeHandler(ITradeHandler):
         total_cost = amount + commission
 
         if self.service.cash_balance < total_cost:
-            msg = f"[回测] 资金不足！尝试买入 {stock_code} 需 {total_cost:.2f}，但现金仅剩 {self.service.cash_balance:.2f}。"
-            logger.error(msg)
-            raise ValueError(msg)
+            raise ValueError(f"资金不足！")
 
         self.service.cash_balance -= total_cost
-        logger.info(f"[回测] 买入 {stock_code} {quantity}股 @{price:.2f}, "
-                    f"花费: {amount:.2f}, 佣金: {commission:.2f}, "
-                    f"现金余额: {self.service.cash_balance:.2f}")
+        logger.info(f"[回测] 买入 {stock_code} {quantity}股 @{price:.2f}, 花费: {amount:.2f}, 现金余额: {self.service.cash_balance:.2f}")
 
-        # 细节优化：使用更真实的开盘时间
         entry_time = time(9, 30, 1)
-        entry_datetime = timezone.make_aware(
-            timezone.datetime.combine(self.service.current_date, entry_time)
-        )
+        entry_datetime = timezone.make_aware(timezone.datetime.combine(self.service.current_date, entry_time))
 
         new_position = Position.objects.create(
-            stock_code_id=stock_code,
-            entry_datetime=entry_datetime,
-            entry_price=price,
-            quantity=quantity,
-            current_stop_loss=Decimal('0.00'),
-            current_take_profit=Decimal('0.00'),
-            status=Position.StatusChoices.OPEN
+            stock_code_id=stock_code, entry_datetime=entry_datetime, entry_price=price,
+            quantity=quantity, status=Position.StatusChoices.OPEN,
+            current_stop_loss=Decimal('0.00'), current_take_profit=Decimal('0.00')
         )
 
         trade_log = TradeLog.objects.create(
-            position=new_position,
-            stock_code_id=stock_code,
-            trade_datetime=entry_datetime,
-            trade_type=TradeLog.TradeTypeChoices.BUY,
-            order_type=TradeLog.OrderTypeChoices.LIMIT,
-            price=price,
-            quantity=quantity,
-            commission=commission,
-            stamp_duty=Decimal('0.00'),
-            reason=TradeLog.ReasonChoices.ENTRY,
-            status=TradeLog.StatusChoices.FILLED
+            position=new_position, stock_code_id=stock_code, trade_datetime=entry_datetime,
+            trade_type=TradeLog.TradeTypeChoices.BUY, order_type=TradeLog.OrderTypeChoices.LIMIT,
+            price=price, quantity=quantity, commission=commission,
+            reason=TradeLog.ReasonChoices.ENTRY, status=TradeLog.StatusChoices.FILLED
         )
         
         self.service.last_buy_trade_id = trade_log.trade_id
+
+        # --- 新增: 记录买入操作日志 ---
+        self._record_buy_operation(new_position)
 
     @transaction.atomic
     def sell_stock_by_market_price(self, position: Position, reason: str) -> None:
         if reason == TradeLog.ReasonChoices.STOP_LOSS:
             trigger_price = position.current_stop_loss
-        elif reason == TradeLog.ReasonChoices.TAKE_PROFIT:
+        else: # TAKE_PROFIT
             trigger_price = position.current_take_profit
-        else:
-            trigger_price = self.get_opening_price(position.stock_code_id)
 
-        sell_price = trigger_price * (Decimal('1.0') - self.service.SELL_SLIPPAGE_RATE)
+        sell_price = (trigger_price * (Decimal('1.0') - self.service.SELL_SLIPPAGE_RATE))
         sell_price = sell_price.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
 
         amount = sell_price * position.quantity
@@ -7544,32 +8279,112 @@ class SimulateTradeHandler(ITradeHandler):
         net_income = amount - commission - stamp_duty
 
         self.service.cash_balance += net_income
-        logger.info(f"[回测] 卖出 {position.stock_code_id} {position.quantity}股 @{sell_price:.2f} (触发价: {trigger_price:.2f}), "
-                    f"收入: {amount:.2f}, 佣金: {commission:.2f}, 印花税: {stamp_duty:.2f}, "
-                    f"现金余额: {self.service.cash_balance:.2f}")
+        logger.info(f"[回测] 卖出 {position.stock_code_id} {position.quantity}股 @{sell_price:.2f}, 现金余额: {self.service.cash_balance:.2f}")
 
         position.status = Position.StatusChoices.CLOSED
         position.save()
 
-        # 细节优化：使用更真实的卖出时间，例如下午2:57
         sell_time = time(14, 57, 0)
-        sell_datetime = timezone.make_aware(
-            timezone.datetime.combine(self.service.current_date, sell_time)
-        )
+        sell_datetime = timezone.make_aware(timezone.datetime.combine(self.service.current_date, sell_time))
 
         TradeLog.objects.create(
-            position=position,
+            position=position, stock_code_id=position.stock_code_id, trade_datetime=sell_datetime,
+            trade_type=TradeLog.TradeTypeChoices.SELL, order_type=TradeLog.OrderTypeChoices.MARKET,
+            price=sell_price, quantity=position.quantity, commission=commission,
+            stamp_duty=stamp_duty, reason=reason, status=TradeLog.StatusChoices.FILLED
+        )
+        
+        # --- 新增: 记录卖出操作日志 ---
+        self._record_sell_operation(position, sell_price, reason)
+        
+    def _get_t_minus_1_date(self) -> date:
+        """安全地获取T-1交易日"""
+        try:
+            return DailyQuotes.objects.filter(trade_date__lt=self.service.current_date).latest('trade_date').trade_date
+        except DailyQuotes.DoesNotExist:
+            logger.warning(f"无法找到 {self.service.current_date} 的前一个交易日。")
+            return self.service.current_date - timedelta(days=1)
+
+    def _record_buy_operation(self, position: Position):
+        t_minus_1 = self._get_t_minus_1_date()
+        
+        # 获取M值
+        try:
+            m_value_obj = DailyFactorValues.objects.get(
+                stock_code_id=MARKET_INDICATOR_CODE,
+                factor_code_id='dynamic_M_VALUE',
+                trade_date=t_minus_1
+            )
+            m_value = m_value_obj.raw_value
+        except DailyFactorValues.DoesNotExist:
+            m_value = None
+        
+        # 获取因子得分
+        factor_scores_qs = DailyFactorValues.objects.filter(
             stock_code_id=position.stock_code_id,
-            trade_datetime=sell_datetime,
-            trade_type=TradeLog.TradeTypeChoices.SELL,
-            order_type=TradeLog.OrderTypeChoices.MARKET,
+            trade_date=t_minus_1
+        ).exclude(factor_code__factor_code__startswith='dynamic_M') # 排除M值本身
+        
+        scores_str = "|".join([
+            f"{f.factor_code.factor_code}:{f.norm_score:.2f}" 
+            for f in factor_scores_qs.select_related('factor_code')
+        ])
+        
+        # 获取止盈止损率 (在调用此函数时，Position应已被更新)
+        profit_rate = (position.current_take_profit / position.entry_price) - 1 if position.entry_price > 0 else 0
+        loss_rate = 1 - (position.current_stop_loss / position.entry_price) if position.entry_price > 0 else 0
+
+        BacktestOperationLog.objects.create(
+            backtest_run_id=self.service.backtest_run_id,
+            position_id_ref=position.position_id,
+            stock_code=position.stock_code_id,
+            stock_name=position.stock_code.stock_name,
+            trade_date=self.service.current_date,
+            direction=BacktestOperationLog.Direction.BUY,
+            exit_reason=None,
+            profit_rate=profit_rate,
+            loss_rate=loss_rate,
+            buy_date_m_value=m_value,
+            factor_scores=scores_str,
+            price=position.entry_price,
+            quantity=position.quantity,
+            amount=position.entry_price * position.quantity
+        )
+        logger.debug(f"已记录买入操作日志 for Position ID: {position.position_id}")
+        
+    def _record_sell_operation(self, position: Position, sell_price: Decimal, reason: str):
+        # 反查买入记录
+        try:
+            buy_op = BacktestOperationLog.objects.get(
+                backtest_run_id=self.service.backtest_run_id,
+                position_id_ref=position.position_id,
+                direction=BacktestOperationLog.Direction.BUY
+            )
+            m_value = buy_op.buy_date_m_value
+            scores_str = buy_op.factor_scores
+            profit_rate = buy_op.profit_rate
+            loss_rate = buy_op.loss_rate
+        except BacktestOperationLog.DoesNotExist:
+            logger.error(f"严重错误：无法找到 Position ID {position.position_id} 对应的买入操作日志！")
+            m_value, scores_str, profit_rate, loss_rate = None, "", None, None
+
+        BacktestOperationLog.objects.create(
+            backtest_run_id=self.service.backtest_run_id,
+            position_id_ref=position.position_id,
+            stock_code=position.stock_code_id,
+            stock_name=position.stock_code.stock_name,
+            trade_date=self.service.current_date,
+            direction=BacktestOperationLog.Direction.SELL,
+            exit_reason=reason,
+            profit_rate=profit_rate,
+            loss_rate=loss_rate,
+            buy_date_m_value=m_value,
+            factor_scores=scores_str,
             price=sell_price,
             quantity=position.quantity,
-            commission=commission,
-            stamp_duty=stamp_duty,
-            reason=reason,
-            status=TradeLog.StatusChoices.FILLED
+            amount=sell_price * position.quantity
         )
+        logger.debug(f"已记录卖出操作日志 for Position ID: {position.position_id}")
 
 ####文件结束####
 

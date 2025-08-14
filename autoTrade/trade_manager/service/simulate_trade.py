@@ -232,6 +232,11 @@ class SimulateTradeService:
                         
                         if self.last_buy_trade_id:
                             decision_order_service.calculate_stop_profit_loss(self.last_buy_trade_id)
+                            # 在止盈止损计算完毕后，获取更新后的持仓对象
+                            trade_log = TradeLog.objects.get(pk=self.last_buy_trade_id)
+                            position = trade_log.position
+                            # 现在才调用日志记录函数，此时 position 对象已包含正确的止盈止损价
+                            handler._record_buy_operation(position)
                         else:
                             break
 
@@ -250,7 +255,7 @@ class SimulateTradeService:
                     selection_service = SelectionService(trade_date=self.current_date, mode='backtest')
                     selection_service.run_selection()
 
-                    
+
                     # --- 邮件发送逻辑 ---
                     is_last_day = (i == len(trading_days) - 1)
                     current_month = current_day.month
