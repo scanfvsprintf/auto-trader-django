@@ -261,8 +261,8 @@ def start():
 
     # 添加任务
     scheduler.add_job(run_job_wrapper, 'cron', day='*', hour=19, minute=0, args=[selection_job, '日终选股'])
-    scheduler.add_job(run_job_wrapper, 'cron', day='*', hour=6, minute=30, args=[premarket_fix_job, '盘前校准'])
-    scheduler.add_job(run_job_wrapper, 'cron', day='*', hour=7, minute=0, args=[email_jobs, '预案推送'])
+    scheduler.add_job(run_job_wrapper, 'cron', day='*', hour=6, minute=10, args=[premarket_fix_job, '盘前校准'])
+    scheduler.add_job(run_job_wrapper, 'cron', day='*', hour=6, minute=30, args=[email_jobs, '预案推送'])
     #scheduler.add_job(run_job_wrapper, 'cron', day='*', hour=9, minute=25, second=5, args=[opening_decision_job, '开盘决策'])
     
     # --- 每日动态任务的调度器 ---
