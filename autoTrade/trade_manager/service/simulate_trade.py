@@ -68,12 +68,73 @@ class SimulateTradeService:
         ]
         
         logger.info(f"准备从 'public' schema 复制基础数据到 '{schema_name}'...")
-        with connections['default'].cursor() as cursor:
+        with transaction.atomic(), connections['default'].cursor() as cursor:
+            cursor.execute(f'SET search_path TO "{schema_name}";')
             for table_name in tables_to_copy:
-                logger.info(f"  - 正在复制表: {table_name}")
-                sql = f'INSERT INTO "{schema_name}"."{table_name}" SELECT * FROM public."{table_name}";'
+                logger.info(f"  - 正在处理表: {table_name}")
+                # 1. 区分并获取 "普通索引" 和 "约束"
+                # =========================================================================
+                # 1a. 获取普通索引 (不包括由 UNIQUE 或 PRIMARY KEY 约束创建的索引)
+                logger.info(f"    - 正在获取 '{table_name}' 的普通索引...")
+                cursor.execute("""
+                    SELECT indexdef
+                    FROM pg_indexes
+                    WHERE schemaname = %s AND tablename = %s
+                    AND indexname NOT IN (
+                        SELECT conname FROM pg_constraint WHERE conrelid = %s::regclass
+                    );
+                """, [schema_name, table_name, f'"{schema_name}"."{table_name}"'])
+                plain_indexes_to_recreate = [row[0] for row in cursor.fetchall()]
+                # 1b. 获取约束 (外键和唯一约束)
+                logger.info(f"    - 正在获取 '{table_name}' 的外键和唯一约束...")
+                cursor.execute("""
+                    SELECT 'ALTER TABLE ' || quote_ident(conrelid::regclass::text) || ' ADD CONSTRAINT ' || quote_ident(conname) || ' ' || pg_get_constraintdef(oid)
+                    FROM pg_constraint
+                    WHERE contype IN ('f', 'u') AND conrelid = %s::regclass;
+                """, [f'"{schema_name}"."{table_name}"'])
+                constraints_to_recreate = [row[0] for row in cursor.fetchall()]
+                # 2. 删除索引和约束 (删除约束会自动删除其底层索引)
+                # =========================================================================
+                # 2a. 删除约束
+                for const_def in constraints_to_recreate:
+                    const_name = const_def.split('ADD CONSTRAINT ')[1].split(' ')[0]
+                    logger.info(f"      - 删除约束: {const_name}")
+                    cursor.execute(f'ALTER TABLE "{table_name}" DROP CONSTRAINT IF EXISTS {const_name};')
+                
+                # 2b. 删除普通索引
+                for index_def in plain_indexes_to_recreate:
+                    # 从 "CREATE INDEX index_name ON ..." 中提取 index_name
+                    try:
+                        index_name = index_def.split(' ')[2]
+                        logger.info(f"      - 删除索引: {index_name}")
+                        cursor.execute(f'DROP INDEX IF EXISTS "{index_name}";')
+                    except IndexError:
+                        logger.warning(f"无法从 '{index_def}' 解析索引名称，跳过删除。")
+                # 3. 高效复制数据 (现在非常快)
+                # =========================================================================
+                logger.info(f"    - 正在从 public.{table_name} 复制数据...")
+                sql = f'INSERT INTO "{table_name}" SELECT * FROM public."{table_name}";'
                 cursor.execute(sql)
+                logger.info(f"    - 数据复制完成。")
+                # 4. 重建索引和约束
+                # =========================================================================
+                logger.info(f"    - 正在重建 '{table_name}' 的索引和约束...")
+                # 4a. 重建普通索引
+                for index_def in plain_indexes_to_recreate:
+                    logger.info(f"      - 重建索引: {index_def}")
+                    cursor.execute(index_def)
+                
+                # 4b. 重建约束 (这会自动重建它们的底层索引)
+                for const_def in constraints_to_recreate:
+                    logger.info(f"      - 重建约束: {const_def}")
+                    cursor.execute(const_def)
         logger.info("基础数据复制完成。")
+        # with connections['default'].cursor() as cursor:
+        #     for table_name in tables_to_copy:
+        #         logger.info(f"  - 正在复制表: {table_name}")
+        #         sql = f'INSERT INTO "{schema_name}"."{table_name}" SELECT * FROM public."{table_name}";'
+        #         cursor.execute(sql)
+        # logger.info("基础数据复制完成。")
 
         self.initial_capital = initial_capital
         self.cash_balance = self.initial_capital
@@ -111,7 +172,7 @@ class SimulateTradeService:
                     if prev_trading_day:
                         logger.info(f"-> [T-1 选股] 基于 {prev_trading_day} 的数据...")
                         selection_service = SelectionService(trade_date=prev_trading_day, mode='backtest')
-                        #selection_service.run_selection()
+                        selection_service.run_selection()
 
                     logger.info("-> [T日 盘前校准] ...")
                     before_fix_service = BeforeFixService(execution_date=self.current_date)

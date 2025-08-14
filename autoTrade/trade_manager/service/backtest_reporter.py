@@ -11,6 +11,7 @@ import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
+
 import pandas as pd
 from django.db import connections
 
@@ -30,7 +31,7 @@ class BacktestReporter:
         self.current_date = current_date
         self.initial_capital = initial_capital
         self.email_handler = EmailHandler()
-        self.recipients = ['876858298@qq.com','285173686@qq.com']#'850696281@qq.com'
+        self.recipients = ['876858298@qq.com']#'850696281@qq.com','285173686@qq.com'
     def _execute_query(self, query: str, params: list = None) -> list[dict]:
         """在指定 schema 中执行原生 SQL 查询并返回结果"""
         with connections['default'].cursor() as cursor:
@@ -103,7 +104,21 @@ class BacktestReporter:
                 profits[key] = profits.get(key, 0) - op['amount']
             else: # SELL
                 profits[key] = profits.get(key, 0) + op['amount']
-        
+        # 总收益 = 已实现盈亏 + 未实现盈亏
+        #        = (卖出总额 - 买入总额) + (当前市值 - 持仓成本)
+        #        = (卖出总额) - (已平仓部分的买入成本) + (当前市值)
+        # 之前的循环已经计算了 (卖出总额 - 全部买入成本)，所以我们只需加上当前市值即可。
+        for holding in data['current_holdings']:
+            key = (holding['stock_code'], holding['stock_name'])
+            
+            # 处理当天可能没有行情数据的情况，若无当前价则按入场价计算，浮动盈亏为0
+            current_price = holding['current_price'] or holding['entry_price']
+            
+            # 计算当前持仓的总市值
+            current_market_value = holding['quantity'] * current_price
+            
+            # 将当前市值加到该股票的累计收益中
+            profits[key] = profits.get(key, 0) + current_market_value
         profit_list = [{'stock_code': k[0], 'stock_name': k[1], 'profit': v} for k, v in profits.items()]
         data['profit_ranking'] = sorted(profit_list, key=lambda x: x['profit'], reverse=True)
 
@@ -113,10 +128,11 @@ class BacktestReporter:
         if not plot_data:
             return ""
         
-        # 临时降低matplotlib日志级别，避免控制台被非关键信息刷屏
-        mpl_logger = logging.getLogger('matplotlib')
-        original_level = mpl_logger.level
-        mpl_logger.setLevel(logging.WARNING)
+        try:
+            plt.rcParams['font.sans-serif'] = ['SimHei', 'Microsoft YaHei']
+            plt.rcParams['axes.unicode_minus'] = False
+        except Exception as e:
+            pass
         
         try:
             df = pd.DataFrame(plot_data)
@@ -132,16 +148,16 @@ class BacktestReporter:
             fig, ax1 = plt.subplots(figsize=(14, 7))
 
             # 绘制主曲线
-            ax1.plot(df['trade_date'], df['total_assets'], color='dodgerblue', label='Total Assets', linewidth=2)
-            ax1.set_xlabel('Date', fontsize=12)
-            ax1.set_ylabel('Total Assets (RMB)', color='dodgerblue', fontsize=12)
+            ax1.plot(df['trade_date'], df['total_assets'], color='dodgerblue', label='money', linewidth=2)
+            ax1.set_xlabel('date', fontsize=12)
+            ax1.set_ylabel('money', color='dodgerblue', fontsize=12)
             ax1.tick_params(axis='y', labelcolor='dodgerblue')
             ax1.yaxis.set_major_formatter(plt.FuncFormatter(lambda x, p: format(int(x), ',')))
 
             # 绘制副坐标轴曲线
             ax2 = ax1.twinx()
-            ax2.plot(df['trade_date'], df['market_m_value'], color='coral', linestyle='--', label='Market M-Value', alpha=0.7)
-            ax2.set_ylabel('M-Value', color='coral', fontsize=12)
+            ax2.plot(df['trade_date'], df['market_m_value'], color='coral', linestyle='--', label='M', alpha=0.7)
+            ax2.set_ylabel('M', color='coral', fontsize=12)
             ax2.tick_params(axis='y', labelcolor='coral')
             ax2.axhline(0, color='grey', linestyle=':', linewidth=1)
 
@@ -169,7 +185,7 @@ class BacktestReporter:
             plt.setp(ax1.get_xticklabels(), rotation=30, ha='right')
             # ========================================================
 
-            fig.suptitle('Backtest Performance: Asset Curve & M-Value', fontsize=16, weight='bold')
+            fig.suptitle('Money-M(t)', fontsize=16, weight='bold')
             fig.legend(loc='upper left', bbox_to_anchor=(0.1, 0.9))
             
             # 使用 tight_layout 替代
@@ -182,8 +198,7 @@ class BacktestReporter:
             buf.seek(0)
             return base64.b64encode(buf.getvalue()).decode('utf-8')
         finally:
-            # 恢复原始日志级别
-            mpl_logger.setLevel(original_level)
+            pass
 
 
 
@@ -287,7 +302,7 @@ class BacktestReporter:
             </style>
         </head>
         <body>
-            <h1>回测进度报告: {self.schema_name}</h1>
+            <h1>回测进度报告: {self.start_date}~{self.current_date}回测</h1>
             {html}
         </body>
         </html>
@@ -301,14 +316,14 @@ class BacktestReporter:
             report_data = self._generate_report_data()
             plot_base64 = self._generate_plot_base64(report_data.get('plot_data', []))
             html_content = self._format_html_content(report_data, plot_base64)
-            subject = f"回测报告 ({self.schema_name}) - {self.current_date.strftime('%Y-%m-%d')}"
+            subject = f"回测报告 ({self.start_date}~{self.current_date}) - {self.current_date.strftime('%Y-%m-%d')}"
             
             self.email_handler.send_email(
                 recipients=self.recipients,
                 subject=subject,
                 html_content=html_content
             )
-            logger.info(f"[{self.schema_name}] 回测报告邮件已成功发送。")
+            logger.info(f"[{self.start_date}~{self.current_date}] 回测报告邮件已成功发送。")
         except Exception as e:
-            logger.error(f"[{self.schema_name}] 生成或发送回测报告时失败: {e}", exc_info=True)
+            logger.error(f"[{self.start_date}~{self.current_date}] 生成或发送回测报告时失败: {e}", exc_info=True)
 
