@@ -158,9 +158,7 @@ class SimulateTradeHandler(ITradeHandler):
         # 步骤2: 在 Python 层面进行过滤和格式化
         scores_list = []
         for f in all_factor_scores_qs:
-            # 直接在字符串上判断，不再依赖数据库查询
-            if not f.factor_code_id.startswith('dynamic_M'):
-                scores_list.append(f"{f.factor_code_id}:{f.norm_score:.2f}")
+            scores_list.append(f"{f.factor_code_id}:{f.norm_score:.2f}")
         scores_str = "|".join(scores_list)
         
         # 获取止盈止损率 (在调用此函数时，Position应已被更新)
