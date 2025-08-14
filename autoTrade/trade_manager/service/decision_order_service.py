@@ -206,16 +206,16 @@ class DecisionOrderService:
             'k_slip': '0.002',
             'lookback_atr': '14',
             # 新版动态风险参数
-            'risk_adj_tp_pct_min': '0.05',
-            'risk_adj_tp_pct_max': '0.25',
-            'risk_adj_sl_atr_min': '1.5',
-            'risk_adj_sl_atr_max': '3.5',
-            'risk_adj_max_loss_pct': '0.10',
+            'risk_adj_tp_pct_min': '0.07',
+            'risk_adj_tp_pct_max': '0.15',
+            'risk_adj_sl_atr_min': '1.2',
+            'risk_adj_sl_atr_max': '2.2',
+            'risk_adj_max_loss_pct': '0.08',
             # 全新动态仓位参数
             'ORIGINAL_MAX_POSITIONS': '5',
             'MIN_POSITIONS_COUNT': '1',
-            'RISK_ADJ_POS_FLOOR_PCT': '0.1',
-            'RISK_ADJ_CAPITAL_FLOOR_PCT': '0.6',
+            'RISK_ADJ_POS_FLOOR_PCT': '0.2',
+            'RISK_ADJ_CAPITAL_FLOOR_PCT': '0.5',
         }
       
         db_params = {p.param_name: p.param_value for p in StrategyParameters.objects.all()}
@@ -503,11 +503,11 @@ class DecisionOrderService:
             'lookback_atr': {'value': '14', 'group': 'INDICATORS', 'desc': 'ATR计算周期'},
             
             # 新版 M(t) 驱动的动态风险参数
-            'risk_adj_tp_pct_min': {'value': '0.05', 'group': 'RISK_ADJUSTED', 'desc': 'M(t)驱动-最小止盈目标百分比 (熊市)'},
-            'risk_adj_tp_pct_max': {'value': '0.25', 'group': 'RISK_ADJUSTED', 'desc': 'M(t)驱动-最大止盈目标百分比 (牛市)'},
-            'risk_adj_sl_atr_min': {'value': '1.5', 'group': 'RISK_ADJUSTED', 'desc': 'M(t)驱动-最小ATR止损乘数 (熊市)'},
-            'risk_adj_sl_atr_max': {'value': '3.5', 'group': 'RISK_ADJUSTED', 'desc': 'M(t)驱动-最大ATR止损乘数 (牛市)'},
-            'risk_adj_max_loss_pct': {'value': '0.10', 'group': 'RISK_ADJUSTED', 'desc': 'M(t)驱动-绝对最大亏损百分比'},
+            'risk_adj_tp_pct_min': {'value': '0.07', 'group': 'RISK_ADJUSTED', 'desc': 'M(t)驱动-最小止盈目标百分比 (熊市)'},
+            'risk_adj_tp_pct_max': {'value': '0.15', 'group': 'RISK_ADJUSTED', 'desc': 'M(t)驱动-最大止盈目标百分比 (牛市)'},
+            'risk_adj_sl_atr_min': {'value': '1.2', 'group': 'RISK_ADJUSTED', 'desc': 'M(t)驱动-最小ATR止损乘数 (熊市)'},
+            'risk_adj_sl_atr_max': {'value': '2.2', 'group': 'RISK_ADJUSTED', 'desc': 'M(t)驱动-最大ATR止损乘数 (牛市)'},
+            'risk_adj_max_loss_pct': {'value': '0.08', 'group': 'RISK_ADJUSTED', 'desc': 'M(t)驱动-绝对最大亏损百分比'},
             # --- 全新动态仓位管理参数 ---
             'ORIGINAL_MAX_POSITIONS': {'value': '5', 'group': 'DYNAMIC_POS_MGMT', 'desc': '【动态仓位】策略基准最大持仓数'},
             'MIN_POSITIONS_COUNT': {'value': '1', 'group': 'DYNAMIC_POS_MGMT', 'desc': '【动态仓位】最小持仓数硬下限'},
