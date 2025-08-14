@@ -150,7 +150,7 @@ class SimulateTradeService:
                         SELECT setval(
                             '{sequence_name}', 
                             COALESCE((SELECT MAX("{column_name}") FROM "{table_name}"), 0) + 1, 
-                            false
+                            true
                         )
                     """
                     cursor.execute(update_sequence_sql)
