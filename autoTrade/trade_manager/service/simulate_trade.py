@@ -134,12 +134,26 @@ class SimulateTradeService:
                 # =========================================================================
                 # 自动查找并更新当前表的自增序列
                 find_serial_sql = """
-                    SELECT a.attname, pg_get_serial_sequence(c.relname, a.attname)
-                    FROM pg_class c JOIN pg_attribute a ON a.attrelid = c.oid
-                    WHERE c.relname = %s AND a.attnum > 0 AND NOT a.attisdropped
-                      AND pg_get_serial_sequence(c.relname, a.attname) IS NOT NULL
+                    SELECT 
+                        a.attname, 
+                        pg_get_serial_sequence(
+                            quote_ident(n.nspname) || '.' || quote_ident(c.relname), 
+                            a.attname
+                        )
+                    FROM 
+                        pg_class c
+                    JOIN 
+                        pg_attribute a ON a.attrelid = c.oid
+                    JOIN 
+                        pg_namespace n ON c.relnamespace = n.oid -- 通过namespace OID关联
+                    WHERE 
+                        n.nspname = %s      -- 参数1: schema的名称
+                        AND c.relname = %s  -- 参数2: 表的名称
+                        AND a.attnum > 0 
+                        AND NOT a.attisdropped
+                        AND pg_get_serial_sequence(quote_ident(n.nspname) || '.' || quote_ident(c.relname), a.attname) IS NOT NULL;
                 """
-                cursor.execute(find_serial_sql, [table_name])
+                cursor.execute(find_serial_sql, [schema_name, table_name])
                 serial_columns = cursor.fetchall()
 
                 for column_name, sequence_name in serial_columns:
