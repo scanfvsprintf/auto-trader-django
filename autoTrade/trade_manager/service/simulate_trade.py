@@ -128,6 +128,35 @@ class SimulateTradeService:
                 for const_def in constraints_to_recreate:
                     logger.info(f"      - 重建约束: {const_def}")
                     cursor.execute(const_def)
+
+                # =========================================================================
+                # 5. 重置自增主键序列 (解决主键冲突的关键)
+                # =========================================================================
+                # 自动查找并更新当前表的自增序列
+                find_serial_sql = """
+                    SELECT a.attname, pg_get_serial_sequence(c.relname, a.attname)
+                    FROM pg_class c JOIN pg_attribute a ON a.attrelid = c.oid
+                    WHERE c.relname = %s AND a.attnum > 0 AND NOT a.attisdropped
+                      AND pg_get_serial_sequence(c.relname, a.attname) IS NOT NULL
+                """
+                cursor.execute(find_serial_sql, [table_name])
+                serial_columns = cursor.fetchall()
+
+                for column_name, sequence_name in serial_columns:
+                    logger.info(f"    - 发现自增列 '{column_name}'，正在重置其序列 '{sequence_name}'...")
+                    
+                    # 将序列的下一个值设置为 (表中该列的最大值 + 1)，如果表为空则设置为1
+                    update_sequence_sql = f"""
+                        SELECT setval(
+                            '{sequence_name}', 
+                            COALESCE((SELECT MAX("{column_name}") FROM "{table_name}"), 0) + 1, 
+                            false
+                        )
+                    """
+                    cursor.execute(update_sequence_sql)
+                    logger.info(f"    - 序列 '{sequence_name}' 已更新。")
+
+                
         logger.info("基础数据复制完成。")
         # with connections['default'].cursor() as cursor:
         #     for table_name in tables_to_copy:
