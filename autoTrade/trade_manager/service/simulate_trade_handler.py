@@ -152,11 +152,11 @@ class SimulateTradeHandler(ITradeHandler):
         factor_scores_qs = DailyFactorValues.objects.filter(
             stock_code_id=position.stock_code_id,
             trade_date=t_minus_1
-        ).exclude(factor_code__factor_code__startswith='dynamic_M') # 排除M值本身
+        ).exclude(factor_code_id__startswith='dynamic_M') # 排除M值本身
         
         scores_str = "|".join([
-            f"{f.factor_code.factor_code}:{f.norm_score:.2f}" 
-            for f in factor_scores_qs.select_related('factor_code')
+            f"{f.factor_code_id}:{f.norm_score:.2f}" 
+            for f in factor_scores_qs
         ])
         
         # 获取止盈止损率 (在调用此函数时，Position应已被更新)
