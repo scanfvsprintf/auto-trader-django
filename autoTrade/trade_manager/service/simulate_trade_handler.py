@@ -199,6 +199,12 @@ class SimulateTradeHandler(ITradeHandler):
             logger.error(f"严重错误：无法找到 Position ID {position.position_id} 对应的买入操作日志！")
             m_value, scores_str, profit_rate, loss_rate = None, "", None, None
 
+        exit_reason_for_log = None
+        if reason == TradeLog.ReasonChoices.TAKE_PROFIT:
+            exit_reason_for_log = BacktestOperationLog.ExitReason.TAKE_PROFIT
+        elif reason == TradeLog.ReasonChoices.STOP_LOSS:
+            exit_reason_for_log = BacktestOperationLog.ExitReason.STOP_LOSS
+
         BacktestOperationLog.objects.create(
             backtest_run_id=self.service.backtest_run_id,
             position_id_ref=position.position_id,
