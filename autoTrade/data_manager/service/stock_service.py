@@ -16,6 +16,7 @@ from common.models.daily_trading_plan import DailyTradingPlan
 from common.models.positions import Position
 from common.models.trade_log import TradeLog
 from common.models.system_log import SystemLog
+from common.models.index_quotes_csi300 import IndexQuotesCsi300
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import time
 
@@ -329,3 +330,42 @@ class StockService:
             cursor.execute(f"DELETE FROM tb_strategy_parameters;")
             cursor.execute(f"DELETE FROM tb_system_log;")
             cursor.execute(f"DELETE FROM tb_trade_log;")
+    def update_csi300_index_data(self, start_date: str, end_date: str):
+        """
+        获取并更新沪深300指数的日线行情数据。
+        """
+        self._log_and_save(f"开始更新沪深300指数数据，范围: {start_date} to {end_date}。")
+        try:
+            df = ak.index_zh_a_hist(
+                symbol="000300",
+                period="daily",
+                start_date=start_date.replace('-', ''),
+                end_date=end_date.replace('-', '')
+            )
+            if df.empty:
+                self._log_and_save(f"在 {start_date} to {end_date} 期间未获取到沪深300指数数据。", level=SystemLog.LogLevelChoices.WARNING)
+                return
+            df.rename(columns={
+                '日期': 'trade_date', '开盘': 'open', '收盘': 'close', '最高': 'high', '最低': 'low',
+                '成交量': 'volume', '成交额': 'amount', '振幅': 'amplitude',
+                '涨跌幅': 'pct_change', '涨跌额': 'change_amount', '换手率': 'turnover_rate'
+            }, inplace=True)
+            
+            df['volume'] = df['volume'] * 100
+            df['turnover_rate'] = pd.to_numeric(df['turnover_rate'], errors='coerce')
+            with transaction.atomic():
+                for _, row in df.iterrows():
+                    IndexQuotesCsi300.objects.update_or_create(
+                        trade_date=row['trade_date'],
+                        defaults={
+                            'open': Decimal(str(row['open'])), 'close': Decimal(str(row['close'])),
+                            'high': Decimal(str(row['high'])), 'low': Decimal(str(row['low'])),
+                            'volume': int(row['volume']), 'amount': Decimal(str(row['amount'])),
+                            'amplitude': Decimal(str(row['amplitude'])), 'pct_change': Decimal(str(row['pct_change'])),
+                            'change_amount': Decimal(str(row['change_amount'])),
+                            'turnover_rate': Decimal(str(row['turnover_rate'])) if pd.notna(row['turnover_rate']) else None
+                        }
+                    )
+            self._log_and_save(f"成功更新 {len(df)} 条沪深300指数数据。")
+        except Exception as e:
+            self._log_and_save(f"更新沪深300指数数据时发生错误: {e}", level=SystemLog.LogLevelChoices.ERROR)

@@ -10,6 +10,8 @@ from .positions import Position
 from .trade_log import TradeLog
 from .system_log import SystemLog
 from .corporate_action import CorporateAction
+from .backtest_logs import BacktestDailyLog,BacktestOperationLog
+from .index_quotes_csi300 import IndexQuotesCsi300
 
 __all__ = [
     'StockInfo',
@@ -21,5 +23,8 @@ __all__ = [
     'Position',
     'TradeLog',
     'SystemLog',
-    'CorporateAction'
+    'CorporateAction',
+    'BacktestDailyLog',
+    'BacktestOperationLog',
+    'IndexQuotesCsi300'
 ]

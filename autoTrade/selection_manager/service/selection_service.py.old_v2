@@ -14,7 +14,7 @@ from django.utils import timezone
 
 from common.models import (
     StockInfo, DailyQuotes, SystemLog, FactorDefinitions, DailyFactorValues,
-    StrategyParameters, DailyTradingPlan,IndexQuotesCsi300 
+    StrategyParameters, DailyTradingPlan
 )
 
 # region: 全局配置
@@ -144,24 +144,11 @@ class SelectionService:
         # 3. 定义所有参数 (使用 'dynamic_' 前缀)
         parameters_to_define = {
             # M(t) 参数
-            # 新版 M(t) 参数 (基于沪深300)
-            'dynamic_m_csi300_w_trend': {'value': '0.4', 'group': 'M_CSI300_WEIGHTS', 'desc': '新M(t)权重: 趋势强度'},
-            'dynamic_m_csi300_w_momentum': {'value': '0.3', 'group': 'M_CSI300_WEIGHTS', 'desc': '新M(t)权重: 短期动能'},
-            'dynamic_m_csi300_w_volatility': {'value': '0.2', 'group': 'M_CSI300_WEIGHTS', 'desc': '新M(t)权重: 波动水平'},
-            'dynamic_m_csi300_w_turnover': {'value': '0.1', 'group': 'M_CSI300_WEIGHTS', 'desc': '新M(t)权重: 量能状态'},
-            # 新版 M(t) 锚点参数 (由校准命令填充)
-            'dynamic_m_csi300_anchor_trend_p10': {'value': '0', 'group': 'M_CSI300_ANCHORS', 'desc': '趋势强度-P10锚点'},
-            'dynamic_m_csi300_anchor_trend_p50': {'value': '0', 'group': 'M_CSI300_ANCHORS', 'desc': '趋势强度-P50锚点'},
-            'dynamic_m_csi300_anchor_trend_p90': {'value': '0', 'group': 'M_CSI300_ANCHORS', 'desc': '趋势强度-P90锚点'},
-            'dynamic_m_csi300_anchor_momentum_p10': {'value': '0', 'group': 'M_CSI300_ANCHORS', 'desc': '短期动能-P10锚点'},
-            'dynamic_m_csi300_anchor_momentum_p50': {'value': '0', 'group': 'M_CSI300_ANCHORS', 'desc': '短期动能-P50锚点'},
-            'dynamic_m_csi300_anchor_momentum_p90': {'value': '0', 'group': 'M_CSI300_ANCHORS', 'desc': '短期动能-P90锚点'},
-            'dynamic_m_csi300_anchor_volatility_p10': {'value': '0', 'group': 'M_CSI300_ANCHORS', 'desc': '波动水平-P10锚点'},
-            'dynamic_m_csi300_anchor_volatility_p50': {'value': '0', 'group': 'M_CSI300_ANCHORS', 'desc': '波动水平-P50锚点'},
-            'dynamic_m_csi300_anchor_volatility_p90': {'value': '0', 'group': 'M_CSI300_ANCHORS', 'desc': '波动水平-P90锚点'},
-            'dynamic_m_csi300_anchor_turnover_p10': {'value': '0', 'group': 'M_CSI300_ANCHORS', 'desc': '量能状态-P10锚点'},
-            'dynamic_m_csi300_anchor_turnover_p50': {'value': '0', 'group': 'M_CSI300_ANCHORS', 'desc': '量能状态-P50锚点'},
-            'dynamic_m_csi300_anchor_turnover_p90': {'value': '0', 'group': 'M_CSI300_ANCHORS', 'desc': '量能状态-P90锚点'},
+            'dynamic_w_m1': {'value': '0.2', 'group': 'M_WEIGHTS', 'desc': 'M(t)指标权重: M1-创60日新高占比'},
+            'dynamic_w_m2': {'value': '0.35', 'group': 'M_WEIGHTS', 'desc': 'M(t)指标权重: M2-MA60之上占比'},
+            'dynamic_w_m3': {'value': '0.25', 'group': 'M_WEIGHTS', 'desc': 'M(t)指标权重: M3-60日回报率中位数'},
+            'dynamic_w_m4': {'value': '0.2', 'group': 'M_WEIGHTS', 'desc': 'M(t)指标权重: M4-20日平均波动率'},
+            'dynamic_m_lookback': {'value': '750', 'group': 'M_PARAMS', 'desc': 'M(t)历史回看周期(约3年)'},
 
             # 动态权重 N_i(M(t)) 参数
             'dynamic_c_MT': {'value': '1.2', 'group': 'N_ATTRACTION', 'desc': '吸引力函数强度系数: 趋势动能'},
@@ -262,10 +249,10 @@ class SelectionService:
 
     def _calculate_market_regime_M(self, stock_pool: list[str]) -> float:
         """
-        计算市场状态函数 M(t) - V2.0 沪深300基准版
-        使用固定分位锚点法进行绝对标准化，并具备容错机制。
+        计算市场状态函数 M(t)，使用数据库缓存机制进行增量计算。
         """
-        logger.debug("开始计算市场状态 M(t) [V2.0]...")
+        logger.debug("开始计算市场状态 M(t)...")
+        
         # 1. 检查当日缓存
         try:
             cached_m = DailyFactorValues.objects.get(
@@ -277,72 +264,74 @@ class SelectionService:
             logger.debug(f"成功从缓存中读取当日 M(t) = {m_value:.4f}")
             return m_value
         except DailyFactorValues.DoesNotExist:
-            logger.debug("当日 M(t) 缓存未命中，开始计算...")
-        # 2. 加载计算所需数据 (约60个交易日)
-        try:
-            lookback_days = 80  # 60日均线需要，给足buffer
-            start_date = self.trade_date - timedelta(days=lookback_days * 2)
-            
-            quotes_qs = IndexQuotesCsi300.objects.filter(
-                trade_date__gte=start_date,
-                trade_date__lte=self.trade_date
-            ).order_by('trade_date')
-            
-            if len(quotes_qs) < 60:
-                raise ValueError("沪深300历史数据不足60天，无法计算M值。")
-            
-            df = pd.DataFrame.from_records(quotes_qs.values())
-            df.set_index('trade_date', inplace=True)
-            columns_to_convert = ['open', 'high', 'low', 'close', 'turnover_rate']
-            for col in columns_to_convert:
-                df[col] = pd.to_numeric(df[col], errors='coerce')
-        except (ValueError, IndexQuotesCsi300.DoesNotExist) as e:
-            logger.error(f"获取沪深300数据失败: {e}。将启用容错机制。")
-            # 容错机制 (方案A): 沿用前一个交易日的M值
-            try:
-                latest_m = DailyFactorValues.objects.filter(
-                    stock_code_id=MARKET_INDICATOR_CODE,
-                    factor_code_id='dynamic_M_VALUE'
-                ).latest('trade_date')
-                logger.warning(f"数据获取失败，沿用 {latest_m.trade_date} 的M值: {latest_m.raw_value:.4f}")
-                return float(latest_m.raw_value)
-            except DailyFactorValues.DoesNotExist:
-                logger.critical("数据库中无任何历史M值，无法回退，返回0。")
-                return 0.0
-        # 3. 计算当日的四个原始指标值
-        # M1: 趋势强度
-        ma60 = df['close'].rolling(60, min_periods=30).mean()
-        m1_series = (df['close'] - ma60) / ma60
-        m1_raw = m1_series.iloc[-1]
-        # M2: 短期动能
-        m2_series = df['close'].pct_change(20)
-        m2_raw = m2_series.iloc[-1]
+            logger.debug("当日 M(t) 缓存未命中，开始增量计算...")
+
+        # 2. 缓存未命中，进行计算
+        lookback_days = int(self.dynamic_params['dynamic_m_lookback'])
+        all_trade_dates = self._get_market_trade_dates(lookback_days)
+        if not all_trade_dates:
+            raise ValueError("无法获取历史交易日历，无法计算M(t)")
+
+        # 3. 获取历史缓存的原始指标值
+        m_factor_codes = ['dynamic_M1_RAW', 'dynamic_M2_RAW', 'dynamic_M3_RAW', 'dynamic_M4_RAW']
+        cached_raw_values_qs = DailyFactorValues.objects.filter(
+            stock_code_id=MARKET_INDICATOR_CODE,
+            trade_date__in=all_trade_dates,
+            factor_code_id__in=m_factor_codes
+        ).values('trade_date', 'factor_code_id', 'raw_value')
+
+        cached_df = pd.DataFrame.from_records(cached_raw_values_qs)
+        if not cached_df.empty:
+            cached_pivot = cached_df.pivot(index='trade_date', columns='factor_code_id', values='raw_value').astype(float)
+        else:
+            cached_pivot = pd.DataFrame(columns=m_factor_codes)
+
+        # 4. 找出需要重新计算的日期
+        dates_to_calculate = sorted(list(set(all_trade_dates) - set(cached_pivot.index)))
+        logger.debug(f"需要重新计算 {len(dates_to_calculate)} 天的 M(t) 基础指标。")
+
+        # 5. 对缺失日期进行计算
+        newly_calculated_data = []
+        if dates_to_calculate:
+            # 只加载计算 M(t) 所需的数据
+            self._load_market_data(stock_pool, for_m_calc=True)
+            for calc_date in dates_to_calculate:
+                m1, m2, m3, m4 = self._calculate_m_indicators_for_date(calc_date)
+                newly_calculated_data.append({
+                    'trade_date': calc_date,
+                    'dynamic_M1_RAW': m1, 'dynamic_M2_RAW': m2,
+                    'dynamic_M3_RAW': m3, 'dynamic_M4_RAW': m4
+                })
+                logger.debug(f"已完成计算{len(newly_calculated_data)}/ {len(dates_to_calculate)} 天")
         
-        # M3: 波动水平
-        daily_return_series = df['close'].pct_change()
-        m3_series = daily_return_series.rolling(20, min_periods=10).std()
-        m3_raw = m3_series.iloc[-1]
+        # 6. 合并新旧数据并存入缓存
+        if newly_calculated_data:
+            new_df = pd.DataFrame(newly_calculated_data).set_index('trade_date')
+            self._save_m_raw_values_to_cache(new_df)
+            # 合并到总的DataFrame
+            if cached_pivot.empty:
+                history_raw_df = new_df.sort_index()
+            else:
+                history_raw_df = pd.concat([cached_pivot, new_df]).sort_index()
+        else:
+            history_raw_df = cached_pivot.sort_index()
+
+        # 7. 标准化并合成最终 M(t)
+        current_raw = history_raw_df.loc[self.trade_date]
         
-        # M4: 量能状态
-        avg_turnover_20 = df['turnover_rate'].rolling(20, min_periods=10).mean()
-        avg_turnover_60 = df['turnover_rate'].rolling(60, min_periods=30).mean()
-        m4_series = avg_turnover_20 / avg_turnover_60
-        m4_raw = m4_series.iloc[-1]
-        # 4. 使用固定锚点进行绝对标准化
-        p = self.dynamic_params
-        m1_norm = self._norm_absolute(m1_raw, p['dynamic_m_csi300_anchor_trend_p10'], p['dynamic_m_csi300_anchor_trend_p50'], p['dynamic_m_csi300_anchor_trend_p90'], 'positive')
-        m2_norm = self._norm_absolute(m2_raw, p['dynamic_m_csi300_anchor_momentum_p10'], p['dynamic_m_csi300_anchor_momentum_p50'], p['dynamic_m_csi300_anchor_momentum_p90'], 'positive')
-        m3_norm = self._norm_absolute(m3_raw, p['dynamic_m_csi300_anchor_volatility_p10'], p['dynamic_m_csi300_anchor_volatility_p50'], p['dynamic_m_csi300_anchor_volatility_p90'], 'negative')
-        m4_norm = self._norm_absolute(m4_raw, p['dynamic_m_csi300_anchor_turnover_p10'], p['dynamic_m_csi300_anchor_turnover_p50'], p['dynamic_m_csi300_anchor_turnover_p90'], 'positive')
-        # 5. 加权合成最终M(t)
+        m1_norm = self._norm_timeseries(current_raw['dynamic_M1_RAW'], history_raw_df['dynamic_M1_RAW'], 'positive')
+        m2_norm = self._norm_timeseries(current_raw['dynamic_M2_RAW'], history_raw_df['dynamic_M2_RAW'], 'positive')
+        m3_norm = self._norm_timeseries(current_raw['dynamic_M3_RAW'], history_raw_df['dynamic_M3_RAW'], 'positive')
+        m4_norm = self._norm_timeseries(current_raw['dynamic_M4_RAW'], history_raw_df['dynamic_M4_RAW'], 'negative')
+
         m_t = (
-            m1_norm * p['dynamic_m_csi300_w_trend'] +
-            m2_norm * p['dynamic_m_csi300_w_momentum'] +
-            m3_norm * p['dynamic_m_csi300_w_volatility'] +
-            m4_norm * p['dynamic_m_csi300_w_turnover']
+            m1_norm * self.dynamic_params['dynamic_w_m1'] +
+            m2_norm * self.dynamic_params['dynamic_w_m2'] +
+            m3_norm * self.dynamic_params['dynamic_w_m3'] +
+            m4_norm * self.dynamic_params['dynamic_w_m4']
         )
         
-        # 6. 缓存最终的 M(t) 值
+        # 8. 缓存最终的 M(t) 值
         DailyFactorValues.objects.update_or_create(
             stock_code_id=MARKET_INDICATOR_CODE,
             trade_date=self.trade_date,
@@ -352,27 +341,59 @@ class SelectionService:
         logger.info(f"M(t) 计算完成，值为: {m_t:.4f}，并已存入缓存。")
         return m_t
 
+    def _calculate_m_indicators_for_date(self, calc_date: date) -> tuple:
+        """为特定一天计算M(t)的四个基础指标原始值"""
+        # 获取当天的面板数据切片
+        close_slice = self.panel_close.loc[:calc_date]
+        hfq_close_slice = self.panel_hfq_close.loc[:calc_date]
+        
+        if close_slice.empty: return np.nan, np.nan, np.nan, np.nan
 
-    def _norm_absolute(self, value, p10, p50, p90, direction):
-        """使用固定分位锚点进行绝对标准化（分段线性插值）"""
-        value = float(value)
-        p10, p50, p90 = float(p10), float(p50), float(p90)
+        # M1: 创60日新高占比
+        high60 = hfq_close_slice.rolling(60, min_periods=1).max()
+        is_new_high = hfq_close_slice.iloc[-1] == high60.iloc[-1]
+        m1 = is_new_high.sum() / is_new_high.count() if is_new_high.count() > 0 else 0
+
+        # M2: MA60之上占比
+        ma60 = hfq_close_slice.rolling(60, min_periods=1).mean()
+        above_ma60 = hfq_close_slice.iloc[-1] > ma60.iloc[-1]
+        m2 = above_ma60.sum() / above_ma60.count() if above_ma60.count() > 0 else 0
+
+        # M3: 60日回报率中位数
+        if len(hfq_close_slice) >= 60:
+            ret60 = hfq_close_slice.iloc[-1] / hfq_close_slice.iloc[-60] - 1
+            m3 = ret60.median()
+        else:
+            m3 = np.nan
+
+        # M4: 20日平均波动率
+        if len(hfq_close_slice) >= 20:
+            daily_ret = hfq_close_slice.pct_change(fill_method=None)
+            vol20 = daily_ret.rolling(20, min_periods=1).std()
+            m4 = vol20.iloc[-1].mean()
+        else:
+            m4 = np.nan
+            
+        return m1, m2, m3, m4
+
+    def _norm_timeseries(self, value, history_series, direction):
+        """对时间序列数据进行标准化"""
+        # 使用T及之前的数据来计算分位数，作为T日的评价标准
+        # history_series 是按时间升序排列的
+        historical_benchmark = history_series
         
-        if direction == 'negative':
-            value = -value
-            p10, p50, p90 = -p90, -p50, -p10
+        if historical_benchmark.count() < 2: return 0.0 # 如果历史数据太少，也无法定标
+        p1 = historical_benchmark.quantile(0.01)
+        p99 = historical_benchmark.quantile(0.99)
         
-        if value <= p10: return -1.0
-        if value >= p90: return 1.0
+        if (p99 - p1) < 1e-9: return 0.0
         
-        if value <= p50:
-            # 在 [-1, 0] 区间插值
-            if (p50 - p10) < 1e-9: return 0.0
-            return -1 + (value - p10) / (p50 - p10)
-        else: # value > p50
-            # 在 [0, 1] 区间插值
-            if (p90 - p50) < 1e-9: return 0.0
-            return (value - p50) / (p90 - p50)
+        value_prime = np.clip(value, p1, p99)
+        
+        if direction == 'positive':
+            return ((value_prime - p1) / (p99 - p1)) * 2 - 1
+        else: # negative
+            return ((p99 - value_prime) / (p99 - p1)) * 2 - 1
 
     def _save_m_raw_values_to_cache(self, df: pd.DataFrame):
         """将新计算的M指标原始值批量存入数据库"""

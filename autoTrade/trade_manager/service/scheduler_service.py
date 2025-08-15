@@ -88,6 +88,7 @@ def selection_job():
         return
     service = StockService()
     service.update_local_a_shares(start_date=date.today().strftime('%Y-%m-%d'),end_date=date.today().strftime('%Y-%m-%d'))
+    service.update_csi300_index_data(start_date=date.today().strftime('%Y-%m-%d'), end_date=date.today().strftime('%Y-%m-%d'))
     service = SelectionService(trade_date=date.today(), mode='realtime')
     service.run_selection()
 
