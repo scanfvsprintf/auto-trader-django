@@ -21,5 +21,6 @@ urlpatterns = [
     path('test', views.test_get),
     path('updateLocalStock', views.update_local_a_shares),
     path('syncCorporateActions', views.sync_corporate_actions),
-    path('sendEmail', views.email_send)
+    path('sendEmail', views.email_send),
+    path('updateCSI300', views.update_csi300_index_data)
 ]

@@ -43,3 +43,9 @@ def email_send(request):
     service=EmailNotificationService(t_day=datetime.strptime(body['date'], "%Y-%m-%d").date())
     service.runEmailSend()
     return JsonResponse({"result":"success"})
+
+def update_csi300_index_data(request):
+    body= json.loads(request.body)
+    service=StockService()
+    service.update_csi300_index_data(start_date=body['startDate'],end_date=body['endDate'])
+    return JsonResponse({"result":"success"})
