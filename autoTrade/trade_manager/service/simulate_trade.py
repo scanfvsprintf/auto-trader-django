@@ -64,7 +64,7 @@ class SimulateTradeService:
         tables_to_copy = [
             'tb_stock_info', 'tb_daily_quotes', 'tb_corporate_actions',
             'tb_factor_definitions', 'tb_strategy_parameters', 
-            'tb_daily_factor_values','tb_daily_trading_plan'
+            'tb_daily_factor_values','tb_daily_trading_plan','tb_index_quotes_csi300'
         ]
         
         logger.info(f"准备从 'public' schema 复制基础数据到 '{schema_name}'...")
