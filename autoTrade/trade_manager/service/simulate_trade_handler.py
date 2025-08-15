@@ -95,7 +95,9 @@ class SimulateTradeHandler(ITradeHandler):
     @transaction.atomic
     def sell_stock_by_market_price(self, position: Position, reason: str) -> None:
         if reason == TradeLog.ReasonChoices.STOP_LOSS:
-            trigger_price = position.current_stop_loss
+            #有可能触发止损是因为配股把止损金额改到了999999，所以止损金额应该取开盘价和止损价更低的那个
+            base_sell_price = self.get_opening_price(position.stock_code_id)
+            trigger_price=min(base_sell_price,position.current_stop_loss)
         else: # TAKE_PROFIT
             trigger_price = position.current_take_profit
 

@@ -3762,45 +3762,45 @@ class SelectionService:
         # 3. 定义所有参数 (使用 'dynamic_' 前缀)
         parameters_to_define = {
             # M(t) 参数
-            'dynamic_w_m1': {'value': '0.3', 'group': 'M_WEIGHTS', 'desc': 'M(t)指标权重: M1-创60日新高占比'},
-            'dynamic_w_m2': {'value': '0.3', 'group': 'M_WEIGHTS', 'desc': 'M(t)指标权重: M2-MA60之上占比'},
+            'dynamic_w_m1': {'value': '0.2', 'group': 'M_WEIGHTS', 'desc': 'M(t)指标权重: M1-创60日新高占比'},
+            'dynamic_w_m2': {'value': '0.35', 'group': 'M_WEIGHTS', 'desc': 'M(t)指标权重: M2-MA60之上占比'},
             'dynamic_w_m3': {'value': '0.25', 'group': 'M_WEIGHTS', 'desc': 'M(t)指标权重: M3-60日回报率中位数'},
-            'dynamic_w_m4': {'value': '0.15', 'group': 'M_WEIGHTS', 'desc': 'M(t)指标权重: M4-20日平均波动率'},
+            'dynamic_w_m4': {'value': '0.2', 'group': 'M_WEIGHTS', 'desc': 'M(t)指标权重: M4-20日平均波动率'},
             'dynamic_m_lookback': {'value': '750', 'group': 'M_PARAMS', 'desc': 'M(t)历史回看周期(约3年)'},
 
             # 动态权重 N_i(M(t)) 参数
-            'dynamic_c_MT': {'value': '1.0', 'group': 'N_ATTRACTION', 'desc': '吸引力函数强度系数: 趋势动能'},
-            'dynamic_c_BO': {'value': '1.0', 'group': 'N_ATTRACTION', 'desc': '吸引力函数强度系数: 强势突破'},
-            'dynamic_c_QD': {'value': '1.0', 'group': 'N_ATTRACTION', 'desc': '吸引力函数强度系数: 质量防御'},
-            'dynamic_c_MR': {'value': '1.0', 'group': 'N_ATTRACTION', 'desc': '吸引力函数强度系数: 均值回归'},
-            'dynamic_sigma_MR': {'value': '0.3', 'group': 'N_PARAMS', 'desc': '均值回归策略适用范围宽度'},
-            'dynamic_tau': {'value': '0.5', 'group': 'N_PARAMS', 'desc': 'Softmax温度系数(控制切换灵敏度)'},
+            'dynamic_c_MT': {'value': '1.2', 'group': 'N_ATTRACTION', 'desc': '吸引力函数强度系数: 趋势动能'},
+            'dynamic_c_BO': {'value': '0.9', 'group': 'N_ATTRACTION', 'desc': '吸引力函数强度系数: 强势突破'},
+            'dynamic_c_QD': {'value': '1.1', 'group': 'N_ATTRACTION', 'desc': '吸引力函数强度系数: 质量防御'},
+            'dynamic_c_MR': {'value': '0.8', 'group': 'N_ATTRACTION', 'desc': '吸引力函数强度系数: 均值回归'},
+            'dynamic_sigma_MR': {'value': '0.25', 'group': 'N_PARAMS', 'desc': '均值回归策略适用范围宽度'},
+            'dynamic_tau': {'value': '0.2', 'group': 'N_PARAMS', 'desc': 'Softmax温度系数(控制切换灵敏度)'},
 
             # 维度内部因子权重 (k_ij)
-            'dynamic_k_MT1': {'value': '0.4', 'group': 'K_WEIGHTS_MT', 'desc': '趋势动能-MA20斜率权重'},
+            'dynamic_k_MT1': {'value': '0.5', 'group': 'K_WEIGHTS_MT', 'desc': '趋势动能-MA20斜率权重'},
             'dynamic_k_MT2': {'value': '0.3', 'group': 'K_WEIGHTS_MT', 'desc': '趋势动能-均线排列权重'},
-            'dynamic_k_MT3': {'value': '0.3', 'group': 'K_WEIGHTS_MT', 'desc': '趋势动能-ADX确认权重'},
-            'dynamic_k_BO1': {'value': '0.4', 'group': 'K_WEIGHTS_BO', 'desc': '强势突破-突破强度权重'},
-            'dynamic_k_BO2': {'value': '0.4', 'group': 'K_WEIGHTS_BO', 'desc': '强势突破-成交量激增权重'},
+            'dynamic_k_MT3': {'value': '0.2', 'group': 'K_WEIGHTS_MT', 'desc': '趋势动能-ADX确认权重'},
+            'dynamic_k_BO1': {'value': '0.45', 'group': 'K_WEIGHTS_BO', 'desc': '强势突破-突破强度权重'},
+            'dynamic_k_BO2': {'value': '0.35', 'group': 'K_WEIGHTS_BO', 'desc': '强势突破-成交量激增权重'},
             'dynamic_k_BO3': {'value': '0.2', 'group': 'K_WEIGHTS_BO', 'desc': '强势突破-动能加速度权重'},
-            'dynamic_k_MR1': {'value': '0.4', 'group': 'K_WEIGHTS_MR', 'desc': '均值回归-RSI超卖权重'},
-            'dynamic_k_MR2': {'value': '0.3', 'group': 'K_WEIGHTS_MR', 'desc': '均值回归-负向偏离度权重'},
-            'dynamic_k_MR3': {'value': '0.3', 'group': 'K_WEIGHTS_MR', 'desc': '均值回归-布林下轨支撑权重'},
-            'dynamic_k_QD1': {'value': '0.4', 'group': 'K_WEIGHTS_QD', 'desc': '质量防御-低波动率权重'},
-            'dynamic_k_QD2': {'value': '0.3', 'group': 'K_WEIGHTS_QD', 'desc': '质量防御-最大回撤权重'},
-            'dynamic_k_QD3': {'value': '0.3', 'group': 'K_WEIGHTS_QD', 'desc': '质量防御-下行风险权重'},
+            'dynamic_k_MR1': {'value': '0.3', 'group': 'K_WEIGHTS_MR', 'desc': '均值回归-RSI超卖权重'},
+            'dynamic_k_MR2': {'value': '0.5', 'group': 'K_WEIGHTS_MR', 'desc': '均值回归-负向偏离度权重'},
+            'dynamic_k_MR3': {'value': '0.2', 'group': 'K_WEIGHTS_MR', 'desc': '均值回归-布林下轨支撑权重'},
+            'dynamic_k_QD1': {'value': '0.45', 'group': 'K_WEIGHTS_QD', 'desc': '质量防御-低波动率权重'},
+            'dynamic_k_QD2': {'value': '0.35', 'group': 'K_WEIGHTS_QD', 'desc': '质量防御-最大回撤权重'},
+            'dynamic_k_QD3': {'value': '0.2', 'group': 'K_WEIGHTS_QD', 'desc': '质量防御-下行风险权重'},
             
             # 交易预案参数
             # 'dynamic_k_drop': {'value': '0.3', 'group': 'PLAN_PARAMS', 'desc': 'MIOP低开容忍系数'},
             # 'dynamic_k_gap': {'value': '0.5', 'group': 'PLAN_PARAMS', 'desc': 'MAOP高开容忍系数'},
-            'dynamic_miopmaop_k_gap_base_mt': {'value': '0.7', 'group': 'MIOPMAOP_BASE', 'desc': '动态开盘区间-趋势动能-高开容忍度'},
+            'dynamic_miopmaop_k_gap_base_mt': {'value': '0.6', 'group': 'MIOPMAOP_BASE', 'desc': '动态开盘区间-趋势动能-高开容忍度'},
             'dynamic_miopmaop_k_drop_base_mt': {'value': '0.2', 'group': 'MIOPMAOP_BASE', 'desc': '动态开盘区间-趋势动能-低开容忍度'},
-            'dynamic_miopmaop_k_gap_base_bo': {'value': '2.0', 'group': 'MIOPMAOP_BASE', 'desc': '动态开盘区间-强势突破-高开容忍度'},
+            'dynamic_miopmaop_k_gap_base_bo': {'value': '1.5', 'group': 'MIOPMAOP_BASE', 'desc': '动态开盘区间-强势突破-高开容忍度'},
             'dynamic_miopmaop_k_drop_base_bo': {'value': '0.1', 'group': 'MIOPMAOP_BASE', 'desc': '动态开盘区间-强势突破-低开容忍度'},
-            'dynamic_miopmaop_k_gap_base_mr': {'value': '0.1', 'group': 'MIOPMAOP_BASE', 'desc': '动态开盘区间-均值回归-高开容忍度'},
-            'dynamic_miopmaop_k_drop_base_mr': {'value': '2.0', 'group': 'MIOPMAOP_BASE', 'desc': '动态开盘区间-均值回归-低开容忍度'},
-            'dynamic_miopmaop_k_gap_base_qd': {'value': '0.2', 'group': 'MIOPMAOP_BASE', 'desc': '动态开盘区间-质量防御-高开容忍度'},
-            'dynamic_miopmaop_k_drop_base_qd': {'value': '0.2', 'group': 'MIOPMAOP_BASE', 'desc': '动态开盘区间-质量防御-低开容忍度'},
+            'dynamic_miopmaop_k_gap_base_mr': {'value': '0.05', 'group': 'MIOPMAOP_BASE', 'desc': '动态开盘区间-均值回归-高开容忍度'},
+            'dynamic_miopmaop_k_drop_base_mr': {'value': '1.8', 'group': 'MIOPMAOP_BASE', 'desc': '动态开盘区间-均值回归-低开容忍度'},
+            'dynamic_miopmaop_k_gap_base_qd': {'value': '0.15', 'group': 'MIOPMAOP_BASE', 'desc': '动态开盘区间-质量防御-高开容忍度'},
+            'dynamic_miopmaop_k_drop_base_qd': {'value': '0.15', 'group': 'MIOPMAOP_BASE', 'desc': '动态开盘区间-质量防御-低开容忍度'},
             
             # 筛选与计算参数
             'dynamic_lookback_new_stock': {'value': '60', 'group': 'FILTERS', 'desc': '次新股定义天数(自然日)'},
@@ -6457,16 +6457,16 @@ class DecisionOrderService:
             'k_slip': '0.002',
             'lookback_atr': '14',
             # 新版动态风险参数
-            'risk_adj_tp_pct_min': '0.05',
-            'risk_adj_tp_pct_max': '0.25',
-            'risk_adj_sl_atr_min': '1.5',
-            'risk_adj_sl_atr_max': '3.5',
-            'risk_adj_max_loss_pct': '0.10',
+            'risk_adj_tp_pct_min': '0.07',
+            'risk_adj_tp_pct_max': '0.15',
+            'risk_adj_sl_atr_min': '1.2',
+            'risk_adj_sl_atr_max': '2.2',
+            'risk_adj_max_loss_pct': '0.08',
             # 全新动态仓位参数
             'ORIGINAL_MAX_POSITIONS': '5',
             'MIN_POSITIONS_COUNT': '1',
-            'RISK_ADJ_POS_FLOOR_PCT': '0.1',
-            'RISK_ADJ_CAPITAL_FLOOR_PCT': '0.6',
+            'RISK_ADJ_POS_FLOOR_PCT': '0.2',
+            'RISK_ADJ_CAPITAL_FLOOR_PCT': '0.5',
         }
       
         db_params = {p.param_name: p.param_value for p in StrategyParameters.objects.all()}
@@ -6754,11 +6754,11 @@ class DecisionOrderService:
             'lookback_atr': {'value': '14', 'group': 'INDICATORS', 'desc': 'ATR计算周期'},
             
             # 新版 M(t) 驱动的动态风险参数
-            'risk_adj_tp_pct_min': {'value': '0.05', 'group': 'RISK_ADJUSTED', 'desc': 'M(t)驱动-最小止盈目标百分比 (熊市)'},
-            'risk_adj_tp_pct_max': {'value': '0.25', 'group': 'RISK_ADJUSTED', 'desc': 'M(t)驱动-最大止盈目标百分比 (牛市)'},
-            'risk_adj_sl_atr_min': {'value': '1.5', 'group': 'RISK_ADJUSTED', 'desc': 'M(t)驱动-最小ATR止损乘数 (熊市)'},
-            'risk_adj_sl_atr_max': {'value': '3.5', 'group': 'RISK_ADJUSTED', 'desc': 'M(t)驱动-最大ATR止损乘数 (牛市)'},
-            'risk_adj_max_loss_pct': {'value': '0.10', 'group': 'RISK_ADJUSTED', 'desc': 'M(t)驱动-绝对最大亏损百分比'},
+            'risk_adj_tp_pct_min': {'value': '0.07', 'group': 'RISK_ADJUSTED', 'desc': 'M(t)驱动-最小止盈目标百分比 (熊市)'},
+            'risk_adj_tp_pct_max': {'value': '0.15', 'group': 'RISK_ADJUSTED', 'desc': 'M(t)驱动-最大止盈目标百分比 (牛市)'},
+            'risk_adj_sl_atr_min': {'value': '1.2', 'group': 'RISK_ADJUSTED', 'desc': 'M(t)驱动-最小ATR止损乘数 (熊市)'},
+            'risk_adj_sl_atr_max': {'value': '2.2', 'group': 'RISK_ADJUSTED', 'desc': 'M(t)驱动-最大ATR止损乘数 (牛市)'},
+            'risk_adj_max_loss_pct': {'value': '0.08', 'group': 'RISK_ADJUSTED', 'desc': 'M(t)驱动-绝对最大亏损百分比'},
             # --- 全新动态仓位管理参数 ---
             'ORIGINAL_MAX_POSITIONS': {'value': '5', 'group': 'DYNAMIC_POS_MGMT', 'desc': '【动态仓位】策略基准最大持仓数'},
             'MIN_POSITIONS_COUNT': {'value': '1', 'group': 'DYNAMIC_POS_MGMT', 'desc': '【动态仓位】最小持仓数硬下限'},
@@ -7761,8 +7761,8 @@ def start():
 
     # 添加任务
     scheduler.add_job(run_job_wrapper, 'cron', day='*', hour=19, minute=0, args=[selection_job, '日终选股'])
-    scheduler.add_job(run_job_wrapper, 'cron', day='*', hour=6, minute=30, args=[premarket_fix_job, '盘前校准'])
-    scheduler.add_job(run_job_wrapper, 'cron', day='*', hour=7, minute=0, args=[email_jobs, '预案推送'])
+    scheduler.add_job(run_job_wrapper, 'cron', day='*', hour=6, minute=10, args=[premarket_fix_job, '盘前校准'])
+    scheduler.add_job(run_job_wrapper, 'cron', day='*', hour=6, minute=30, args=[email_jobs, '预案推送'])
     #scheduler.add_job(run_job_wrapper, 'cron', day='*', hour=9, minute=25, second=5, args=[opening_decision_job, '开盘决策'])
     
     # --- 每日动态任务的调度器 ---
@@ -8025,6 +8025,11 @@ class SimulateTradeService:
                         
                         if self.last_buy_trade_id:
                             decision_order_service.calculate_stop_profit_loss(self.last_buy_trade_id)
+                            # 在止盈止损计算完毕后，获取更新后的持仓对象
+                            trade_log = TradeLog.objects.get(pk=self.last_buy_trade_id)
+                            position = trade_log.position
+                            # 现在才调用日志记录函数，此时 position 对象已包含正确的止盈止损价
+                            handler._record_buy_operation(position)
                         else:
                             break
 
@@ -8036,14 +8041,15 @@ class SimulateTradeService:
                     handler.current_price_node = 'HIGH'
                     monitor_exit_service.monitor_and_exit_positions()
 
-                    self._record_daily_log()
+                    
 
 
                     logger.info(f"-> [T日 盘后选股] 基于 {self.current_date} 的数据为下一交易日做准备...")
                     selection_service = SelectionService(trade_date=self.current_date, mode='backtest')
                     selection_service.run_selection()
-
                     
+                    self._record_daily_log()
+
                     # --- 邮件发送逻辑 ---
                     is_last_day = (i == len(trading_days) - 1)
                     current_month = current_day.month
@@ -8260,8 +8266,7 @@ class SimulateTradeHandler(ITradeHandler):
         
         self.service.last_buy_trade_id = trade_log.trade_id
 
-        # --- 新增: 记录买入操作日志 ---
-        self._record_buy_operation(new_position)
+        
 
     @transaction.atomic
     def sell_stock_by_market_price(self, position: Position, reason: str) -> None:
@@ -8320,15 +8325,17 @@ class SimulateTradeHandler(ITradeHandler):
             m_value = None
         
         # 获取因子得分
-        factor_scores_qs = DailyFactorValues.objects.filter(
+        # 步骤1: 先获取该股票当天的所有因子值
+        all_factor_scores_qs = DailyFactorValues.objects.filter(
             stock_code_id=position.stock_code_id,
             trade_date=t_minus_1
-        ).exclude(factor_code__factor_code__startswith='dynamic_M') # 排除M值本身
+        )
         
-        scores_str = "|".join([
-            f"{f.factor_code.factor_code}:{f.norm_score:.2f}" 
-            for f in factor_scores_qs.select_related('factor_code')
-        ])
+        # 步骤2: 在 Python 层面进行过滤和格式化
+        scores_list = []
+        for f in all_factor_scores_qs:
+            scores_list.append(f"{f.factor_code_id}:{f.norm_score:.2f}")
+        scores_str = "|".join(scores_list)
         
         # 获取止盈止损率 (在调用此函数时，Position应已被更新)
         profit_rate = (position.current_take_profit / position.entry_price) - 1 if position.entry_price > 0 else 0
@@ -8368,6 +8375,12 @@ class SimulateTradeHandler(ITradeHandler):
             logger.error(f"严重错误：无法找到 Position ID {position.position_id} 对应的买入操作日志！")
             m_value, scores_str, profit_rate, loss_rate = None, "", None, None
 
+        exit_reason_for_log = None
+        if reason == TradeLog.ReasonChoices.TAKE_PROFIT:
+            exit_reason_for_log = BacktestOperationLog.ExitReason.TAKE_PROFIT
+        elif reason == TradeLog.ReasonChoices.STOP_LOSS:
+            exit_reason_for_log = BacktestOperationLog.ExitReason.STOP_LOSS
+
         BacktestOperationLog.objects.create(
             backtest_run_id=self.service.backtest_run_id,
             position_id_ref=position.position_id,
@@ -8375,7 +8388,7 @@ class SimulateTradeHandler(ITradeHandler):
             stock_name=position.stock_code.stock_name,
             trade_date=self.service.current_date,
             direction=BacktestOperationLog.Direction.SELL,
-            exit_reason=reason,
+            exit_reason=exit_reason_for_log,
             profit_rate=profit_rate,
             loss_rate=loss_rate,
             buy_date_m_value=m_value,
