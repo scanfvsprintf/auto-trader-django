@@ -31,7 +31,7 @@ class BacktestReporter:
         self.current_date = current_date
         self.initial_capital = initial_capital
         self.email_handler = EmailHandler()
-        self.recipients = ['876858298@qq.com']#'850696281@qq.com','285173686@qq.com'
+        self.recipients = ['876858298@qq.com','850696281@qq.com']#,'285173686@qq.com'
     def _execute_query(self, query: str, params: list = None) -> list[dict]:
         """在指定 schema 中执行原生 SQL 查询并返回结果"""
         with connections['default'].cursor() as cursor:
