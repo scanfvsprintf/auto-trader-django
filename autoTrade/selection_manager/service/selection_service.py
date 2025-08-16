@@ -165,11 +165,11 @@ class SelectionService:
 
             # 动态权重 N_i(M(t)) 参数
             'dynamic_c_MT': {'value': '1.2', 'group': 'N_ATTRACTION', 'desc': '吸引力函数强度系数: 趋势动能'},
-            'dynamic_c_BO': {'value': '0.9', 'group': 'N_ATTRACTION', 'desc': '吸引力函数强度系数: 强势突破'},
+            'dynamic_c_BO': {'value': '0.7', 'group': 'N_ATTRACTION', 'desc': '吸引力函数强度系数: 强势突破'},
             'dynamic_c_QD': {'value': '1.1', 'group': 'N_ATTRACTION', 'desc': '吸引力函数强度系数: 质量防御'},
-            'dynamic_c_MR': {'value': '0.8', 'group': 'N_ATTRACTION', 'desc': '吸引力函数强度系数: 均值回归'},
+            'dynamic_c_MR': {'value': '1.5', 'group': 'N_ATTRACTION', 'desc': '吸引力函数强度系数: 均值回归'},
             'dynamic_sigma_MR': {'value': '0.25', 'group': 'N_PARAMS', 'desc': '均值回归策略适用范围宽度'},
-            'dynamic_tau': {'value': '0.2', 'group': 'N_PARAMS', 'desc': 'Softmax温度系数(控制切换灵敏度)'},
+            'dynamic_tau': {'value': '0.7', 'group': 'N_PARAMS', 'desc': 'Softmax温度系数(控制切换灵敏度)'},
 
             # 维度内部因子权重 (k_ij)
             'dynamic_k_MT1': {'value': '0.5', 'group': 'K_WEIGHTS_MT', 'desc': '趋势动能-MA20斜率权重'},
@@ -189,10 +189,10 @@ class SelectionService:
             # 'dynamic_k_drop': {'value': '0.3', 'group': 'PLAN_PARAMS', 'desc': 'MIOP低开容忍系数'},
             # 'dynamic_k_gap': {'value': '0.5', 'group': 'PLAN_PARAMS', 'desc': 'MAOP高开容忍系数'},
             'dynamic_miopmaop_k_gap_base_mt': {'value': '0.6', 'group': 'MIOPMAOP_BASE', 'desc': '动态开盘区间-趋势动能-高开容忍度'},
-            'dynamic_miopmaop_k_drop_base_mt': {'value': '0.2', 'group': 'MIOPMAOP_BASE', 'desc': '动态开盘区间-趋势动能-低开容忍度'},
+            'dynamic_miopmaop_k_drop_base_mt': {'value': '0.5', 'group': 'MIOPMAOP_BASE', 'desc': '动态开盘区间-趋势动能-低开容忍度'},
             'dynamic_miopmaop_k_gap_base_bo': {'value': '1.5', 'group': 'MIOPMAOP_BASE', 'desc': '动态开盘区间-强势突破-高开容忍度'},
             'dynamic_miopmaop_k_drop_base_bo': {'value': '0.1', 'group': 'MIOPMAOP_BASE', 'desc': '动态开盘区间-强势突破-低开容忍度'},
-            'dynamic_miopmaop_k_gap_base_mr': {'value': '0.05', 'group': 'MIOPMAOP_BASE', 'desc': '动态开盘区间-均值回归-高开容忍度'},
+            'dynamic_miopmaop_k_gap_base_mr': {'value': '0.01', 'group': 'MIOPMAOP_BASE', 'desc': '动态开盘区间-均值回归-高开容忍度'},
             'dynamic_miopmaop_k_drop_base_mr': {'value': '1.8', 'group': 'MIOPMAOP_BASE', 'desc': '动态开盘区间-均值回归-低开容忍度'},
             'dynamic_miopmaop_k_gap_base_qd': {'value': '0.15', 'group': 'MIOPMAOP_BASE', 'desc': '动态开盘区间-质量防御-高开容忍度'},
             'dynamic_miopmaop_k_drop_base_qd': {'value': '0.15', 'group': 'MIOPMAOP_BASE', 'desc': '动态开盘区间-质量防御-低开容忍度'},
