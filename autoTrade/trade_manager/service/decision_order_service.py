@@ -153,12 +153,12 @@ class DecisionOrderService:
         # iii. 计算单位名义本金风险缩放因子 S_cap(M(t))
         S_min_cap = self.params['RISK_ADJ_CAPITAL_FLOOR_PCT']
         S_cap = S_min_cap + (1 - S_min_cap) * (M_t + 1) / 2
-        if M_t>0.:
-            S_cap=1
-        elif M_t>-0.3:
-            S_cap=0.5
+        if M_t > Decimal('0.0'):
+            S_cap = Decimal('1.0')
+        elif M_t > Decimal('-0.3'):
+            S_cap = Decimal('0.5')
         else:
-            S_cap=0
+            S_cap = Decimal('0.0')
         # iv. 计算动态调整后的名义本金
         adjusted_unit_principal = baseline_unit_principal * S_cap
         
