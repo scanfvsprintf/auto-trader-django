@@ -6991,7 +6991,7 @@ class MDistributionBacktestService:
         self.end_date = date.fromisoformat(end_date)
         self.backtest_run_id = f"m_dist_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
         self.max_holding_days = 90
-
+    def _get_next_trading_day(self, from_date: date) -> date | None: return (DailyQuotes.objects .filter(trade_date__gte=from_date) .order_by('trade_date') .values_list('trade_date', flat=True) .first())
     def _setup_backtest_schema(self):
         """
         【最终修正版】在 Schema 中准备回测环境，并集成索引/约束优化逻辑。
@@ -7108,7 +7108,7 @@ class MDistributionBacktestService:
                 ).values_list('trade_date', flat=True).distinct().order_by('trade_date'))
 
                 logger.info(f"--- 2. 开始日度回测循环 ({len(trading_days)}天) ---")
-                
+                last_sent_month = None
                 for i, t_minus_1 in enumerate(trading_days):
                     logger.info(f"\n{'='*20} 模拟预案日: {t_minus_1} ({i+1}/{len(trading_days)}) {'='*20}")
 
@@ -7146,7 +7146,6 @@ class MDistributionBacktestService:
                     last_sent_month = current_month
                     # --- 邮件发送逻辑结束 ---
 
-            reporter.generate_and_send_report()
 
         except Exception as e:
             logger.critical(f"M值分布回测过程中发生严重错误: {e}", exc_info=True)
@@ -7162,15 +7161,28 @@ class MDistributionBacktestService:
         stock_code = plan_obj.stock_code_id
         logger.debug(f"  -> 开始追溯股票: {stock_code}")
 
+        # try:
+        #     entry_day_quote = DailyQuotes.objects.get(stock_code_id=stock_code, trade_date=plan_obj.plan_date)
+        #     entry_date = entry_day_quote.trade_date
+        #     entry_price = entry_day_quote.open
+        # except DailyQuotes.DoesNotExist:
+        #     logger.warning(f"    无法找到 {plan_obj.plan_date} 的行情数据，无法为 {stock_code} 入场。")
+        #     return
+        actual_entry_date = self._get_next_trading_day(plan_obj.plan_date)
+        if not actual_entry_date:
+            logger.warning(f"    从 {plan_obj.plan_date} 起未找到后续交易日，跳过 {stock_code}。")
+            return
         try:
-            entry_day_quote = DailyQuotes.objects.get(stock_code_id=stock_code, trade_date=plan_obj.plan_date)
-            entry_date = entry_day_quote.trade_date
+            entry_day_quote = DailyQuotes.objects.get(stock_code_id=stock_code, trade_date=actual_entry_date)
+            entry_date = actual_entry_date
             entry_price = entry_day_quote.open
         except DailyQuotes.DoesNotExist:
-            logger.warning(f"    无法找到 {plan_obj.plan_date} 的行情数据，无法为 {stock_code} 入场。")
+            logger.warning(f"    无法在 {actual_entry_date} 找到 {stock_code} 的行情数据，跳过。")
             return
-
         try:
+            if entry_price<plan_obj.miop or entry_price>plan_obj.maop:
+                logger.debug(f"{stock_code}该股票不在开盘区间跳过此股票。")
+                return
             tp_price, sl_price, tp_rate, sl_rate = self._get_simulated_stop_profit_loss(stock_code, entry_date, entry_price)
         except ValueError as e:
             logger.warning(f"    无法为 {stock_code} 计算止盈止损: {e}，跳过此股票。")
@@ -7188,12 +7200,13 @@ class MDistributionBacktestService:
 
         exit_info = None
         for i, quote_dict in enumerate(future_quotes):
-            if quote_dict['high'] >= tp_price:
-                exit_info = {'date': quote_dict['trade_date'], 'price': tp_price, 'reason': 'TAKE_PROFIT', 'period': i + 1}
-                break
             if quote_dict['low'] <= sl_price:
                 exit_info = {'date': quote_dict['trade_date'], 'price': sl_price, 'reason': 'STOP_LOSS', 'period': i + 1}
                 break
+            if quote_dict['high'] >= tp_price:
+                exit_info = {'date': quote_dict['trade_date'], 'price': tp_price, 'reason': 'TAKE_PROFIT', 'period': i + 1}
+                break
+            
         
         if not exit_info:
             last_quote = future_quotes[-1]

@@ -29,16 +29,15 @@ class MDistributionReporter:
 
     def _fetch_data(self) -> pd.DataFrame:
         """从数据库获取回测结果"""
-        with use_backtest_schema(self.backtest_run_id):
-            logs = MDistributionBacktestLog.objects.filter(
-                backtest_run_id=self.backtest_run_id
-            ).exclude(
-                exit_reason=MDistributionBacktestLog.ExitReason.END_OF_PERIOD
-            )
-            if not logs.exists():
-                return pd.DataFrame()
-            
-            return pd.DataFrame.from_records(logs.values())
+        logs = MDistributionBacktestLog.objects.filter(
+            backtest_run_id=self.backtest_run_id
+        ).exclude(
+            exit_reason=MDistributionBacktestLog.ExitReason.END_OF_PERIOD
+        )
+        if not logs.exists():
+            return pd.DataFrame()
+        
+        return pd.DataFrame.from_records(logs.values())
 
     def _analyze_data(self, df: pd.DataFrame) -> pd.DataFrame:
         """对数据进行分箱和统计分析"""

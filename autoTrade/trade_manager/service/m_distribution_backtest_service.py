@@ -194,7 +194,6 @@ class MDistributionBacktestService:
                     last_sent_month = current_month
                     # --- 邮件发送逻辑结束 ---
 
-            reporter.generate_and_send_report()
 
         except Exception as e:
             logger.critical(f"M值分布回测过程中发生严重错误: {e}", exc_info=True)
