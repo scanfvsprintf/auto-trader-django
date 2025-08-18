@@ -156,7 +156,7 @@ class MDistributionBacktestService:
                 ).values_list('trade_date', flat=True).distinct().order_by('trade_date'))
 
                 logger.info(f"--- 2. 开始日度回测循环 ({len(trading_days)}天) ---")
-                
+                last_sent_month = None
                 for i, t_minus_1 in enumerate(trading_days):
                     logger.info(f"\n{'='*20} 模拟预案日: {t_minus_1} ({i+1}/{len(trading_days)}) {'='*20}")
 
@@ -246,12 +246,13 @@ class MDistributionBacktestService:
 
         exit_info = None
         for i, quote_dict in enumerate(future_quotes):
-            if quote_dict['high'] >= tp_price:
-                exit_info = {'date': quote_dict['trade_date'], 'price': tp_price, 'reason': 'TAKE_PROFIT', 'period': i + 1}
-                break
             if quote_dict['low'] <= sl_price:
                 exit_info = {'date': quote_dict['trade_date'], 'price': sl_price, 'reason': 'STOP_LOSS', 'period': i + 1}
                 break
+            if quote_dict['high'] >= tp_price:
+                exit_info = {'date': quote_dict['trade_date'], 'price': tp_price, 'reason': 'TAKE_PROFIT', 'period': i + 1}
+                break
+            
         
         if not exit_info:
             last_quote = future_quotes[-1]
