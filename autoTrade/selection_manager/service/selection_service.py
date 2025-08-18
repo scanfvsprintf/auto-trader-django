@@ -963,7 +963,7 @@ class SelectionService:
                 ssw = {'MT': 0, 'BO': 0, 'MR': 0, 'QD': 1.0}
             else:
                 ssw = {k: v / total_pdcv for k, v in pdcv.items()}
- 
+            strategy_dna_str = "|".join([f"{k}:{v:.2f}" for k, v in ssw.items()])
             # 步骤3: 加权合成动态k值
             # ... (此部分逻辑保持不变)
             k_gap_dynamic = (
@@ -997,7 +997,8 @@ class SelectionService:
                 'rank': len(plans) + 1,
                 'final_score': top_stocks_scores.get(stock_code),
                 'miop': miop,
-                'maop': maop
+                'maop': maop,
+                'strategy_dna': strategy_dna_str
             })
             
             # 更新日志，现在ATR值会是正常的
@@ -1042,7 +1043,8 @@ class SelectionService:
                     rank=row['rank'], final_score=Decimal(str(row['final_score'])),
                     miop=Decimal(str(row['miop'])).quantize(Decimal('0.01')),
                     maop=Decimal(str(row['maop'])).quantize(Decimal('0.01')),
-                    status=DailyTradingPlan.StatusChoices.PENDING
+                    status=DailyTradingPlan.StatusChoices.PENDING,
+                    strategy_dna=row['strategy_dna']
                 )
             )
         DailyTradingPlan.objects.bulk_create(plans_to_create)

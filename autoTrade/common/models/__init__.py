@@ -26,5 +26,6 @@ __all__ = [
     'CorporateAction',
     'BacktestDailyLog',
     'BacktestOperationLog',
+    "MDistributionBacktestLog",
     'IndexQuotesCsi300'
 ]

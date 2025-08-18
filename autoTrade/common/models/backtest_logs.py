@@ -154,3 +154,90 @@ class BacktestOperationLog(models.Model):
             models.Index(fields=['backtest_run_id', 'position_id_ref']),
         ]
 
+class MDistributionBacktestLog(models.Model):
+    """
+    M值胜率分布回测的专用日志表。
+    
+    说明: 每一条记录代表一次完整的模拟交易（从预案生成到最终平仓）。
+    这张表是M值胜率分布回测报告的唯一数据源。
+    """
+    class ExitReason(models.TextChoices):
+        TAKE_PROFIT = 'TAKE_PROFIT', '止盈'
+        STOP_LOSS = 'STOP_LOSS', '止损'
+        END_OF_PERIOD = 'END_OF_PERIOD', '达到最大持有期'
+    backtest_run_id = models.CharField(
+        max_length=50,
+        db_index=True,
+        help_text="回测运行的唯一标识符"
+    )
+    plan_date = models.DateField(
+        help_text="预案生成日期 (T-1日)"
+    )
+    stock_code = models.CharField(
+        max_length=50,
+        help_text="股票代码"
+    )
+    stock_name = models.CharField(
+        max_length=50,
+        help_text="股票名称"
+    )
+    m_value_at_plan = models.DecimalField(
+        max_digits=18,
+        decimal_places=10,
+        help_text="预案生成日的市场M(t)值"
+    )
+    strategy_dna = models.CharField(
+        max_length=255,
+        help_text="策略DNA贡献度, 格式: MT:0.70|BO:0.20|MR:0.05|QD:0.05"
+    )
+    entry_date = models.DateField(
+        help_text="模拟入场日期 (T日)"
+    )
+    entry_price = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        help_text="模拟入场价格 (T日开盘价)"
+    )
+    exit_date = models.DateField(
+        help_text="模拟出场日期"
+    )
+    exit_price = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        help_text="模拟出场价格"
+    )
+    exit_reason = models.CharField(
+        max_length=20,
+        choices=ExitReason.choices,
+        help_text="平仓原因"
+    )
+    holding_period = models.IntegerField(
+        help_text="持有天数（交易日）"
+    )
+    # 预设的止盈止损率，用于计算期望收益
+    preset_take_profit_rate = models.DecimalField(
+        max_digits=10,
+        decimal_places=4,
+        help_text="根据策略计算出的预设止盈率"
+    )
+    preset_stop_loss_rate = models.DecimalField(
+        max_digits=10,
+        decimal_places=4,
+        help_text="根据策略计算出的预设止损率"
+    )
+    # 实际收益率
+    actual_return_rate = models.DecimalField(
+        max_digits=10,
+        decimal_places=4,
+        help_text="该笔交易的实际收益率 ( (exit_price / entry_price) - 1 )"
+    )
+    created_at = models.DateTimeField(
+        auto_now_add=True
+    )
+    class Meta:
+        db_table = 'tb_m_distribution_backtest_log'
+        verbose_name = 'M值分布回测日志'
+        verbose_name_plural = verbose_name
+        indexes = [
+            models.Index(fields=['backtest_run_id', 'plan_date']),
+        ]

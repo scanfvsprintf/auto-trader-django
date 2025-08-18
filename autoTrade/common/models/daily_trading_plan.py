@@ -44,7 +44,12 @@ class DailyTradingPlan(models.Model):
         default=StatusChoices.PENDING,
         help_text="预案状态。枚举: pending(待执行), executed(已执行买入), cancelled(当日未满足条件作废)"
     )
-
+    strategy_dna = models.CharField(
+        max_length=255,
+        null=True,  # 允许为空，确保对旧数据和现有代码的兼容性
+        blank=True, # 允许为空
+        help_text="策略DNA贡献度, 格式: MT:0.70|BO:0.20|MR:0.05|QD:0.05"
+    )
     def __str__(self):
         return f"Plan for {self.stock_code} on {self.plan_date} (Rank: {self.rank})"
 

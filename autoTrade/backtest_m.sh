@@ -1,0 +1,1 @@
+nohup python3.10 manage.py run_m_distribution_backtest --start 2022-01-01 --end 2025-08-15 >logs/backTestM.log &
