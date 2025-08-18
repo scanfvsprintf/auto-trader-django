@@ -229,6 +229,9 @@ class MDistributionBacktestService:
             logger.warning(f"    无法在 {actual_entry_date} 找到 {stock_code} 的行情数据，跳过。")
             return
         try:
+            if entry_price<plan_obj.miop or entry_price>plan_obj.maop:
+                logger.debug(f"{stock_code}该股票不在开盘区间跳过此股票。")
+                return
             tp_price, sl_price, tp_rate, sl_rate = self._get_simulated_stop_profit_loss(stock_code, entry_date, entry_price)
         except ValueError as e:
             logger.warning(f"    无法为 {stock_code} 计算止盈止损: {e}，跳过此股票。")
