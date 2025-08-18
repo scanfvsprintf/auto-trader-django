@@ -83,7 +83,7 @@ class MDistributionReporter:
                 **dna_proportions
             })
 
-        analysis_df = df.groupby('m_interval').apply(agg_func).reset_index()
+        analysis_df = df.groupby('m_interval',observed=True).apply(agg_func, include_groups=False).reset_index()
         return analysis_df
 
     def _generate_plots_base64(self, analysis_df: pd.DataFrame) -> tuple[str, str]:
