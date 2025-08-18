@@ -19,6 +19,7 @@ from trade_manager.service.decision_order_service import DecisionOrderService
 from .db_utils import use_backtest_schema
 from .m_distribution_reporter import MDistributionReporter
 from trade_manager.service.simulate_trade import SimulateTradeService
+from trade_manager.service.simulate_trade_handler import SimulateTradeHandler
 logger = logging.getLogger(__name__)
 
 class MDistributionBacktestService:
@@ -38,7 +39,7 @@ class MDistributionBacktestService:
         self.end_date = date.fromisoformat(end_date)
         self.backtest_run_id = f"m_dist_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
         self.max_holding_days = 90
-
+    def _get_next_trading_day(self, from_date: date) -> date | None: return (DailyQuotes.objects .filter(trade_date__gte=from_date) .order_by('trade_date') .values_list('trade_date', flat=True) .first())
     def _setup_backtest_schema(self):
         """
         【最终修正版】在 Schema 中准备回测环境，并集成索引/约束优化逻辑。
@@ -174,9 +175,25 @@ class MDistributionBacktestService:
                     # 3. 对每个从数据库读出的预案进行前向追溯
                     for plan in plans_for_today:
                         self._trace_forward_and_log(t_minus_1, plan, selection_service.market_regime_M)
+                    # --- 邮件发送逻辑 ---
+                    is_last_day = (i == len(trading_days) - 1)
+                    current_month = t_minus_1.month
+                    send_mail_flag = False
 
-            logger.info("--- 3. 回测循环结束, 生成报告 ---")
-            reporter = MDistributionReporter(self.backtest_run_id)
+                    if is_last_day:
+                        send_mail_flag = True
+                        logger.info("回测结束，触发最终邮件报告。")
+                    elif last_sent_month is not None and current_month != last_sent_month:
+                        send_mail_flag = True
+                        logger.info(f"月份从 {last_sent_month} 变为 {current_month}，触发月度邮件报告。")
+                    
+                    if send_mail_flag:
+                        reporter = MDistributionReporter(self.backtest_run_id)
+                        reporter.generate_and_send_report()
+                    
+                    last_sent_month = current_month
+                    # --- 邮件发送逻辑结束 ---
+
             reporter.generate_and_send_report()
 
         except Exception as e:
@@ -193,14 +210,24 @@ class MDistributionBacktestService:
         stock_code = plan_obj.stock_code_id
         logger.debug(f"  -> 开始追溯股票: {stock_code}")
 
+        # try:
+        #     entry_day_quote = DailyQuotes.objects.get(stock_code_id=stock_code, trade_date=plan_obj.plan_date)
+        #     entry_date = entry_day_quote.trade_date
+        #     entry_price = entry_day_quote.open
+        # except DailyQuotes.DoesNotExist:
+        #     logger.warning(f"    无法找到 {plan_obj.plan_date} 的行情数据，无法为 {stock_code} 入场。")
+        #     return
+        actual_entry_date = self._get_next_trading_day(plan_obj.plan_date)
+        if not actual_entry_date:
+            logger.warning(f"    从 {plan_obj.plan_date} 起未找到后续交易日，跳过 {stock_code}。")
+            return
         try:
-            entry_day_quote = DailyQuotes.objects.get(stock_code_id=stock_code, trade_date=plan_obj.plan_date)
-            entry_date = entry_day_quote.trade_date
+            entry_day_quote = DailyQuotes.objects.get(stock_code_id=stock_code, trade_date=actual_entry_date)
+            entry_date = actual_entry_date
             entry_price = entry_day_quote.open
         except DailyQuotes.DoesNotExist:
-            logger.warning(f"    无法找到 {plan_obj.plan_date} 的行情数据，无法为 {stock_code} 入场。")
+            logger.warning(f"    无法在 {actual_entry_date} 找到 {stock_code} 的行情数据，跳过。")
             return
-
         try:
             tp_price, sl_price, tp_rate, sl_rate = self._get_simulated_stop_profit_loss(stock_code, entry_date, entry_price)
         except ValueError as e:
@@ -269,8 +296,9 @@ class MDistributionBacktestService:
                 commission=0,
                 stamp_duty=0
             )
-
-            decision_service = DecisionOrderService(handler=None, execution_date=entry_date)
+            dummy_sim_service = SimulateTradeService()
+            dummy_handler = SimulateTradeHandler(dummy_sim_service)
+            decision_service = DecisionOrderService(handler=dummy_handler, execution_date=entry_date)
             decision_service.calculate_stop_profit_loss(trade_id=temp_trade_log.trade_id)
 
             temp_position.refresh_from_db()
