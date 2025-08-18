@@ -188,7 +188,7 @@ class MDistributionBacktestService:
                         logger.info(f"月份从 {last_sent_month} 变为 {current_month}，触发月度邮件报告。")
                     
                     if send_mail_flag:
-                        reporter = MDistributionReporter(self.backtest_run_id)
+                        reporter = MDistributionReporter(self.backtest_run_id,f"{self.start_date}至{t_minus_1}")
                         reporter.generate_and_send_report()
                     
                     last_sent_month = current_month

@@ -456,8 +456,8 @@ class DecisionOrderService:
                 # 4.3 计算绝对最大亏损底线
                 z2_max_loss = aep * (1 - self.params['risk_adj_max_loss_pct'])
               
-                # 4.4 取最严格的止损位（价格最高者）
-                stop_loss_price = max(z1_dynamic_atr, z2_max_loss)
+                # 4.4 取最严格的止损位（价格最高者），但是止损率不能低于6%，避免无限被凌迟
+                stop_loss_price =min(aep *Decimal('0.94'),max(z1_dynamic_atr, z2_max_loss))
               
                 logger.debug(f"[{stock_code}] 止损线比较 (基于M(t)={market_regime_M:.4f}): "
                             f"动态ATR止损(乘数{k_h_dynamic:.2f})={z1_dynamic_atr:.2f}, "

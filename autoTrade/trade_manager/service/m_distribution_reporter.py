@@ -22,8 +22,9 @@ class MDistributionReporter:
     """
     M值胜率分布回测的报告生成与发送器。
     """
-    def __init__(self, backtest_run_id: str):
+    def __init__(self, backtest_run_id: str,date_range_text:str):
         self.backtest_run_id = backtest_run_id
+        self.date_range_text=date_range_text
         self.email_handler = EmailHandler()
         self.recipients = ['876858298@qq.com']
 
@@ -59,8 +60,8 @@ class MDistributionReporter:
             win_rate = win_trades / total_trades if total_trades > 0 else 0
             
             # 计算期望收益率
-            avg_tp_rate = group[group['exit_reason'] == 'TAKE_PROFIT']['preset_take_profit_rate'].mean()
-            avg_sl_rate = group[group['exit_reason'] == 'STOP_LOSS']['preset_stop_loss_rate'].mean()
+            avg_tp_rate = np.nan_to_num(group[group['exit_reason'] == 'TAKE_PROFIT']['preset_take_profit_rate'].mean())
+            avg_sl_rate = np.nan_to_num(group[group['exit_reason'] == 'STOP_LOSS']['preset_stop_loss_rate'].mean())
             
             expected_return = (win_rate * avg_tp_rate - (1 - win_rate) * avg_sl_rate) if total_trades > 0 else 0
 
@@ -100,9 +101,9 @@ class MDistributionReporter:
         # 胜率图
         fig_win, ax_win = plt.subplots(figsize=(12, 6))
         ax_win.plot(analysis_df['m_interval'], analysis_df['win_rate'], marker='o', linestyle='-', color='b')
-        ax_win.set_title('胜率随M值变化趋势', fontsize=16)
-        ax_win.set_xlabel('M值区间', fontsize=12)
-        ax_win.set_ylabel('胜率', fontsize=12)
+        ax_win.set_title('Winning Rate/M Value', fontsize=16)
+        ax_win.set_xlabel('M Value', fontsize=12)
+        ax_win.set_ylabel('Winning Rate', fontsize=12)
         ax_win.yaxis.set_major_formatter(plt.FuncFormatter('{:.0%}'.format))
         ax_win.grid(True)
         plt.xticks(rotation=45)
@@ -115,9 +116,9 @@ class MDistributionReporter:
         # 期望收益图
         fig_exp, ax_exp = plt.subplots(figsize=(12, 6))
         ax_exp.plot(analysis_df['m_interval'], analysis_df['expected_return'], marker='s', linestyle='--', color='g')
-        ax_exp.set_title('期望收益随M值变化趋势', fontsize=16)
-        ax_exp.set_xlabel('M值区间', fontsize=12)
-        ax_exp.set_ylabel('期望收益率', fontsize=12)
+        ax_exp.set_title('Expected Rate/M Value', fontsize=16)
+        ax_exp.set_xlabel('M Value', fontsize=12)
+        ax_exp.set_ylabel('‌Expected Rate of Return‌', fontsize=12)
         ax_exp.yaxis.set_major_formatter(plt.FuncFormatter('{:.2%}'.format))
         ax_exp.axhline(0, color='grey', linestyle=':', linewidth=1)
         ax_exp.grid(True)
@@ -146,7 +147,7 @@ class MDistributionReporter:
             'win_trades': '止盈数',
             'loss_trades': '止损数',
             'win_rate': '胜率',
-            'expected_return': '期望收益',
+            'expected_return': '期望收益率',
             'prop_MT': '趋势动能占比',
             'prop_BO': '强势突破占比',
             'prop_MR': '均值回归占比',
@@ -177,7 +178,7 @@ class MDistributionReporter:
         </head>
         <body>
             <h1>M值胜率分布回测报告</h1>
-            <h2>回测ID: {self.backtest_run_id}</h2>
+            <h2>日期区间: {self.date_range_text}</h2>
             
             <h2>详细数据统计</h2>
             {html_table}
