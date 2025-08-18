@@ -40,9 +40,109 @@ class MDistributionBacktestService:
         self.max_holding_days = 90
 
     def _setup_backtest_schema(self):
-        simulete_service=SimulateTradeService()
-        simulete_service._setup_backtest_schema(self.backtest_run_id,1)
-        simulete_service=None
+        """
+        【最终修正版】在 Schema 中准备回测环境，并集成索引/约束优化逻辑。
+        """
+        logger.info(f"--- 1. 在 Schema '{self.backtest_run_id}' 中准备回测环境 (集成索引优化) ---")
+        
+        with connections['default'].cursor() as cursor:
+            cursor.execute(f'CREATE SCHEMA IF NOT EXISTS "{self.backtest_run_id}";')
+            cursor.execute(f'SET search_path TO "{self.backtest_run_id}";')
+            call_command('migrate')
+        logger.info("表结构创建完成。")
+        tables_to_copy = [
+            StockInfo, DailyQuotes, CorporateAction, FactorDefinitions,
+            StrategyParameters, DailyFactorValues, IndexQuotesCsi300
+        ]
+        
+        logger.info(f"准备从 'public' schema 复制基础数据到 '{self.backtest_run_id}'...")
+        with transaction.atomic(), connections['default'].cursor() as cursor:
+            # 确保后续操作都在新schema下
+            cursor.execute(f'SET search_path TO "{self.backtest_run_id}";')
+            
+            for model in tables_to_copy:
+                table_name = model._meta.db_table
+                logger.info(f"  - 正在处理表: {table_name}")
+                
+                # =========================================================================
+                # 1. 获取并暂存索引和约束的定义
+                # =========================================================================
+                # 1a. 获取普通索引 (不包括由UNIQUE或PRIMARY KEY约束创建的索引)
+                cursor.execute("""
+                    SELECT indexdef
+                    FROM pg_indexes
+                    WHERE schemaname = %s AND tablename = %s
+                    AND indexname NOT IN (
+                        SELECT conname FROM pg_constraint WHERE conrelid = %s::regclass
+                    );
+                """, [self.backtest_run_id, table_name, f'"{self.backtest_run_id}"."{table_name}"'])
+                plain_indexes_to_recreate = [row[0] for row in cursor.fetchall()]
+                # 1b. 获取约束 (外键、唯一、主键等)
+                cursor.execute("""
+                    SELECT 'ALTER TABLE ' || quote_ident(conrelid::regclass::text) || ' ADD CONSTRAINT ' || quote_ident(conname) || ' ' || pg_get_constraintdef(oid)
+                    FROM pg_constraint
+                    WHERE conrelid = %s::regclass;
+                """, [f'"{self.backtest_run_id}"."{table_name}"'])
+                constraints_to_recreate = [row[0] for row in cursor.fetchall()]
+                
+                # =========================================================================
+                # 2. 删除所有约束和索引以极大地加速数据插入
+                # =========================================================================
+                for const_def in constraints_to_recreate:
+                    const_name = const_def.split('ADD CONSTRAINT ')[1].split(' ')[0]
+                    logger.debug(f"      - 删除约束: {const_name}")
+                    cursor.execute(f'ALTER TABLE "{table_name}" DROP CONSTRAINT IF EXISTS {const_name} CASCADE;')
+                for index_def in plain_indexes_to_recreate:
+                    try:
+                        index_name = index_def.split(' ')[2]
+                        logger.debug(f"      - 删除索引: {index_name}")
+                        cursor.execute(f'DROP INDEX IF EXISTS "{index_name}";')
+                    except IndexError:
+                        logger.warning(f"无法从 '{index_def}' 解析索引名称，跳过删除。")
+                # =========================================================================
+                # 3. 高效复制数据
+                # =========================================================================
+                logger.info(f"    - 正在从 public.{table_name} 复制数据...")
+                sql = f'INSERT INTO "{table_name}" SELECT * FROM public."{table_name}";'
+                cursor.execute(sql)
+                logger.info(f"    - 数据复制完成。")
+                # =========================================================================
+                # 4. 重建索引和约束
+                # =========================================================================
+                logger.info(f"    - 正在重建 '{table_name}' 的索引和约束...")
+                # 4a. 重建普通索引
+                for index_def in plain_indexes_to_recreate:
+                    logger.debug(f"      - 重建索引: {index_def}")
+                    cursor.execute(index_def)
+                
+                # 4b. 重建约束 (这会自动重建它们的底层索引)
+                #     注意：主键约束必须最先重建
+                constraints_to_recreate.sort(key=lambda x: 'PRIMARY KEY' not in x)
+                for const_def in constraints_to_recreate:
+                    logger.debug(f"      - 重建约束: {const_def}")
+                    cursor.execute(const_def)
+                # =========================================================================
+                # 5. 重置自增主键序列 (如果存在)
+                # =========================================================================
+                find_serial_sql = """
+                    SELECT a.attname, pg_get_serial_sequence(quote_ident(n.nspname) || '.' || quote_ident(c.relname), a.attname)
+                    FROM pg_class c
+                    JOIN pg_attribute a ON a.attrelid = c.oid
+                    JOIN pg_namespace n ON c.relnamespace = n.oid
+                    WHERE n.nspname = %s AND c.relname = %s AND a.attnum > 0 AND NOT a.attisdropped
+                    AND pg_get_serial_sequence(quote_ident(n.nspname) || '.' || quote_ident(c.relname), a.attname) IS NOT NULL;
+                """
+                cursor.execute(find_serial_sql, [self.backtest_run_id, table_name])
+                serial_columns = cursor.fetchall()
+                for column_name, sequence_name in serial_columns:
+                    if sequence_name:
+                        logger.info(f"    - 发现自增列 '{column_name}'，正在重置其序列 '{sequence_name}'...")
+                        update_sequence_sql = f"""
+                            SELECT setval('{sequence_name}', COALESCE((SELECT MAX("{column_name}") FROM "{table_name}"), 0) + 1, false);
+                        """
+                        cursor.execute(update_sequence_sql)
+        
+        logger.info("基础数据复制完成，并已完成索引优化。")
 
     def run(self):
         try:
