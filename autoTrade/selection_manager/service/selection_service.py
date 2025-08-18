@@ -559,19 +559,118 @@ class SelectionService:
         )
         return (close > ma5).astype(int) + (ma5 > ma10).astype(int) + (ma10 > ma20).astype(int)
 
+    # def _calc_factor_adx_confirm(self) -> pd.Series:
+    #     adx_df = self.panel_hfq_close.apply(lambda s: ta.adx(self.panel_high[s.name], self.panel_low[s.name], s, length=14).iloc[-1])
+    #     adx_df = adx_df.T
+    #     condition = (adx_df['ADX_14'] > 20) & (adx_df['DMP_14'] > adx_df['DMN_14'])
+    #     return adx_df['ADX_14'].where(condition, 0)
+
     def _calc_factor_adx_confirm(self) -> pd.Series:
-        adx_df = self.panel_hfq_close.apply(lambda s: ta.adx(self.panel_high[s.name], self.panel_low[s.name], s, length=14).iloc[-1])
-        adx_df = adx_df.T
-        condition = (adx_df['ADX_14'] > 20) & (adx_df['DMP_14'] > adx_df['DMN_14'])
-        return adx_df['ADX_14'].where(condition, 0)
+        # --- 准备基础数据 ---
+        high = self.panel_high
+        low = self.panel_low
+        close = self.panel_hfq_close
+        length = 14
+        
+        # --- 1. 向量化计算 +DM 和 -DM ---
+        # 使用 .diff() 一次性计算所有股票的 up_move 和 down_move
+        move_up = high.diff()
+        move_down = -low.diff()
+        
+        # 使用布尔掩码和 .where() 实现条件逻辑
+        plus_dm = move_up.where((move_up > move_down) & (move_up > 0), 0.0)
+        minus_dm = move_down.where((move_down > move_up) & (move_down > 0), 0.0)
+        # --- 2. 向量化计算真实波幅 (TR) ---
+        prev_close = close.shift(1)
+        range1 = high - low
+        range2 = (high - prev_close).abs()
+        range3 = (low - prev_close).abs()
+        true_range = np.maximum(np.maximum(range1, range2), range3)
+        
+        # --- 3. 向量化平滑处理 ---
+        # 使用 .ewm() 一次性计算所有股票的平滑值 (Wilder's Smoothing)
+        alpha = 1 / length
+        min_p = length
+        
+        atr = true_range.ewm(alpha=alpha, adjust=False, min_periods=min_p).mean()
+        plus_dm_smooth = plus_dm.ewm(alpha=alpha, adjust=False, min_periods=min_p).mean()
+        minus_dm_smooth = minus_dm.ewm(alpha=alpha, adjust=False, min_periods=min_p).mean()
+        
+        # --- 4. 向量化计算 +DI 和 -DI ---
+        # 加上 epsilon 防止除以零
+        epsilon = 1e-9
+        plus_di = 100 * (plus_dm_smooth / (atr + epsilon))
+        minus_di = 100 * (minus_dm_smooth / (atr + epsilon))
+        
+        # --- 5. 向量化计算 DX ---
+        di_sum = plus_di + minus_di
+        di_diff_abs = (plus_di - minus_di).abs()
+        dx = 100 * (di_diff_abs / (di_sum + epsilon))
+        
+        # --- 6. 向量化计算最终 ADX ---
+        adx = dx.ewm(alpha=alpha, adjust=False, min_periods=min_p).mean()
+        
+        # --- 7. 提取最后一日的数据并应用过滤条件 ---
+        # 直接从计算出的面板中提取最后一行，得到的就是所有股票的最新指标
+        adx_final = adx.iloc[-1]
+        plus_di_final = plus_di.iloc[-1]
+        minus_di_final = minus_di.iloc[-1]
+        
+        # 条件判断现在是在Series上进行，完全向量化
+        condition = (adx_final > 20) & (plus_di_final > minus_di_final)
+        
+        # .where() 也是一个高效的向量化操作
+        # 返回的Series结构与原函数完全一致
+        return adx_final.where(condition, 0.0)
         
 
     # --- BO 因子 ---
+    # def _calc_factor_breakout_pwr(self) -> pd.Series:
+    #     close = self.panel_hfq_close
+    #     atr14 = self.panel_hfq_close.apply(lambda s: ta.atr(self.panel_high[s.name], self.panel_low[s.name], s, length=14).iloc[-1])
+    #     breakout_level = close.iloc[-60:-1].max()
+    #     return (close.iloc[-1] - breakout_level) / (atr14+ 1e-9)
+
     def _calc_factor_breakout_pwr(self) -> pd.Series:
-        close = self.panel_hfq_close
-        atr14 = self.panel_hfq_close.apply(lambda s: ta.atr(self.panel_high[s.name], self.panel_low[s.name], s, length=14).iloc[-1])
-        breakout_level = close.iloc[-60:-1].max()
-        return (close.iloc[-1] - breakout_level) / (atr14+ 1e-9)
+        # 准备基础数据，与之前相同
+        # 1. 准备所有需要的基础数据面板
+        hfq_close = self.panel_hfq_close
+        raw_close = self.panel_close  # 新增依赖：不复权收盘价
+        raw_high = self.panel_high
+        raw_low = self.panel_low
+        
+        # --- 核心修正：将 high 和 low 价格调整到后复权空间 ---
+        # 2. 计算每日的复权因子。这是一个全DataFrame的向量化操作。
+        #    为防止除以0（尽管在股价中罕见），增加一个极小值。
+        adjustment_factor = hfq_close / (raw_close + 1e-9)
+        
+        # 3. 应用复权因子，得到后复权的 high 和 low。这同样是向量化操作。
+        hfq_high = raw_high * adjustment_factor
+        hfq_low = raw_low * adjustment_factor
+        # --- 修正结束 ---
+        # --- ATR 向量化计算开始 (现在使用完全一致的后复权价格) ---
+        # 4. 计算前一日的后复权收盘价
+        #    注意：这里我们用 hfq_close，因为ATR公式需要前一天的收盘价
+        prev_hfq_close = hfq_close.shift(1)
+        
+        # 5. 计算TR的三个组成部分，现在所有价格都在同一复权空间内
+        range1 = hfq_high - hfq_low
+        range2 = (hfq_high - prev_hfq_close).abs()
+        range3 = (hfq_low - prev_hfq_close).abs()
+        
+        # 6. 计算真实波幅 (True Range)，完全向量化
+        true_range = np.maximum(range1, range2)
+        true_range = np.maximum(true_range, range3)
+        
+        # 7. 计算 ATR，一次性对整个DataFrame进行
+        atr_panel = true_range.ewm(alpha=1/14, adjust=False, min_periods=14).mean()
+        
+        # 8. 获取最后一天的ATR值
+        atr14 = atr_panel.iloc[-1]
+        # --- ATR 向量化计算结束 ---
+        # 9. 后续计算与之前完全相同，但现在 ATR 的值是基于正确逻辑得出的
+        breakout_level = hfq_close.iloc[-60:-1].max()
+        return (hfq_close.iloc[-1] - breakout_level) / (atr14 + 1e-9)
         
 
     def _calc_factor_volume_surge(self) -> pd.Series:
@@ -596,23 +695,76 @@ class SelectionService:
         return acceleration.iloc[-1]
 
     # --- MR 因子 ---
+    # def _calc_factor_rsi_os(self) -> pd.Series:
+    #     return self.panel_hfq_close.apply(lambda s: ta.rsi(s, length=14).iloc[-1])
+
     def _calc_factor_rsi_os(self) -> pd.Series:
-        return self.panel_hfq_close.apply(lambda s: ta.rsi(s, length=14).iloc[-1])
+        close = self.panel_hfq_close
+        length = 14 # RSI周期
+        
+        # --- RSI 向量化计算开始 ---
+        # 1. 计算所有股票的价格日度变动。这是一个全DataFrame操作。
+        delta = close.diff(1)
+        
+        # 2. 从delta中分离出上涨(gain)和下跌(loss)的DataFrame。
+        # 上涨部分：将负值和0裁剪为0。
+        gain = delta.clip(lower=0)
+        # 下跌部分：将正值和0裁剪为0，然后取绝对值。
+        loss = delta.clip(upper=0).abs()
+        
+        # 3. 计算平均上涨和平均下跌。使用ewm进行指数平滑，这与Wilder's Smoothing等价。
+        # `adjust=False` 确保使用递归平滑公式，与技术分析标准一致。
+        # `min_periods=length` 确保在有足够数据时才开始计算。
+        avg_gain = gain.ewm(alpha=1/length, adjust=False, min_periods=length).mean()
+        avg_loss = loss.ewm(alpha=1/length, adjust=False, min_periods=length).mean()
+        
+        # 4. 计算相对强度 (RS)。为分母增加一个极小值以防止除以零。
+        rs = avg_gain / (avg_loss + 1e-9)
+        
+        # 5. 根据RS计算RSI。所有操作都是元素级别的，速度极快。
+        rsi_panel = 100 - (100 / (1 + rs))
+        
+        # 6. 获取最后一天的RSI值，得到一个Series，格式与原输出完全一致。
+        return rsi_panel.iloc[-1]
 
     def _calc_factor_neg_dev(self) -> pd.Series:
         ma60 = self.panel_hfq_close.rolling(60).mean().iloc[-1]
         return (self.panel_hfq_close.iloc[-1] - ma60) / (ma60+ 1e-9)
 
+    # def _calc_factor_boll_lb(self) -> pd.Series:
+    #     boll_df = self.panel_hfq_close.apply(lambda s: ta.bbands(s, length=20).iloc[-1])
+    #     boll_df = boll_df.T
+    #     return (self.panel_hfq_close.iloc[-1] - boll_df['BBL_20_2.0']) / (boll_df['BBU_20_2.0'] - boll_df['BBL_20_2.0']+ 1e-9)
     def _calc_factor_boll_lb(self) -> pd.Series:
-        boll_df = self.panel_hfq_close.apply(lambda s: ta.bbands(s, length=20).iloc[-1])
-        boll_df = boll_df.T
-        return (self.panel_hfq_close.iloc[-1] - boll_df['BBL_20_2.0']) / (boll_df['BBU_20_2.0'] - boll_df['BBL_20_2.0']+ 1e-9)
+        # 准备基础数据和参数
+        close_panel = self.panel_hfq_close
+        length = 20
+        std_dev_multiplier = 2.0
+        # --- 布林带向量化计算开始 ---
+        # 1. 一次性计算所有股票的20日滚动均值 (中轨)
+        # .rolling() 返回一个窗口对象，.mean() 在此对象上进行高效计算
+        middle_band_panel = close_panel.rolling(window=length, min_periods=length).mean()
+        # 2. 一次性计算所有股票的20日滚动标准差
+        std_dev_panel = close_panel.rolling(window=length, min_periods=length).std()
+        # 3. 通过DataFrame算术一次性计算上下轨
+        upper_band_panel = middle_band_panel + std_dev_multiplier * std_dev_panel
+        lower_band_panel = middle_band_panel - std_dev_multiplier * std_dev_panel
+        # --- 布林带向量化计算结束 ---
+        # 4. 从面板数据中直接获取最后一日的截面数据 (Series)
+        last_close = close_panel.iloc[-1]
+        last_upper_band = upper_band_panel.iloc[-1]
+        last_lower_band = lower_band_panel.iloc[-1]
+        # 5. 最终因子计算，所有操作都是在Series上进行的向量化运算
+        band_width = last_upper_band - last_lower_band
         
+        # 加上 epsilon 防止除以零
+        return (last_close - last_lower_band) / (band_width + 1e-9)
         
 
     # --- QD 因子 ---
     def _calc_factor_low_vol(self) -> pd.Series:
         return self.panel_hfq_close.pct_change(fill_method=None).rolling(20, min_periods=2).std().iloc[-1]
+    
 
     def _calc_factor_max_dd(self) -> pd.Series:
         roll_max = self.panel_hfq_close.rolling(60, min_periods=1).max()
