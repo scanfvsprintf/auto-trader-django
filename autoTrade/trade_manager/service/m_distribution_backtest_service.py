@@ -258,12 +258,16 @@ class MDistributionBacktestService:
         with transaction.atomic():
             temp_position = Position.objects.create(
                 stock_code_id=stock_code, entry_price=entry_price, quantity=100,
-                entry_datetime=timezone.now(), status=Position.StatusChoices.OPEN
+                entry_datetime=timezone.now(), status=Position.StatusChoices.OPEN,
+                current_stop_loss=Decimal('0.00'),
+                current_take_profit=Decimal('0.00')
             )
             temp_trade_log = TradeLog.objects.create(
                 position=temp_position, stock_code_id=stock_code, trade_datetime=timezone.now(),
                 trade_type=TradeLog.TradeTypeChoices.BUY, status=TradeLog.StatusChoices.FILLED,
-                price=entry_price, quantity=100
+                price=entry_price, quantity=100,
+                commission=0,
+                stamp_duty=0
             )
 
             decision_service = DecisionOrderService(handler=None, execution_date=entry_date)
