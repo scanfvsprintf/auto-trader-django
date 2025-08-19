@@ -398,9 +398,15 @@ class SelectionService:
         p = self.dynamic_params
         
         # a. 计算各维度吸引力 A_i
-        A_MT = p['dynamic_c_MT'] * M_t
-        A_BO = p['dynamic_c_BO'] * M_t
-        A_QD = p['dynamic_c_QD'] * (-M_t)
+        # A_MT = p['dynamic_c_MT'] * M_t
+        # A_BO = p['dynamic_c_BO'] * M_t
+        # A_QD = p['dynamic_c_QD'] * (-M_t)
+        # A_MR = p['dynamic_c_MR'] * np.exp(- (M_t / p['dynamic_sigma_MR'])**2)
+        A_MT = p['dynamic_c_MT'] * (-M_t) 
+        A_BO = p['dynamic_c_BO'] * (-M_t)
+        # 当M(t)为+1(狂热)时，QD吸引力最大；当M(t)为-1(恐慌)时，吸引力最小
+        A_QD = p['dynamic_c_QD'] * M_t
+        # MR的逻辑保持不变，它在M(t)接近0（中性/转折期）时吸引力最大，这仍然是合理的
         A_MR = p['dynamic_c_MR'] * np.exp(- (M_t / p['dynamic_sigma_MR'])**2)
         
         # b. 通过Softmax计算最终权重 N_i
