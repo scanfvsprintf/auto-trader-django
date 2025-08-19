@@ -44,20 +44,20 @@ class SelectionService:
 
         # --- 日期对齐逻辑 ---
         try:
-            self.trade_date=trade_date
             # 查询小于等于输入日期的、最新的一个交易日
-            # latest_trade_date_obj = DailyQuotes.objects.filter(trade_date__lte=trade_date).latest('trade_date')
-            # validated_trade_date = latest_trade_date_obj.trade_date
+            latest_trade_date_obj = DailyQuotes.objects.filter(trade_date__lte=trade_date).latest('trade_date')
+            validated_trade_date = latest_trade_date_obj.trade_date
             
-            # if validated_trade_date != trade_date:
-            #     logger.debug(f"输入日期 {trade_date} 不是交易日，已自动校准为最近的交易日: {validated_trade_date}")
+            if validated_trade_date != trade_date:
+                logger.debug(f"输入日期 {trade_date} 不是交易日，已自动校准为最近的交易日: {validated_trade_date}")
             
-            # self.trade_date = validated_trade_date
-        except ObjectDoesNotExist:
+            self.trade_date = validated_trade_date
+        except :
             # 如果数据库中没有任何早于或等于 trade_date 的数据
-            error_msg = f"无法在数据库中找到日期 {trade_date} 或之前的任何交易日数据，服务无法初始化。"
-            logger.error(error_msg)
-            raise ValueError(error_msg)
+            # error_msg = f"无法在数据库中找到日期 {trade_date} 或之前的任何交易日数据，服务无法初始化。"
+            # logger.error(error_msg)
+            # raise ValueError(error_msg)
+            self.trade_date=trade_date
         self.mode = mode
         self.dynamic_params = {}
         self.dynamic_factor_defs = {}
