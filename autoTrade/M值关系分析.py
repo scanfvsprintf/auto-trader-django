@@ -46,7 +46,7 @@ def analyze_m_value_predictiveness(df, horizons=[5, 20, 60]):
     df.dropna(inplace=True)
 
     # 2. 对M值进行分箱
-    bins = np.arange(-1.0, 1.1, 0.1)
+    bins = np.arange(-1.0, 1.10, 0.1)
     # 确保标签和bins的长度匹配
     labels = [f"[{i:.1f}, {i+0.1:.1f})" for i in bins[:-1]]
     df['m_bin'] = pd.cut(df['m值'], bins=bins, labels=labels, right=False, include_lowest=True)
