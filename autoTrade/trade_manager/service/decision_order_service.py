@@ -441,14 +441,14 @@ class DecisionOrderService:
                 # 3. 计算动态止盈价 g_new(y)
                 tp_min = self.params['risk_adj_tp_pct_min']
                 tp_max = self.params['risk_adj_tp_pct_max']
-                tp_pct = tp_min + (tp_max - tp_min) * (-market_regime_M + 1) / 2
+                tp_pct = tp_min + (tp_max - tp_min) * (market_regime_M + 1) / 2
                 take_profit_price = aep * (1 + tp_pct)
 
                 # 4. 计算自适应止损价 h_new(z)
                 # 4.1 计算动态ATR乘数 k_h(M(t))
                 kh_min = self.params['risk_adj_sl_atr_min']
                 kh_max = self.params['risk_adj_sl_atr_max']
-                k_h_dynamic = kh_min + (kh_max - kh_min) * (-market_regime_M + 1) / 2
+                k_h_dynamic = kh_min + (kh_max - kh_min) * (market_regime_M + 1) / 2
                 
                 # 4.2 计算动态波动止损线
                 z1_dynamic_atr = aep - k_h_dynamic * atr_14_buy
