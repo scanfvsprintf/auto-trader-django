@@ -231,6 +231,15 @@ class MDistributionBacktestLog(models.Model):
         decimal_places=4,
         help_text="该笔交易的实际收益率 ( (exit_price / entry_price) - 1 )"
     )
+
+    one_stratage_mode = models.CharField(
+        max_length=10,
+        null=True,
+        blank=True,
+        db_index=True, # 为GROUP BY和查询优化添加索引
+        help_text="单策略模式下使用的策略名 (MT, BO, QD, MR), 为空则为M动态策略"
+    )
+
     created_at = models.DateTimeField(
         auto_now_add=True
     )
@@ -240,4 +249,5 @@ class MDistributionBacktestLog(models.Model):
         verbose_name_plural = verbose_name
         indexes = [
             models.Index(fields=['backtest_run_id', 'plan_date']),
+            models.Index(fields=['backtest_run_id', 'one_stratage_mode'])
         ]

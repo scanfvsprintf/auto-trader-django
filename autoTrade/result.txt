@@ -7327,16 +7327,16 @@ class MDistributionBacktestService:
     def _get_simulated_stop_profit_loss(self, stock_code: str, entry_date: date, entry_price: Decimal):
         """复用DecisionOrderService逻辑计算止盈止损，但不实际修改数据库"""
         tp_price, sl_price, tp_rate, sl_rate = (Decimal(0), Decimal(0), Decimal(0), Decimal(0))
-        
+        simulated_trade_time = timezone.make_aware(datetime.combine(entry_date, datetime.min.time()))
         with transaction.atomic():
             temp_position = Position.objects.create(
                 stock_code_id=stock_code, entry_price=entry_price, quantity=100,
-                entry_datetime=timezone.now(), status=Position.StatusChoices.OPEN,
+                entry_datetime=simulated_trade_time, status=Position.StatusChoices.OPEN,
                 current_stop_loss=Decimal('0.00'),
                 current_take_profit=Decimal('0.00')
             )
             temp_trade_log = TradeLog.objects.create(
-                position=temp_position, stock_code_id=stock_code, trade_datetime=timezone.now(),
+                position=temp_position, stock_code_id=stock_code, trade_datetime=simulated_trade_time,
                 trade_type=TradeLog.TradeTypeChoices.BUY, status=TradeLog.StatusChoices.FILLED,
                 price=entry_price, quantity=100,
                 commission=0,

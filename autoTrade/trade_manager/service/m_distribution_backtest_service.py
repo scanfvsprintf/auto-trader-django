@@ -21,7 +21,7 @@ from .m_distribution_reporter import MDistributionReporter
 from trade_manager.service.simulate_trade import SimulateTradeService
 from trade_manager.service.simulate_trade_handler import SimulateTradeHandler
 logger = logging.getLogger(__name__)
-
+STRATEGIES = ['MT', 'BO', 'QD', 'MR']
 class MDistributionBacktestService:
     """
     M值胜率分布回测服务 (V2 - 修正版)。
@@ -34,11 +34,12 @@ class MDistributionBacktestService:
     5. 回测结束后，调用报告模块生成分析报告。
     """
     
-    def __init__(self, start_date: str, end_date: str):
+    def __init__(self, start_date: str, end_date: str, single_strategy_mode: bool = False):
         self.start_date = date.fromisoformat(start_date)
         self.end_date = date.fromisoformat(end_date)
         self.backtest_run_id = f"m_dist_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
         self.max_holding_days = 90
+        self.single_strategy_mode = single_strategy_mode
     def _get_next_trading_day(self, from_date: date) -> date | None: return (DailyQuotes.objects .filter(trade_date__gte=from_date) .order_by('trade_date') .values_list('trade_date', flat=True) .first())
     def _setup_backtest_schema(self):
         """
@@ -160,21 +161,32 @@ class MDistributionBacktestService:
                 for i, t_minus_1 in enumerate(trading_days):
                     logger.info(f"\n{'='*20} 模拟预案日: {t_minus_1} ({i+1}/{len(trading_days)}) {'='*20}")
 
-                    # 1. 运行选股服务，它会自动将预案（含策略DNA）保存到数据库
-                    selection_service = SelectionService(trade_date=t_minus_1, mode='backtest')
-                    selection_service.run_selection()
-
-                    # 2. 从数据库中查询刚刚生成的预案
+                    # 1. 运行标准的M动态策略
+                    logger.info(f"  Running M-Dynamic Strategy for {t_minus_1}...")
+                    selection_service_dynamic = SelectionService(trade_date=t_minus_1, mode='backtest', one_strategy=None)
+                    selection_service_dynamic.run_selection()
                     plan_date_for_t = t_minus_1 + timedelta(days=1)
-                    plans_for_today = DailyTradingPlan.objects.filter(plan_date=plan_date_for_t)
-
-                    if not plans_for_today.exists():
-                        logger.info(f"在 {t_minus_1} 未生成任何交易预案。")
-                        continue
-                    
-                    # 3. 对每个从数据库读出的预案进行前向追溯
-                    for plan in plans_for_today:
-                        self._trace_forward_and_log(t_minus_1, plan, selection_service.market_regime_M)
+                    plans_dynamic = DailyTradingPlan.objects.filter(plan_date=plan_date_for_t)
+                    if not plans_dynamic.exists():
+                        logger.info(f"    在M动态策略下未生成任何交易预案。")
+                    else:
+                        for plan in plans_dynamic:
+                            self._trace_forward_and_log(t_minus_1, plan, selection_service_dynamic.market_regime_M, one_stratage_mode=None)
+                    # 2. 如果开启了单策略模式，则循环运行
+                    if self.single_strategy_mode:
+                        for strategy_name in STRATEGIES:
+                            logger.info(f"  Running Single Strategy '{strategy_name}' for {t_minus_1}...")
+                            selection_service_single = SelectionService(trade_date=t_minus_1, mode='backtest', one_strategy=strategy_name)
+                            selection_service_single.run_selection()
+                            
+                            # 注意：run_selection会覆盖旧预案，所以需要重新查询
+                            plans_single = DailyTradingPlan.objects.filter(plan_date=plan_date_for_t)
+                            if not plans_single.exists():
+                                logger.info(f"    在单策略 {strategy_name} 下未生成任何交易预案。")
+                                continue
+                            
+                            for plan in plans_single:
+                                self._trace_forward_and_log(t_minus_1, plan, selection_service_single.market_regime_M, one_stratage_mode=strategy_name)
                     # --- 邮件发送逻辑 ---
                     is_last_day = (i == len(trading_days) - 1)
                     current_month = t_minus_1.month
@@ -204,7 +216,7 @@ class MDistributionBacktestService:
             # logger.info(f"已清理回测环境 Schema: {self.backtest_run_id}")
             pass
 
-    def _trace_forward_and_log(self, t_minus_1: date, plan_obj: DailyTradingPlan, m_value: float):
+    def _trace_forward_and_log(self, t_minus_1: date, plan_obj: DailyTradingPlan, m_value: float, one_stratage_mode: str = None):
         """对单个预案 (数据库对象) 进行前向追溯并记录结果"""
         stock_code = plan_obj.stock_code_id
         logger.debug(f"  -> 开始追溯股票: {stock_code}")
@@ -277,7 +289,8 @@ class MDistributionBacktestService:
             holding_period=exit_info['period'],
             preset_take_profit_rate=tp_rate,
             preset_stop_loss_rate=sl_rate,
-            actual_return_rate=actual_return
+            actual_return_rate=actual_return,
+            one_stratage_mode=one_stratage_mode
         )
         logger.info(f"    [记录成功] {stock_code}: 入场 {entry_date}@{entry_price:.2f}, 出场 {exit_info['date']}@{exit_info['price']:.2f}, 原因: {exit_info['reason']}")
 

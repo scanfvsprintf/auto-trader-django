@@ -32,7 +32,7 @@ class SelectionService:
     动态调整选股策略的维度权重，以适应不同的市场环境。
     """
 
-    def __init__(self, trade_date: date, mode: str = 'realtime'):
+    def __init__(self, trade_date: date, mode: str = 'realtime' , one_strategy: str = None):
         """
         初始化选股服务。
 
@@ -59,6 +59,7 @@ class SelectionService:
             # raise ValueError(error_msg)
             self.trade_date=trade_date
         self.mode = mode
+        self.one_strategy = one_strategy
         self.dynamic_params = {}
         self.dynamic_factor_defs = {}
         
@@ -418,6 +419,11 @@ class SelectionService:
             'QD': exp_A_QD / sum_exp_A,
             'MR': exp_A_MR / sum_exp_A,
         }
+        if self.one_strategy and self.one_strategy in weights:
+            logger.debug(f"单策略模式已激活，强制使用策略: {self.one_strategy}")
+            for key in weights:
+                weights[key] = 0.0
+            weights[self.one_strategy] = 1.0
         logger.debug(f"动态权重计算完成: MT={weights['MT']:.2%}, BO={weights['BO']:.2%}, MR={weights['MR']:.2%}, QD={weights['QD']:.2%}")
         return weights
 
