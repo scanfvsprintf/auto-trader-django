@@ -14,17 +14,33 @@ class Command(BaseCommand):
 
     def add_arguments(self, parser: CommandParser):
         parser.add_argument(
-            '--years',
-            type=int,
-            default=10,
-            help='用于校准的历史数据年数，默认为10年。'
+            '--start-date',
+            type=str,
+            default=None,  # 或者设置为 None
+            help='用于校准的起始日期 (格式: YYYY-MM-DD)。'
+        )
+        parser.add_argument(
+            '--end-date',
+            type=str,
+            default=None,  # 或者设置为 None
+            help='用于校准的截止日期 (格式: YYYY-MM-DD)。'
         )
 
     def handle(self, *args, **options):
         self.stdout.write(self.style.SUCCESS("===== 开始校准M值固定分位锚点 ====="))
         
         # 1. 加载数据
-        df = pd.DataFrame.from_records(IndexQuotesCsi300.objects.all().values())
+        # df = pd.DataFrame.from_records(IndexQuotesCsi300.objects.all().values())
+        start_date = options['start_date']
+        end_date = options['end_date']
+        queryset = IndexQuotesCsi300.objects.all()
+        if start_date:
+            queryset = queryset.filter(trade_date__gte=start_date)
+        if end_date:
+            queryset = queryset.filter(trade_date__lte=end_date)
+        # 可以在这里加一句日志，方便确认
+        self.stdout.write(f"使用数据范围: 从 {start_date or '最早'} 到 {end_date or '最新'}")
+        df = pd.DataFrame.from_records(queryset.values())
         if df.empty:
             self.stdout.write(self.style.ERROR("数据库中没有沪深300指数数据，请先执行 backfill_csi300_data。"))
             return
