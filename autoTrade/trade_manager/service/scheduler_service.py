@@ -147,15 +147,20 @@ def update_order_status_job():
                     trade.price = Decimal(str(real_order['filled_price']))
                     # 注意：easytrader返回的佣金可能不准确，这里仅为示例
                     trade.commission = Decimal(str(real_order.get('business_balance', '0.0'))) - Decimal(str(real_order.get('clear_balance', '0.0')))
-                    trade.save()
+                    
 
                     if trade.trade_type == 'buy':
                         decision_service = DecisionOrderService(handler, execution_date=date.today())
                         decision_service.calculate_stop_profit_loss(trade.trade_id)
                     else: # sell
+                        if trade.price >= position.entry_price:
+                            trade.reason = TradeLog.ReasonChoices.TAKE_PROFIT
+                        else:
+                            trade.reason = TradeLog.ReasonChoices.STOP_LOSS
                         position = trade.position
                         position.status = Position.StatusChoices.CLOSED
                         position.save()
+                    trade.save()
                 logger.info(f"订单 {trade.trade_id} (委托号: {trade.external_order_id}) 状态更新为已成交。")
 
             elif real_order['order_status'] in ['已撤', '废单', '部成已撤']:

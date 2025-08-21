@@ -25,7 +25,8 @@ from trade_manager.service.decision_order_service import DecisionOrderService
 from trade_manager.service.monitor_exit_service import MonitorExitService
 from .simulate_trade_handler import SimulateTradeHandler
 from .db_utils import use_backtest_schema
-from .backtest_reporter import BacktestReporter # 新增导入
+from .backtest_reporter import BacktestReporter 
+from .position_monitor_logic import PositionMonitorLogic
 
 logger = logging.getLogger(__name__)
 
@@ -183,6 +184,67 @@ class SimulateTradeService:
         self.cash_balance = self.initial_capital
         logger.info(f"初始资金已设定为: {self.initial_capital:.2f}")
 
+    def _simulate_intraday_monitoring(self, position: Position, daily_quote: DailyQuotes):
+        open_p, high_p, low_p = daily_quote.open, daily_quote.high, daily_quote.low
+        
+        # 临时变量，模拟盘中状态
+        temp_position_state = {
+            'current_stop_loss': position.current_stop_loss,
+            'current_take_profit': position.current_take_profit
+        }
+        
+        # 1. 开盘价检查
+        decision = PositionMonitorLogic.check_and_decide(position, open_p, self.handler.service.params)
+        if decision['action'] == 'SELL':
+            logger.info(f"[回测] {position.stock_code_id} 开盘价 {open_p:.2f} 触发卖出，成交价 {decision['exit_price']:.2f}")
+            self.handler.sell_stock_by_market_price(position, decision['reason'], simulated_exit_price=decision['exit_price'])
+            return
+        elif decision['action'] == 'UPDATE':
+            temp_position_state.update(decision['updates'])
+        # 2. 日内循环监控
+        while True:
+            action_taken_in_loop = False
+            
+            # 检查点1: 最低价是否触发卖出
+            decision_low = PositionMonitorLogic.check_and_decide(
+                Position( # 传入一个临时的、包含最新状态的Position对象
+                    entry_price=position.entry_price,
+                    current_stop_loss=temp_position_state['current_stop_loss'],
+                    current_take_profit=temp_position_state['current_take_profit']
+                ), 
+                low_p, 
+                self.handler.service.params
+            )
+            if decision_low['action'] == 'SELL':
+                logger.info(f"[回测] {position.stock_code_id} 最低价 {low_p:.2f} 触发卖出，成交价 {decision_low['exit_price']:.2f}")
+                self.handler.sell_stock_by_market_price(position, decision_low['reason'], simulated_exit_price=decision_low['exit_price'])
+                return
+            # 检查点2: 最高价是否触发价格更新
+            decision_high = PositionMonitorLogic.check_and_decide(
+                Position(
+                    entry_price=position.entry_price,
+                    current_stop_loss=temp_position_state['current_stop_loss'],
+                    current_take_profit=temp_position_state['current_take_profit']
+                ), 
+                high_p, 
+                self.handler.service.params
+            )
+            if decision_high['action'] == 'UPDATE':
+                # 检查是否有实际的更新
+                if temp_position_state != decision_high['updates']:
+                    temp_position_state.update(decision_high['updates'])
+                    action_taken_in_loop = True
+            if not action_taken_in_loop:
+                break
+                
+        # 3. 日终结算
+        if temp_position_state['current_stop_loss'] != position.current_stop_loss or \
+        temp_position_state['current_take_profit'] != position.current_take_profit:
+            position.current_stop_loss = temp_position_state['current_stop_loss']
+            position.current_take_profit = temp_position_state['current_take_profit']
+            position.save(update_fields=['current_stop_loss', 'current_take_profit'])
+            logger.info(f"[回测] {position.stock_code_id} 日终更新风控价格。SL: {position.current_stop_loss:.2f}, TP: {position.current_take_profit:.2f}")
+
     def run_backtest(self, start_date: str, end_date: str, initial_capital: Decimal) -> dict:
         self.start_date = date.fromisoformat(start_date)
         self.end_date = date.fromisoformat(end_date)
@@ -198,6 +260,7 @@ class SimulateTradeService:
                 self._setup_backtest_schema(self.backtest_run_id, initial_capital)
 
                 handler = SimulateTradeHandler(self)
+                self.handler=handler
                 trading_days = self._get_trading_days()
                 if not trading_days:
                     logger.error("在指定日期范围内未找到任何交易日，回测终止。")
@@ -240,13 +303,21 @@ class SimulateTradeService:
                         else:
                             break
 
-                    monitor_exit_service = MonitorExitService(handler=handler, execution_date=self.current_date)
-                    logger.info("-> [T日 盘中监控] 模拟价格跌至最低点...")
-                    handler.current_price_node = 'LOW'
-                    monitor_exit_service.monitor_and_exit_positions()
-                    logger.info("-> [T日 盘中监控] 模拟价格涨至最高点...")
-                    handler.current_price_node = 'HIGH'
-                    monitor_exit_service.monitor_and_exit_positions()
+                    positions_to_monitor = Position.objects.filter(status=Position.StatusChoices.OPEN).exclude(
+                        entry_datetime__date=self.current_date
+                    )
+                
+                    for pos in positions_to_monitor:
+                        # 如果持仓已在循环中被卖出，则跳过
+                        if pos.status != Position.StatusChoices.OPEN:
+                            continue
+                        
+                        try:
+                            daily_quote = DailyQuotes.objects.get(stock_code_id=pos.stock_code_id, trade_date=self.current_date)
+                            self._simulate_intraday_monitoring(pos, daily_quote)
+                        except DailyQuotes.DoesNotExist:
+                            logger.warning(f"[回测] 无法找到 {pos.stock_code_id} 在 {self.current_date} 的行情，当日无法监控。")
+                            continue
 
                     
 

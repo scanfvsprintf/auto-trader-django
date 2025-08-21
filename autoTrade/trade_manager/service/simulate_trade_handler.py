@@ -93,15 +93,12 @@ class SimulateTradeHandler(ITradeHandler):
         
 
     @transaction.atomic
-    def sell_stock_by_market_price(self, position: Position, reason: str) -> None:
-        if reason == TradeLog.ReasonChoices.STOP_LOSS:
-            #有可能触发止损是因为配股把止损金额改到了999999，所以止损金额应该取开盘价和止损价更低的那个
-            base_sell_price = self.get_opening_price(position.stock_code_id)
-            trigger_price=min(base_sell_price,position.current_stop_loss)
-        else: # TAKE_PROFIT
-            trigger_price = position.current_take_profit
+    def sell_stock_by_market_price(self, position: Position, reason: str, simulated_exit_price: Decimal = None) -> None:
+        
+        if simulated_exit_price is None:
+            raise ValueError("回测模式下调用 sell_stock_by_market_price 必须提供 simulated_exit_price")
 
-        sell_price = (trigger_price * (Decimal('1.0') - self.service.SELL_SLIPPAGE_RATE))
+        sell_price = (simulated_exit_price * (Decimal('1.0') - self.service.SELL_SLIPPAGE_RATE))
         sell_price = sell_price.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
 
         amount = sell_price * position.quantity
@@ -110,7 +107,7 @@ class SimulateTradeHandler(ITradeHandler):
         net_income = amount - commission - stamp_duty
 
         self.service.cash_balance += net_income
-        logger.info(f"[回测] 卖出 {position.stock_code_id} {position.quantity}股 @{sell_price:.2f}, 现金余额: {self.service.cash_balance:.2f}")
+        logger.info(f"[回测] 卖出 {position.stock_code_id} {position.quantity}股 @{sell_price:.2f}, 原因: {reason}, 现金余额: {self.service.cash_balance:.2f}")
 
         position.status = Position.StatusChoices.CLOSED
         position.save()

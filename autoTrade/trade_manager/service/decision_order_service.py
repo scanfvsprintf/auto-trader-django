@@ -517,7 +517,12 @@ class DecisionOrderService:
             'ORIGINAL_MAX_POSITIONS': {'value': '5', 'group': 'DYNAMIC_POS_MGMT', 'desc': '【动态仓位】策略基准最大持仓数'},
             'MIN_POSITIONS_COUNT': {'value': '1', 'group': 'DYNAMIC_POS_MGMT', 'desc': '【动态仓位】最小持仓数硬下限'},
             'RISK_ADJ_POS_FLOOR_PCT': {'value': '0.1', 'group': 'DYNAMIC_POS_MGMT', 'desc': '【动态仓位】总仓位数缩放因子的下限 S_min_pos (例如0.4代表最差情况持有基准的40%)'},
-            'RISK_ADJ_CAPITAL_FLOOR_PCT': {'value': '0.6', 'group': 'DYNAMIC_POS_MGMT', 'desc': '【动态仓位】单位名义本金缩放因子的下限 S_min_cap (例如0.6代表最差情况投入基准的60%)'}
+            'RISK_ADJ_CAPITAL_FLOOR_PCT': {'value': '0.6', 'group': 'DYNAMIC_POS_MGMT', 'desc': '【动态仓位】单位名义本金缩放因子的下限 S_min_cap (例如0.6代表最差情况投入基准的60%)'},
+        
+            # --- 追踪止盈参数 ---
+            'trailing_tp_increment_pct': {'value': '0.02', 'group': 'TRAILING_STOP', 'desc': '追踪止盈的步进百分比'},
+            'trailing_sl_buffer_pct': {'value': '0.01', 'group': 'TRAILING_STOP', 'desc': '追踪止盈的回撤缓冲百分比'},
+        
         }
 
         with transaction.atomic():

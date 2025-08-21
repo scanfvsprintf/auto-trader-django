@@ -20,6 +20,7 @@ from .db_utils import use_backtest_schema
 from .m_distribution_reporter import MDistributionReporter
 from trade_manager.service.simulate_trade import SimulateTradeService
 from trade_manager.service.simulate_trade_handler import SimulateTradeHandler
+from .position_monitor_logic import PositionMonitorLogic
 logger = logging.getLogger(__name__)
 STRATEGIES = ['MT', 'BO', 'QD', 'MR']
 class MDistributionBacktestService:
@@ -41,6 +42,49 @@ class MDistributionBacktestService:
         self.max_holding_days = 90
         self.single_strategy_mode = single_strategy_mode
     def _get_next_trading_day(self, from_date: date) -> date | None: return (DailyQuotes.objects .filter(trade_date__gte=from_date) .order_by('trade_date') .values_list('trade_date', flat=True) .first())
+    
+    def _simulate_intraday_monitoring(self, position_dict: dict, daily_quote: dict) -> tuple[str, Decimal, Decimal, Decimal]:
+        """
+        对单个持仓在一天内进行高保真监控模拟。
+        这是一个纯逻辑函数，不直接操作数据库。
+        返回: (状态, 退出价格, 新止损, 新止盈)
+        """
+        open_p, high_p, low_p = daily_quote['open'], daily_quote['high'], daily_quote['low']
+        
+        temp_sl = position_dict['current_stop_loss']
+        temp_tp = position_dict['current_take_profit']
+        entry_price = position_dict['entry_price']
+        # 1. 开盘价检查
+        if open_p <= temp_sl:
+            return 'SOLD', open_p, temp_sl, temp_tp
+        # 加载参数 (这里简化处理，实际可从 DecisionOrderService 加载)
+        trailing_tp_increment_pct = Decimal('0.02')
+        trailing_sl_buffer_pct = Decimal('0.01')
+        # 2. 日内循环监控
+        while True:
+            action_taken_in_loop = False
+            
+            if low_p <= temp_sl:
+                return 'SOLD', temp_sl, temp_sl, temp_tp
+            if high_p >= temp_tp:
+                new_tp = temp_tp * (1 + trailing_tp_increment_pct)
+                new_sl = temp_tp * (1 - trailing_sl_buffer_pct)
+                if new_sl > temp_sl:
+                    temp_sl, temp_tp = new_sl, new_tp
+                    action_taken_in_loop = True
+            if not action_taken_in_loop and temp_sl < entry_price:
+                base_price = max(entry_price, temp_sl)
+                cost_lock_price = min((base_price + temp_tp) / 2, base_price * Decimal('1.01'))
+                if high_p > cost_lock_price:
+                    new_sl = (base_price + cost_lock_price) / 2
+                    if new_sl > temp_sl:
+                        temp_sl = new_sl
+                        action_taken_in_loop = True
+            if not action_taken_in_loop:
+                break
+        
+        return 'HOLD', Decimal('0.0'), temp_sl, temp_tp
+    
     def _setup_backtest_schema(self):
         """
         【最终修正版】在 Schema 中准备回测环境，并集成索引/约束优化逻辑。
@@ -220,14 +264,6 @@ class MDistributionBacktestService:
         """对单个预案 (数据库对象) 进行前向追溯并记录结果"""
         stock_code = plan_obj.stock_code_id
         logger.debug(f"  -> 开始追溯股票: {stock_code}")
-
-        # try:
-        #     entry_day_quote = DailyQuotes.objects.get(stock_code_id=stock_code, trade_date=plan_obj.plan_date)
-        #     entry_date = entry_day_quote.trade_date
-        #     entry_price = entry_day_quote.open
-        # except DailyQuotes.DoesNotExist:
-        #     logger.warning(f"    无法找到 {plan_obj.plan_date} 的行情数据，无法为 {stock_code} 入场。")
-        #     return
         actual_entry_date = self._get_next_trading_day(plan_obj.plan_date)
         if not actual_entry_date:
             logger.warning(f"    从 {plan_obj.plan_date} 起未找到后续交易日，跳过 {stock_code}。")
@@ -247,7 +283,12 @@ class MDistributionBacktestService:
         except ValueError as e:
             logger.warning(f"    无法为 {stock_code} 计算止盈止损: {e}，跳过此股票。")
             return
-
+        # 初始化内存中的持仓状态
+        position_state = {
+            'entry_price': entry_price,
+            'current_stop_loss': sl_price,
+            'current_take_profit': tp_price,
+        }
         future_quotes_qs = DailyQuotes.objects.filter(
             stock_code_id=stock_code,
             trade_date__gt=entry_date
@@ -260,12 +301,15 @@ class MDistributionBacktestService:
 
         exit_info = None
         for i, quote_dict in enumerate(future_quotes):
-            if quote_dict['low'] <= sl_price:
-                exit_info = {'date': quote_dict['trade_date'], 'price': sl_price, 'reason': 'STOP_LOSS', 'period': i + 1}
+            status, exit_price, new_sl, new_tp = self._simulate_intraday_monitoring(position_state, quote_dict)
+        
+            if status == 'SOLD':
+                final_reason = 'TAKE_PROFIT' if exit_price >= entry_price else 'STOP_LOSS'
+                exit_info = {'date': quote_dict['trade_date'], 'price': exit_price, 'reason': final_reason, 'period': i + 1}
                 break
-            if quote_dict['high'] >= tp_price:
-                exit_info = {'date': quote_dict['trade_date'], 'price': tp_price, 'reason': 'TAKE_PROFIT', 'period': i + 1}
-                break
+            else: # HOLD
+                position_state['current_stop_loss'] = new_sl
+                position_state['current_take_profit'] = new_tp
             
         
         if not exit_info:

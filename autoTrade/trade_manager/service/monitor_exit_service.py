@@ -8,7 +8,7 @@ from decimal import Decimal
 # 导入项目内的模型和接口
 from common.models import Position, TradeLog
 from .trade_handler import ITradeHandler
-
+from .position_monitor_logic import PositionMonitorLogic
 persistent_logger = logging.getLogger(__name__)
 
 
@@ -72,20 +72,20 @@ class MonitorExitService:
                     f"止盈价: {position.current_take_profit}"
                 )
 
-                # 检查是否触发止损
-                if current_price <= position.current_stop_loss:
-                    msg = (f"触发止损条件! 股票: {position.stock_code}, "
-                           f"当前价: {current_price} <= 止损价: {position.current_stop_loss}。准备执行卖出。")
-                    persistent_logger.info(msg) # 这是一个重要事件，使用可持久化的logger
-                    self.handler.sell_stock_by_market_price(position, TradeLog.ReasonChoices.STOP_LOSS)
-                    # 卖出后，此持仓在下一次循环中将不再被查询到，无需从当前循环中移除
-
-                # 检查是否触发止盈
-                elif current_price >= position.current_take_profit:
-                    msg = (f"触发止盈条件! 股票: {position.stock_code}, "
-                           f"当前价: {current_price} >= 止盈价: {position.current_take_profit}。准备执行卖出。")
-                    persistent_logger.info(msg) # 这是一个重要事件，使用可持久化的logger
-                    self.handler.sell_stock_by_market_price(position, TradeLog.ReasonChoices.TAKE_PROFIT)
+                # 调用中央决策逻辑
+                decision = PositionMonitorLogic.check_and_decide(position, current_price, self.params)
+                if decision['action'] == 'SELL':
+                    msg = f"触发卖出! 股票: {position.stock_code_id}, 价格: {current_price:.2f}, 机制原因: {decision['reason']}"
+                    persistent_logger.info(msg)
+                    # 注意：实盘卖出时，成交价未知，所以reason是基于触发机制的
+                    self.handler.sell_stock_by_market_price(position, decision['reason'])
+                
+                elif decision['action'] == 'UPDATE':
+                    updates = decision['updates']
+                    for field, value in updates.items():
+                        setattr(position, field, value)
+                    position.save(update_fields=list(updates.keys()))
+                    persistent_logger.info(f"风控价格更新! 股票: {position.stock_code_id}, 更新内容: {updates}")
 
             except Exception as e:
                 # 根据要求，卖出失败等异常只在控制台打印错误日志，等待下一次循环
