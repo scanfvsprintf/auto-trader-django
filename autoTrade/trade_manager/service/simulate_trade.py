@@ -219,6 +219,7 @@ class SimulateTradeService:
         # 1. 开盘价检查
         decision = PositionMonitorLogic.check_and_decide(position, open_p, self.params)
         if decision['action'] == 'SELL':
+            price=min(open_p,decision['exit_price'])
             logger.info(f"[回测] {position.stock_code_id} 开盘价 {open_p:.2f} 触发卖出，成交价 {decision['exit_price']:.2f}")
             self._persist_risk_prices_if_changed(
                 position,
@@ -226,8 +227,8 @@ class SimulateTradeService:
                 temp_position_state['current_take_profit'],
                 label='盘中'
             )
-            logger.info(f"[回测] {position.stock_code_id} 开盘价 {open_p:.2f} 触发卖出，成交价 {decision['exit_price']:.2f}")
-            self.handler.sell_stock_by_market_price(position, decision['reason'], simulated_exit_price=decision['exit_price'])
+            logger.info(f"[回测] {position.stock_code_id} 开盘价 {open_p:.2f} 触发卖出，成交价 {price:.2f}")
+            self.handler.sell_stock_by_market_price(position, decision['reason'], simulated_exit_price=price)
             return
         elif decision['action'] == 'UPDATE':
             temp_position_state.update(decision['updates'])
