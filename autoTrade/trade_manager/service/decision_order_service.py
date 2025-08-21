@@ -211,8 +211,8 @@ class DecisionOrderService:
             'k_slip': '0.002',
             'lookback_atr': '14',
             # 新版动态风险参数
-            'risk_adj_tp_pct_min': '0.1',
-            'risk_adj_tp_pct_max': '0.3',
+            'risk_adj_tp_pct_min': '0.08',
+            'risk_adj_tp_pct_max': '0.2',
             'risk_adj_sl_atr_min': '2.5',
             'risk_adj_sl_atr_max': '4',
             'risk_adj_max_loss_pct': '0.12',
@@ -508,8 +508,8 @@ class DecisionOrderService:
             'lookback_atr': {'value': '14', 'group': 'INDICATORS', 'desc': 'ATR计算周期'},
             
             # 新版 M(t) 驱动的动态风险参数
-            'risk_adj_tp_pct_min': {'value': '0.1', 'group': 'RISK_ADJUSTED', 'desc': 'M(t)驱动-最小止盈目标百分比 (熊市)'},
-            'risk_adj_tp_pct_max': {'value': '0.3', 'group': 'RISK_ADJUSTED', 'desc': 'M(t)驱动-最大止盈目标百分比 (牛市)'},
+            'risk_adj_tp_pct_min': {'value': '0.08', 'group': 'RISK_ADJUSTED', 'desc': 'M(t)驱动-最小止盈目标百分比 (熊市)'},
+            'risk_adj_tp_pct_max': {'value': '0.2', 'group': 'RISK_ADJUSTED', 'desc': 'M(t)驱动-最大止盈目标百分比 (牛市)'},
             'risk_adj_sl_atr_min': {'value': '2.5', 'group': 'RISK_ADJUSTED', 'desc': 'M(t)驱动-最小ATR止损乘数 (熊市)'},
             'risk_adj_sl_atr_max': {'value': '4.0', 'group': 'RISK_ADJUSTED', 'desc': 'M(t)驱动-最大ATR止损乘数 (牛市)'},
             'risk_adj_max_loss_pct': {'value': '0.12', 'group': 'RISK_ADJUSTED', 'desc': 'M(t)驱动-绝对最大亏损百分比'},

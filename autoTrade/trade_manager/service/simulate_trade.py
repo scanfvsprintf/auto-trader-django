@@ -48,7 +48,24 @@ class SimulateTradeService:
         self.portfolio_history = []
         self.last_buy_trade_id = None
         self.backtest_run_id: str = None # 新增：回测唯一ID
-
+        self.params: dict = {}
+    def _load_parameters(self):
+        """在回测开始前加载所有需要的策略参数。"""
+        logger.info("加载回测所需策略参数...")
+        # 从 StrategyParameters 表中一次性加载所有参数
+        all_params = {p.param_name: p.param_value for p in StrategyParameters.objects.all()}
+        
+        # 定义回测逻辑中需要用到的参数及其默认值
+        required_params = {
+            'trailing_tp_increment_pct': '0.02',
+            'trailing_sl_buffer_pct': '0.01',
+            # 这里可以添加其他未来可能用到的参数
+        }
+        for key, default_value in required_params.items():
+            # 优先使用数据库的值，否则使用默认值
+            self.params[key] = all_params.get(key, Decimal(default_value))
+        
+        logger.info(f"策略参数加载完成: {self.params}")
     def _setup_backtest_schema(self, schema_name: str, initial_capital: Decimal):
         logger.info(f"--- 1. 在 Schema '{schema_name}' 中准备回测环境 ---")
         
@@ -194,7 +211,7 @@ class SimulateTradeService:
         }
         
         # 1. 开盘价检查
-        decision = PositionMonitorLogic.check_and_decide(position, open_p, self.handler.service.params)
+        decision = PositionMonitorLogic.check_and_decide(position, open_p, self.params)
         if decision['action'] == 'SELL':
             logger.info(f"[回测] {position.stock_code_id} 开盘价 {open_p:.2f} 触发卖出，成交价 {decision['exit_price']:.2f}")
             self.handler.sell_stock_by_market_price(position, decision['reason'], simulated_exit_price=decision['exit_price'])
@@ -213,7 +230,7 @@ class SimulateTradeService:
                     current_take_profit=temp_position_state['current_take_profit']
                 ), 
                 low_p, 
-                self.handler.service.params
+                self.params
             )
             if decision_low['action'] == 'SELL':
                 logger.info(f"[回测] {position.stock_code_id} 最低价 {low_p:.2f} 触发卖出，成交价 {decision_low['exit_price']:.2f}")
@@ -227,7 +244,7 @@ class SimulateTradeService:
                     current_take_profit=temp_position_state['current_take_profit']
                 ), 
                 high_p, 
-                self.handler.service.params
+                self.params
             )
             if decision_high['action'] == 'UPDATE':
                 # 检查是否有实际的更新
@@ -258,7 +275,7 @@ class SimulateTradeService:
 
             with use_backtest_schema(self.backtest_run_id):
                 self._setup_backtest_schema(self.backtest_run_id, initial_capital)
-
+                self._load_parameters()
                 handler = SimulateTradeHandler(self)
                 self.handler=handler
                 trading_days = self._get_trading_days()
