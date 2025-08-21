@@ -513,7 +513,7 @@ class DecisionOrderService:
             'risk_adj_tp_pct_max': {'value': '0.2', 'group': 'RISK_ADJUSTED', 'desc': 'M(t)驱动-最大止盈目标百分比 (牛市)'},
             'risk_adj_sl_atr_min': {'value': '2.5', 'group': 'RISK_ADJUSTED', 'desc': 'M(t)驱动-最小ATR止损乘数 (熊市)'},
             'risk_adj_sl_atr_max': {'value': '4.0', 'group': 'RISK_ADJUSTED', 'desc': 'M(t)驱动-最大ATR止损乘数 (牛市)'},
-            'risk_adj_max_loss_pct': {'value': '0.12', 'group': 'RISK_ADJUSTED', 'desc': 'M(t)驱动-绝对最大亏损百分比'},
+            'risk_adj_max_loss_pct': {'value': '0.01', 'group': 'RISK_ADJUSTED', 'desc': 'M(t)驱动-绝对最大亏损百分比'},
             # --- 全新动态仓位管理参数 ---
             'ORIGINAL_MAX_POSITIONS': {'value': '5', 'group': 'DYNAMIC_POS_MGMT', 'desc': '【动态仓位】策略基准最大持仓数'},
             'MIN_POSITIONS_COUNT': {'value': '1', 'group': 'DYNAMIC_POS_MGMT', 'desc': '【动态仓位】最小持仓数硬下限'},
@@ -521,8 +521,8 @@ class DecisionOrderService:
             'RISK_ADJ_CAPITAL_FLOOR_PCT': {'value': '0.6', 'group': 'DYNAMIC_POS_MGMT', 'desc': '【动态仓位】单位名义本金缩放因子的下限 S_min_cap (例如0.6代表最差情况投入基准的60%)'},
         
             # --- 追踪止盈参数 ---
-            'trailing_tp_increment_pct': {'value': '0.02', 'group': 'TRAILING_STOP', 'desc': '追踪止盈的步进百分比'},
-            'trailing_sl_buffer_pct': {'value': '0.01', 'group': 'TRAILING_STOP', 'desc': '追踪止盈的回撤缓冲百分比'},
+            'trailing_tp_increment_pct': {'value': '0.05', 'group': 'TRAILING_STOP', 'desc': '追踪止盈的步进百分比'},
+            'trailing_sl_buffer_pct': {'value': '0.05', 'group': 'TRAILING_STOP', 'desc': '追踪止盈的回撤缓冲百分比'},
         
         }
 

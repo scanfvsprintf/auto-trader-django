@@ -92,8 +92,15 @@ class BacktestReporter:
             """, [self.current_date]
         )
         for h in data['current_holdings']:
-            h['profit_rate'] = (h['current_take_profit'] / h['entry_price']) - 1 if h['entry_price'] > 0 else 0
-            h['loss_rate'] = 1 - (h['current_stop_loss'] / h['entry_price']) if h['entry_price'] > 0 else 0
+            entry_price = h['entry_price']
+            if entry_price and entry_price > 0:
+                # 新的计算方式：将止盈/止损价表示为成本价的百分比
+                h['profit_level_pct'] = h['current_take_profit'] / entry_price
+                h['loss_level_pct'] = h['current_stop_loss'] / entry_price
+            else:
+                # 处理 entry_price 无效的情况
+                h['profit_level_pct'] = Decimal('0.0')
+                h['loss_level_pct'] = Decimal('0.0')
 
         # 4. 收益排名
         all_ops = self._execute_query(f"SELECT stock_code, stock_name, direction, amount FROM {BacktestOperationLog._meta.db_table}")
@@ -237,7 +244,7 @@ class BacktestReporter:
         if data['current_holdings']:
             html += """
             <table class="data-table">
-                <thead><tr><th>股票代码</th><th>股票名称</th><th>入场价</th><th>当前价</th><th>浮动盈亏</th><th>止盈价格</th><th>止损价格</th><th>预设止盈率</th><th>预设止损率</th></tr></thead>
+                <thead><tr><th>股票代码</th><th>股票名称</th><th>入场价</th><th>当前价</th><th>浮动盈亏</th><th>止盈价格</th><th>止损价格</th><th>止盈线位置</th><th>止损线位置</th></tr></thead>
                 <tbody>
             """
             for h in data['current_holdings']:
@@ -245,6 +252,8 @@ class BacktestReporter:
                 profit_loss = current_price - h['entry_price']
                 profit_loss_rate = (current_price / h['entry_price'] - 1) if h['entry_price'] else 0
                 style = get_row_style(profit_loss)
+                profit_level_str = f"{h['profit_level_pct']:.2%}"
+                loss_level_str = f"{h['loss_level_pct']:.2%}"
                 html += f"""
                 <tr {style}>
                     <td>{h['stock_code']}</td>
@@ -254,8 +263,8 @@ class BacktestReporter:
                     <td>{profit_loss_rate:.2%}</td>
                     <td>{h['current_take_profit']:.2f}</td>
                     <td>{h['current_stop_loss']:.2f}</td>
-                    <td>{h['profit_rate']:.2%}</td>
-                    <td>{h['loss_rate']:.2%}</td>
+                    <td style="color: #c82333;">{profit_level_str}</td>
+                    <td style="color: #1e7e34;">{loss_level_str}</td>
                 </tr>
                 """
             html += "</tbody></table>"

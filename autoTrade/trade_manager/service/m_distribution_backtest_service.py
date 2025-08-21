@@ -58,8 +58,8 @@ class MDistributionBacktestService:
         if open_p <= temp_sl:
             return 'SOLD', open_p, temp_sl, temp_tp
         # 加载参数 (这里简化处理，实际可从 DecisionOrderService 加载)
-        trailing_tp_increment_pct = Decimal('0.02')
-        trailing_sl_buffer_pct = Decimal('0.01')
+        trailing_tp_increment_pct = Decimal('0.05')
+        trailing_sl_buffer_pct = Decimal('0.05')
         # 2. 日内循环监控
         while True:
             action_taken_in_loop = False

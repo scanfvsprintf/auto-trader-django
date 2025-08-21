@@ -89,39 +89,36 @@ class BeforeFixService:
         logger.warning(f"在过去 {self.MAX_PLAN_LOOKBACK_DAYS} 天内未找到任何待执行的交易预案。")
         return None
 
-    def _calculate_adjusted_price(self, t_minus_1_close: Decimal, events: list[CorporateAction]) -> Decimal:
+    def _calculate_adjustment_ratios(self, events: list[CorporateAction]) -> tuple[Decimal, Decimal]:
         """
         核心算法：根据事件列表计算除权除息参考价。
         处理顺序：1.除息 -> 2.送/转股 -> 3.配股
         """
-        adjusted_price = t_minus_1_close
+        price_ratio = Decimal('1.0')
+        quantity_ratio = Decimal('1.0')
+
+
         
         # 按事件类型优先级排序
         event_priority = {
             CorporateAction.EventType.DIVIDEND: 1,
             CorporateAction.EventType.BONUS: 2,
             CorporateAction.EventType.TRANSFER: 2,
-            CorporateAction.EventType.SPLIT: 2,
-            CorporateAction.EventType.RIGHTS: 3,
+            CorporateAction.EventType.SPLIT: 2
+            #CorporateAction.EventType.RIGHTS: 3,
         }
         sorted_events = sorted(events, key=lambda e: event_priority.get(e.event_type, 99))
 
         for event in sorted_events:
-            # 1. 现金分红 (除息)
-            if event.event_type == CorporateAction.EventType.DIVIDEND and event.dividend_per_share:
-                adjusted_price -= event.dividend_per_share
-            
-            # 2. 送股/转增股/并股/拆股 (除权)
-            elif event.event_type in [CorporateAction.EventType.BONUS, CorporateAction.EventType.TRANSFER, CorporateAction.EventType.SPLIT]:
+            # 送股/转增股/并股/拆股 (除权)
+            if event.event_type in [CorporateAction.EventType.BONUS, CorporateAction.EventType.TRANSFER, CorporateAction.EventType.SPLIT]:
                 if event.shares_before and event.shares_after and event.shares_after > 0:
-                    adjusted_price = adjusted_price * (event.shares_before / event.shares_after)
-
-            # 3. 配股 (除权) - 注意：按需求，此计算结果不用于常规校准，但逻辑保留
-            elif event.event_type == CorporateAction.EventType.RIGHTS:
-                if event.shares_before and event.shares_after and event.rights_issue_price is not None and event.shares_after > 0:
-                    adjusted_price = (event.shares_before * adjusted_price + (event.shares_after - event.shares_before) * event.rights_issue_price) / event.shares_after
+                    # 价格比率 = 旧股数 / 新股数
+                    price_ratio *= (event.shares_before / event.shares_after)
+                    # 数量比率 = 新股数 / 旧股数
+                    quantity_ratio *= (event.shares_after / event.shares_before)
         
-        return adjusted_price
+        return price_ratio, quantity_ratio
 
     @transaction.atomic
     def run(self):
@@ -141,9 +138,14 @@ class BeforeFixService:
         # 按股票代码分组事件
         events_by_stock = {}
         for event in events_on_t_day:
-            events_by_stock.setdefault(event.stock_code, []).append(event)
+            if event.event_type != CorporateAction.EventType.RIGHTS:
+                 events_by_stock.setdefault(event.stock_code, []).append(event)
         
         affected_codes = list(events_by_stock.keys())
+        if not affected_codes:
+            logger.info("T日只有配股事件，常规校准流程跳过。")
+            self._handle_rights_issue_special_case() # 仍然要处理配股的特殊情况
+            return
         logger.info(f"T日共有 {len(affected_codes)} 只股票发生股权事件。")
 
         # 获取这些股票在T-1日的收盘价
@@ -153,7 +155,7 @@ class BeforeFixService:
         )
         # 使用字典推导式构建我们需要的映射关系
         quotes_t_minus_1 = {quote.stock_code_id: quote for quote in quotes_qs}
-
+        self.adjustment_ratios = {} 
         # b. 计算价格调整比率
         for stock_code, events in events_by_stock.items():
             if stock_code not in quotes_t_minus_1:
@@ -164,11 +166,23 @@ class BeforeFixService:
             if close_t_minus_1 <= 0:
                 logger.warning(f"股票 {stock_code} 在T-1日收盘价为0或负数，不合理，跳过校准。")
                 continue
-
-            adjusted_close = self._calculate_adjusted_price(close_t_minus_1, events)
-            ratio = adjusted_close / close_t_minus_1
-            self.adjustment_ratios[stock_code] = ratio
-            logger.info(f"股票 {stock_code}: T-1收盘价={close_t_minus_1}, 校准后价格={adjusted_close:.2f}, 调整比率={ratio:.6f}")
+            # 1. 计算送/转/拆/并股的比率
+            price_ratio_st, quantity_ratio_st = self._calculate_adjustment_ratios(events)
+            # 2. 计算分红的价格影响
+            total_dividend = sum(e.dividend_per_share for e in events if e.event_type == CorporateAction.EventType.DIVIDEND and e.dividend_per_share)
+            
+            price_ratio_div = Decimal('1.0')
+            if total_dividend > 0:
+                # 分红的价格调整比率 = (收盘价 - 分红) / 收盘价
+                price_ratio_div = (close_t_minus_1 - total_dividend) / close_t_minus_1
+            # 3. 合并总比率
+            final_price_ratio = price_ratio_st * price_ratio_div
+            final_quantity_ratio = quantity_ratio_st # 分红不影响数量
+            self.adjustment_ratios[stock_code] = (final_price_ratio, final_quantity_ratio)
+            
+            logger.info(f"股票 {stock_code}: T-1收盘价={close_t_minus_1}, "
+                        f"价格调整比率={final_price_ratio:.6f}, "
+                        f"数量调整比率={final_quantity_ratio:.6f}")
 
         # c. 修正交易预案
         self._process_trading_plans()
@@ -195,15 +209,15 @@ class BeforeFixService:
 
         plans_to_update = []
         for plan in plans_to_fix:
-            ratio = self.adjustment_ratios[plan.stock_code_id]
+            price_ratio, _ = self.adjustment_ratios[plan.stock_code_id]
             original_miop = plan.miop
             original_maop = plan.maop
             
-            plan.miop = (original_miop * Decimal(str(ratio))).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
-            plan.maop = (original_maop * Decimal(str(ratio))).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+            plan.miop = (original_miop * price_ratio).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+            plan.maop = (original_maop * price_ratio).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
             
             plans_to_update.append(plan)
-            logger.info(f"交易预案修正: {plan.stock_code}, MIOP: {original_miop}->{plan.miop}, MAOP: {original_maop}->{plan.maop}")
+            logger.info(f"交易预案修正: {plan.stock_code_id}, MIOP: {original_miop}->{plan.miop}, MAOP: {original_maop}->{plan.maop}")
 
         if plans_to_update:
             DailyTradingPlan.objects.bulk_update(plans_to_update, ['miop', 'maop'])
@@ -217,16 +231,29 @@ class BeforeFixService:
         )
 
         positions_to_update = []
+        update_fields = ['entry_price', 'quantity', 'current_stop_loss', 'current_take_profit']
         for pos in positions_to_fix:
-            ratio = self.adjustment_ratios[pos.stock_code_id]
+            price_ratio, quantity_ratio = self.adjustment_ratios[pos.stock_code_id]
+            
+            original_ep = pos.entry_price
+            original_qty = pos.quantity
             original_sl = pos.current_stop_loss
             original_tp = pos.current_take_profit
-
-            pos.current_stop_loss = (original_sl * Decimal(str(ratio))).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
-            pos.current_take_profit = (original_tp * Decimal(str(ratio))).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+            # 【新增】调整成本价
+            pos.entry_price = (original_ep * price_ratio).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+            
+            # 【新增】调整持仓数量，并取整到股
+            pos.quantity = int((Decimal(str(original_qty)) * quantity_ratio).to_integral_value(rounding=ROUND_HALF_UP))
+            # 【修改】调整止盈止损价
+            pos.current_stop_loss = (original_sl * price_ratio).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+            pos.current_take_profit = (original_tp * price_ratio).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
             
             positions_to_update.append(pos)
-            logger.info(f"持仓风控修正: {pos.stock_code}, 止损: {original_sl}->{pos.current_stop_loss}, 止盈: {original_tp}->{pos.current_take_profit}")
+            logger.info(f"持仓风控修正: {pos.stock_code_id}, "
+                        f"成本价: {original_ep:.2f} -> {pos.entry_price:.2f}, "
+                        f"数量: {original_qty} -> {pos.quantity}, "
+                        f"止损: {original_sl:.2f} -> {pos.current_stop_loss:.2f}, "
+                        f"止盈: {original_tp:.2f} -> {pos.current_take_profit:.2f}")
 
         if positions_to_update:
             Position.objects.bulk_update(positions_to_update, ['current_stop_loss', 'current_take_profit'])
