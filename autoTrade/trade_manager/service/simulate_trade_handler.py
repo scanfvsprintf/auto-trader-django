@@ -203,7 +203,8 @@ class SimulateTradeHandler(ITradeHandler):
             exit_reason_for_log = BacktestOperationLog.ExitReason.TAKE_PROFIT
         elif reason == TradeLog.ReasonChoices.STOP_LOSS:
             exit_reason_for_log = BacktestOperationLog.ExitReason.STOP_LOSS
-
+        final_profit_rate = (position.current_take_profit / position.entry_price - 1) if position.entry_price > 0 else None
+        final_loss_rate = (1 - (position.current_stop_loss / position.entry_price)) if position.entry_price > 0 else None
         BacktestOperationLog.objects.create(
             backtest_run_id=self.service.backtest_run_id,
             position_id_ref=position.position_id,
@@ -212,8 +213,8 @@ class SimulateTradeHandler(ITradeHandler):
             trade_date=self.service.current_date,
             direction=BacktestOperationLog.Direction.SELL,
             exit_reason=exit_reason_for_log,
-            profit_rate=profit_rate,
-            loss_rate=loss_rate,
+            profit_rate=final_profit_rate,
+            loss_rate=final_loss_rate,
             buy_date_m_value=m_value,
             factor_scores=scores_str,
             price=sell_price,

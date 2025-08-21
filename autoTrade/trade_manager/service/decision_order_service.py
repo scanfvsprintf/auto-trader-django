@@ -121,7 +121,7 @@ class DecisionOrderService:
         # iii. 取整并应用下限
         min_pos_count = self.params['MIN_POSITIONS_COUNT']
         current_max_positions = max(min_pos_count, int(theoretical_max.to_integral_value(rounding='ROUND_FLOOR')))
-        
+        current_max_positions=base_max_pos
         logger.debug(f"动态持仓数计算: S_pos={S_pos:.4f}, 理财持仓={theoretical_max:.2f}, 最终取整={current_max_positions}")
         return current_max_positions
  
@@ -159,6 +159,7 @@ class DecisionOrderService:
             S_cap = Decimal('0.5')
         else:
             S_cap = Decimal('0.0')
+        S_cap=Decimal('1.0')
         # iv. 计算动态调整后的名义本金
         adjusted_unit_principal = baseline_unit_principal * S_cap
         

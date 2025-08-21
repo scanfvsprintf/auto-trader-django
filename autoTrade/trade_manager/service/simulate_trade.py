@@ -49,6 +49,12 @@ class SimulateTradeService:
         self.last_buy_trade_id = None
         self.backtest_run_id: str = None # 新增：回测唯一ID
         self.params: dict = {}
+    def _persist_risk_prices_if_changed(self, position, new_sl, new_tp, label='盘中'):
+        if new_sl != position.current_stop_loss or new_tp != position.current_take_profit:
+            position.current_stop_loss = new_sl
+            position.current_take_profit = new_tp
+            position.save(update_fields=['current_stop_loss', 'current_take_profit'])
+            logger.info(f"[回测] {position.stock_code_id} {label}更新风控价格。SL: {position.current_stop_loss:.2f}, TP: {position.current_take_profit:.2f}")
     def _load_parameters(self):
         """在回测开始前加载所有需要的策略参数。"""
         logger.info("加载回测所需策略参数...")
@@ -214,6 +220,13 @@ class SimulateTradeService:
         decision = PositionMonitorLogic.check_and_decide(position, open_p, self.params)
         if decision['action'] == 'SELL':
             logger.info(f"[回测] {position.stock_code_id} 开盘价 {open_p:.2f} 触发卖出，成交价 {decision['exit_price']:.2f}")
+            self._persist_risk_prices_if_changed(
+                position,
+                temp_position_state['current_stop_loss'],
+                temp_position_state['current_take_profit'],
+                label='盘中'
+            )
+            logger.info(f"[回测] {position.stock_code_id} 开盘价 {open_p:.2f} 触发卖出，成交价 {decision['exit_price']:.2f}")
             self.handler.sell_stock_by_market_price(position, decision['reason'], simulated_exit_price=decision['exit_price'])
             return
         elif decision['action'] == 'UPDATE':
@@ -233,6 +246,12 @@ class SimulateTradeService:
                 self.params
             )
             if decision_low['action'] == 'SELL':
+                self._persist_risk_prices_if_changed(
+                    position,
+                    temp_position_state['current_stop_loss'],
+                    temp_position_state['current_take_profit'],
+                    label='盘中'
+                )
                 logger.info(f"[回测] {position.stock_code_id} 最低价 {low_p:.2f} 触发卖出，成交价 {decision_low['exit_price']:.2f}")
                 self.handler.sell_stock_by_market_price(position, decision_low['reason'], simulated_exit_price=decision_low['exit_price'])
                 return

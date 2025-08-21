@@ -114,6 +114,7 @@
             📄 m_distribution_backtest_service.py
             📄 m_distribution_reporter.py
             📄 monitor_exit_service.py
+            📄 position_monitor_logic.py
             📄 real_trade_handler.py
             📄 scheduler_service.py
             📄 simulate_trade.py
@@ -6563,8 +6564,8 @@ class DecisionOrderService:
             'k_slip': '0.002',
             'lookback_atr': '14',
             # 新版动态风险参数
-            'risk_adj_tp_pct_min': '0.1',
-            'risk_adj_tp_pct_max': '0.3',
+            'risk_adj_tp_pct_min': '0.08',
+            'risk_adj_tp_pct_max': '0.2',
             'risk_adj_sl_atr_min': '2.5',
             'risk_adj_sl_atr_max': '4',
             'risk_adj_max_loss_pct': '0.12',
@@ -6860,8 +6861,8 @@ class DecisionOrderService:
             'lookback_atr': {'value': '14', 'group': 'INDICATORS', 'desc': 'ATR计算周期'},
             
             # 新版 M(t) 驱动的动态风险参数
-            'risk_adj_tp_pct_min': {'value': '0.1', 'group': 'RISK_ADJUSTED', 'desc': 'M(t)驱动-最小止盈目标百分比 (熊市)'},
-            'risk_adj_tp_pct_max': {'value': '0.3', 'group': 'RISK_ADJUSTED', 'desc': 'M(t)驱动-最大止盈目标百分比 (牛市)'},
+            'risk_adj_tp_pct_min': {'value': '0.08', 'group': 'RISK_ADJUSTED', 'desc': 'M(t)驱动-最小止盈目标百分比 (熊市)'},
+            'risk_adj_tp_pct_max': {'value': '0.2', 'group': 'RISK_ADJUSTED', 'desc': 'M(t)驱动-最大止盈目标百分比 (牛市)'},
             'risk_adj_sl_atr_min': {'value': '2.5', 'group': 'RISK_ADJUSTED', 'desc': 'M(t)驱动-最小ATR止损乘数 (熊市)'},
             'risk_adj_sl_atr_max': {'value': '4.0', 'group': 'RISK_ADJUSTED', 'desc': 'M(t)驱动-最大ATR止损乘数 (牛市)'},
             'risk_adj_max_loss_pct': {'value': '0.12', 'group': 'RISK_ADJUSTED', 'desc': 'M(t)驱动-绝对最大亏损百分比'},
@@ -6869,7 +6870,12 @@ class DecisionOrderService:
             'ORIGINAL_MAX_POSITIONS': {'value': '5', 'group': 'DYNAMIC_POS_MGMT', 'desc': '【动态仓位】策略基准最大持仓数'},
             'MIN_POSITIONS_COUNT': {'value': '1', 'group': 'DYNAMIC_POS_MGMT', 'desc': '【动态仓位】最小持仓数硬下限'},
             'RISK_ADJ_POS_FLOOR_PCT': {'value': '0.1', 'group': 'DYNAMIC_POS_MGMT', 'desc': '【动态仓位】总仓位数缩放因子的下限 S_min_pos (例如0.4代表最差情况持有基准的40%)'},
-            'RISK_ADJ_CAPITAL_FLOOR_PCT': {'value': '0.6', 'group': 'DYNAMIC_POS_MGMT', 'desc': '【动态仓位】单位名义本金缩放因子的下限 S_min_cap (例如0.6代表最差情况投入基准的60%)'}
+            'RISK_ADJ_CAPITAL_FLOOR_PCT': {'value': '0.6', 'group': 'DYNAMIC_POS_MGMT', 'desc': '【动态仓位】单位名义本金缩放因子的下限 S_min_cap (例如0.6代表最差情况投入基准的60%)'},
+        
+            # --- 追踪止盈参数 ---
+            'trailing_tp_increment_pct': {'value': '0.02', 'group': 'TRAILING_STOP', 'desc': '追踪止盈的步进百分比'},
+            'trailing_sl_buffer_pct': {'value': '0.01', 'group': 'TRAILING_STOP', 'desc': '追踪止盈的回撤缓冲百分比'},
+        
         }
 
         with transaction.atomic():
@@ -7279,6 +7285,7 @@ from .db_utils import use_backtest_schema
 from .m_distribution_reporter import MDistributionReporter
 from trade_manager.service.simulate_trade import SimulateTradeService
 from trade_manager.service.simulate_trade_handler import SimulateTradeHandler
+from .position_monitor_logic import PositionMonitorLogic
 logger = logging.getLogger(__name__)
 STRATEGIES = ['MT', 'BO', 'QD', 'MR']
 class MDistributionBacktestService:
@@ -7300,6 +7307,49 @@ class MDistributionBacktestService:
         self.max_holding_days = 90
         self.single_strategy_mode = single_strategy_mode
     def _get_next_trading_day(self, from_date: date) -> date | None: return (DailyQuotes.objects .filter(trade_date__gte=from_date) .order_by('trade_date') .values_list('trade_date', flat=True) .first())
+    
+    def _simulate_intraday_monitoring(self, position_dict: dict, daily_quote: dict) -> tuple[str, Decimal, Decimal, Decimal]:
+        """
+        对单个持仓在一天内进行高保真监控模拟。
+        这是一个纯逻辑函数，不直接操作数据库。
+        返回: (状态, 退出价格, 新止损, 新止盈)
+        """
+        open_p, high_p, low_p = daily_quote['open'], daily_quote['high'], daily_quote['low']
+        
+        temp_sl = position_dict['current_stop_loss']
+        temp_tp = position_dict['current_take_profit']
+        entry_price = position_dict['entry_price']
+        # 1. 开盘价检查
+        if open_p <= temp_sl:
+            return 'SOLD', open_p, temp_sl, temp_tp
+        # 加载参数 (这里简化处理，实际可从 DecisionOrderService 加载)
+        trailing_tp_increment_pct = Decimal('0.02')
+        trailing_sl_buffer_pct = Decimal('0.01')
+        # 2. 日内循环监控
+        while True:
+            action_taken_in_loop = False
+            
+            if low_p <= temp_sl:
+                return 'SOLD', temp_sl, temp_sl, temp_tp
+            if high_p >= temp_tp:
+                new_tp = temp_tp * (1 + trailing_tp_increment_pct)
+                new_sl = temp_tp * (1 - trailing_sl_buffer_pct)
+                if new_sl > temp_sl:
+                    temp_sl, temp_tp = new_sl, new_tp
+                    action_taken_in_loop = True
+            if not action_taken_in_loop and temp_sl < entry_price:
+                base_price = max(entry_price, temp_sl)
+                cost_lock_price = min((base_price + temp_tp) / 2, base_price * Decimal('1.01'))
+                if high_p > cost_lock_price:
+                    new_sl = (base_price + cost_lock_price) / 2
+                    if new_sl > temp_sl:
+                        temp_sl = new_sl
+                        action_taken_in_loop = True
+            if not action_taken_in_loop:
+                break
+        
+        return 'HOLD', Decimal('0.0'), temp_sl, temp_tp
+    
     def _setup_backtest_schema(self):
         """
         【最终修正版】在 Schema 中准备回测环境，并集成索引/约束优化逻辑。
@@ -7479,14 +7529,6 @@ class MDistributionBacktestService:
         """对单个预案 (数据库对象) 进行前向追溯并记录结果"""
         stock_code = plan_obj.stock_code_id
         logger.debug(f"  -> 开始追溯股票: {stock_code}")
-
-        # try:
-        #     entry_day_quote = DailyQuotes.objects.get(stock_code_id=stock_code, trade_date=plan_obj.plan_date)
-        #     entry_date = entry_day_quote.trade_date
-        #     entry_price = entry_day_quote.open
-        # except DailyQuotes.DoesNotExist:
-        #     logger.warning(f"    无法找到 {plan_obj.plan_date} 的行情数据，无法为 {stock_code} 入场。")
-        #     return
         actual_entry_date = self._get_next_trading_day(plan_obj.plan_date)
         if not actual_entry_date:
             logger.warning(f"    从 {plan_obj.plan_date} 起未找到后续交易日，跳过 {stock_code}。")
@@ -7506,7 +7548,12 @@ class MDistributionBacktestService:
         except ValueError as e:
             logger.warning(f"    无法为 {stock_code} 计算止盈止损: {e}，跳过此股票。")
             return
-
+        # 初始化内存中的持仓状态
+        position_state = {
+            'entry_price': entry_price,
+            'current_stop_loss': sl_price,
+            'current_take_profit': tp_price,
+        }
         future_quotes_qs = DailyQuotes.objects.filter(
             stock_code_id=stock_code,
             trade_date__gt=entry_date
@@ -7519,12 +7566,15 @@ class MDistributionBacktestService:
 
         exit_info = None
         for i, quote_dict in enumerate(future_quotes):
-            if quote_dict['low'] <= sl_price:
-                exit_info = {'date': quote_dict['trade_date'], 'price': sl_price, 'reason': 'STOP_LOSS', 'period': i + 1}
+            status, exit_price, new_sl, new_tp = self._simulate_intraday_monitoring(position_state, quote_dict)
+        
+            if status == 'SOLD':
+                final_reason = 'TAKE_PROFIT' if exit_price >= entry_price else 'STOP_LOSS'
+                exit_info = {'date': quote_dict['trade_date'], 'price': exit_price, 'reason': final_reason, 'period': i + 1}
                 break
-            if quote_dict['high'] >= tp_price:
-                exit_info = {'date': quote_dict['trade_date'], 'price': tp_price, 'reason': 'TAKE_PROFIT', 'period': i + 1}
-                break
+            else: # HOLD
+                position_state['current_stop_loss'] = new_sl
+                position_state['current_take_profit'] = new_tp
             
         
         if not exit_info:
@@ -7844,7 +7894,7 @@ from decimal import Decimal
 # 导入项目内的模型和接口
 from common.models import Position, TradeLog
 from .trade_handler import ITradeHandler
-
+from .position_monitor_logic import PositionMonitorLogic
 persistent_logger = logging.getLogger(__name__)
 
 
@@ -7908,20 +7958,20 @@ class MonitorExitService:
                     f"止盈价: {position.current_take_profit}"
                 )
 
-                # 检查是否触发止损
-                if current_price <= position.current_stop_loss:
-                    msg = (f"触发止损条件! 股票: {position.stock_code}, "
-                           f"当前价: {current_price} <= 止损价: {position.current_stop_loss}。准备执行卖出。")
-                    persistent_logger.info(msg) # 这是一个重要事件，使用可持久化的logger
-                    self.handler.sell_stock_by_market_price(position, TradeLog.ReasonChoices.STOP_LOSS)
-                    # 卖出后，此持仓在下一次循环中将不再被查询到，无需从当前循环中移除
-
-                # 检查是否触发止盈
-                elif current_price >= position.current_take_profit:
-                    msg = (f"触发止盈条件! 股票: {position.stock_code}, "
-                           f"当前价: {current_price} >= 止盈价: {position.current_take_profit}。准备执行卖出。")
-                    persistent_logger.info(msg) # 这是一个重要事件，使用可持久化的logger
-                    self.handler.sell_stock_by_market_price(position, TradeLog.ReasonChoices.TAKE_PROFIT)
+                # 调用中央决策逻辑
+                decision = PositionMonitorLogic.check_and_decide(position, current_price, self.params)
+                if decision['action'] == 'SELL':
+                    msg = f"触发卖出! 股票: {position.stock_code_id}, 价格: {current_price:.2f}, 机制原因: {decision['reason']}"
+                    persistent_logger.info(msg)
+                    # 注意：实盘卖出时，成交价未知，所以reason是基于触发机制的
+                    self.handler.sell_stock_by_market_price(position, decision['reason'])
+                
+                elif decision['action'] == 'UPDATE':
+                    updates = decision['updates']
+                    for field, value in updates.items():
+                        setattr(position, field, value)
+                    position.save(update_fields=list(updates.keys()))
+                    persistent_logger.info(f"风控价格更新! 股票: {position.stock_code_id}, 更新内容: {updates}")
 
             except Exception as e:
                 # 根据要求，卖出失败等异常只在控制台打印错误日志，等待下一次循环
@@ -7933,6 +7983,71 @@ class MonitorExitService:
         
         self.logger.debug(f"[{self.MODULE_NAME}] 任务结束。")
 
+
+####文件结束####
+
+####trade_manager\service\position_monitor_logic.py####
+# trade_manager/service/position_monitor_logic.py (新增或在monitor_exit_service.py中定义)
+from decimal import Decimal
+from common.models import Position, TradeLog
+
+class PositionMonitorLogic:
+    """
+    持仓监控的核心决策逻辑。
+    这是一个无状态的类，所有方法都是静态的，便于在任何地方调用。
+    """
+    @staticmethod
+    def check_and_decide(position: Position, current_price: Decimal, params: dict) -> dict:
+        """
+        根据当前价格，对一个持仓做出决策。
+        这是所有监控逻辑的唯一入口。
+
+        :param position: 持仓对象
+        :param current_price: 当前检查的价格
+        :param params: 包含所需策略参数的字典
+        :return: 一个包含决策的字典, e.g.,
+                 {'action': 'SELL', 'reason': 'stop_loss', 'exit_price': Decimal('10.00')}
+                 {'action': 'UPDATE', 'updates': {'current_stop_loss': ..., 'current_take_profit': ...}}
+                 {'action': 'NONE'}
+        """
+        # 阶段一：止损退出检查 (最高优先级)
+        if current_price <= position.current_stop_loss:
+            final_reason = TradeLog.ReasonChoices.TAKE_PROFIT if position.current_stop_loss >= position.entry_price else TradeLog.ReasonChoices.STOP_LOSS
+            return {
+                'action': 'SELL',
+                'reason': final_reason,
+                'exit_price': position.current_stop_loss
+            }
+
+        # 阶段二：追踪止盈
+        if current_price >= position.current_take_profit:
+            new_tp = position.current_take_profit * (1 + params['trailing_tp_increment_pct'])
+            new_sl = position.current_take_profit * (1 - params['trailing_sl_buffer_pct'])
+            return {
+                'action': 'UPDATE',
+                'updates': {
+                    'current_take_profit': new_tp.quantize(Decimal('0.01')),
+                    'current_stop_loss': new_sl.quantize(Decimal('0.01'))
+                }
+            }
+
+        # 阶段三：成本锁定
+        if position.current_stop_loss < position.entry_price:
+            base_price = max(position.entry_price, position.current_stop_loss)
+            cost_lock_price = min(
+                (base_price + position.current_take_profit) / 2,
+                base_price * Decimal('1.01')
+            )
+            if current_price > cost_lock_price:
+                new_sl = ((base_price + cost_lock_price) / 2)
+                # 确保新的止损价不会高于当前价，避免立即触发
+                if new_sl < current_price:
+                    return {
+                        'action': 'UPDATE',
+                        'updates': {'current_stop_loss': new_sl.quantize(Decimal('0.01'))}
+                    }
+
+        return {'action': 'NONE'}
 
 ####文件结束####
 
@@ -8330,15 +8445,20 @@ def update_order_status_job():
                     trade.price = Decimal(str(real_order['filled_price']))
                     # 注意：easytrader返回的佣金可能不准确，这里仅为示例
                     trade.commission = Decimal(str(real_order.get('business_balance', '0.0'))) - Decimal(str(real_order.get('clear_balance', '0.0')))
-                    trade.save()
+                    
 
                     if trade.trade_type == 'buy':
                         decision_service = DecisionOrderService(handler, execution_date=date.today())
                         decision_service.calculate_stop_profit_loss(trade.trade_id)
                     else: # sell
+                        if trade.price >= position.entry_price:
+                            trade.reason = TradeLog.ReasonChoices.TAKE_PROFIT
+                        else:
+                            trade.reason = TradeLog.ReasonChoices.STOP_LOSS
                         position = trade.position
                         position.status = Position.StatusChoices.CLOSED
                         position.save()
+                    trade.save()
                 logger.info(f"订单 {trade.trade_id} (委托号: {trade.external_order_id}) 状态更新为已成交。")
 
             elif real_order['order_status'] in ['已撤', '废单', '部成已撤']:
@@ -8502,7 +8622,8 @@ from trade_manager.service.decision_order_service import DecisionOrderService
 from trade_manager.service.monitor_exit_service import MonitorExitService
 from .simulate_trade_handler import SimulateTradeHandler
 from .db_utils import use_backtest_schema
-from .backtest_reporter import BacktestReporter # 新增导入
+from .backtest_reporter import BacktestReporter 
+from .position_monitor_logic import PositionMonitorLogic
 
 logger = logging.getLogger(__name__)
 
@@ -8524,7 +8645,24 @@ class SimulateTradeService:
         self.portfolio_history = []
         self.last_buy_trade_id = None
         self.backtest_run_id: str = None # 新增：回测唯一ID
-
+        self.params: dict = {}
+    def _load_parameters(self):
+        """在回测开始前加载所有需要的策略参数。"""
+        logger.info("加载回测所需策略参数...")
+        # 从 StrategyParameters 表中一次性加载所有参数
+        all_params = {p.param_name: p.param_value for p in StrategyParameters.objects.all()}
+        
+        # 定义回测逻辑中需要用到的参数及其默认值
+        required_params = {
+            'trailing_tp_increment_pct': '0.02',
+            'trailing_sl_buffer_pct': '0.01',
+            # 这里可以添加其他未来可能用到的参数
+        }
+        for key, default_value in required_params.items():
+            # 优先使用数据库的值，否则使用默认值
+            self.params[key] = all_params.get(key, Decimal(default_value))
+        
+        logger.info(f"策略参数加载完成: {self.params}")
     def _setup_backtest_schema(self, schema_name: str, initial_capital: Decimal):
         logger.info(f"--- 1. 在 Schema '{schema_name}' 中准备回测环境 ---")
         
@@ -8660,6 +8798,67 @@ class SimulateTradeService:
         self.cash_balance = self.initial_capital
         logger.info(f"初始资金已设定为: {self.initial_capital:.2f}")
 
+    def _simulate_intraday_monitoring(self, position: Position, daily_quote: DailyQuotes):
+        open_p, high_p, low_p = daily_quote.open, daily_quote.high, daily_quote.low
+        
+        # 临时变量，模拟盘中状态
+        temp_position_state = {
+            'current_stop_loss': position.current_stop_loss,
+            'current_take_profit': position.current_take_profit
+        }
+        
+        # 1. 开盘价检查
+        decision = PositionMonitorLogic.check_and_decide(position, open_p, self.params)
+        if decision['action'] == 'SELL':
+            logger.info(f"[回测] {position.stock_code_id} 开盘价 {open_p:.2f} 触发卖出，成交价 {decision['exit_price']:.2f}")
+            self.handler.sell_stock_by_market_price(position, decision['reason'], simulated_exit_price=decision['exit_price'])
+            return
+        elif decision['action'] == 'UPDATE':
+            temp_position_state.update(decision['updates'])
+        # 2. 日内循环监控
+        while True:
+            action_taken_in_loop = False
+            
+            # 检查点1: 最低价是否触发卖出
+            decision_low = PositionMonitorLogic.check_and_decide(
+                Position( # 传入一个临时的、包含最新状态的Position对象
+                    entry_price=position.entry_price,
+                    current_stop_loss=temp_position_state['current_stop_loss'],
+                    current_take_profit=temp_position_state['current_take_profit']
+                ), 
+                low_p, 
+                self.params
+            )
+            if decision_low['action'] == 'SELL':
+                logger.info(f"[回测] {position.stock_code_id} 最低价 {low_p:.2f} 触发卖出，成交价 {decision_low['exit_price']:.2f}")
+                self.handler.sell_stock_by_market_price(position, decision_low['reason'], simulated_exit_price=decision_low['exit_price'])
+                return
+            # 检查点2: 最高价是否触发价格更新
+            decision_high = PositionMonitorLogic.check_and_decide(
+                Position(
+                    entry_price=position.entry_price,
+                    current_stop_loss=temp_position_state['current_stop_loss'],
+                    current_take_profit=temp_position_state['current_take_profit']
+                ), 
+                high_p, 
+                self.params
+            )
+            if decision_high['action'] == 'UPDATE':
+                # 检查是否有实际的更新
+                if temp_position_state != decision_high['updates']:
+                    temp_position_state.update(decision_high['updates'])
+                    action_taken_in_loop = True
+            if not action_taken_in_loop:
+                break
+                
+        # 3. 日终结算
+        if temp_position_state['current_stop_loss'] != position.current_stop_loss or \
+        temp_position_state['current_take_profit'] != position.current_take_profit:
+            position.current_stop_loss = temp_position_state['current_stop_loss']
+            position.current_take_profit = temp_position_state['current_take_profit']
+            position.save(update_fields=['current_stop_loss', 'current_take_profit'])
+            logger.info(f"[回测] {position.stock_code_id} 日终更新风控价格。SL: {position.current_stop_loss:.2f}, TP: {position.current_take_profit:.2f}")
+
     def run_backtest(self, start_date: str, end_date: str, initial_capital: Decimal) -> dict:
         self.start_date = date.fromisoformat(start_date)
         self.end_date = date.fromisoformat(end_date)
@@ -8673,8 +8872,9 @@ class SimulateTradeService:
 
             with use_backtest_schema(self.backtest_run_id):
                 self._setup_backtest_schema(self.backtest_run_id, initial_capital)
-
+                self._load_parameters()
                 handler = SimulateTradeHandler(self)
+                self.handler=handler
                 trading_days = self._get_trading_days()
                 if not trading_days:
                     logger.error("在指定日期范围内未找到任何交易日，回测终止。")
@@ -8717,13 +8917,21 @@ class SimulateTradeService:
                         else:
                             break
 
-                    monitor_exit_service = MonitorExitService(handler=handler, execution_date=self.current_date)
-                    logger.info("-> [T日 盘中监控] 模拟价格跌至最低点...")
-                    handler.current_price_node = 'LOW'
-                    monitor_exit_service.monitor_and_exit_positions()
-                    logger.info("-> [T日 盘中监控] 模拟价格涨至最高点...")
-                    handler.current_price_node = 'HIGH'
-                    monitor_exit_service.monitor_and_exit_positions()
+                    positions_to_monitor = Position.objects.filter(status=Position.StatusChoices.OPEN).exclude(
+                        entry_datetime__date=self.current_date
+                    )
+                
+                    for pos in positions_to_monitor:
+                        # 如果持仓已在循环中被卖出，则跳过
+                        if pos.status != Position.StatusChoices.OPEN:
+                            continue
+                        
+                        try:
+                            daily_quote = DailyQuotes.objects.get(stock_code_id=pos.stock_code_id, trade_date=self.current_date)
+                            self._simulate_intraday_monitoring(pos, daily_quote)
+                        except DailyQuotes.DoesNotExist:
+                            logger.warning(f"[回测] 无法找到 {pos.stock_code_id} 在 {self.current_date} 的行情，当日无法监控。")
+                            continue
 
                     
 
@@ -8953,15 +9161,12 @@ class SimulateTradeHandler(ITradeHandler):
         
 
     @transaction.atomic
-    def sell_stock_by_market_price(self, position: Position, reason: str) -> None:
-        if reason == TradeLog.ReasonChoices.STOP_LOSS:
-            #有可能触发止损是因为配股把止损金额改到了999999，所以止损金额应该取开盘价和止损价更低的那个
-            base_sell_price = self.get_opening_price(position.stock_code_id)
-            trigger_price=min(base_sell_price,position.current_stop_loss)
-        else: # TAKE_PROFIT
-            trigger_price = position.current_take_profit
+    def sell_stock_by_market_price(self, position: Position, reason: str, simulated_exit_price: Decimal = None) -> None:
+        
+        if simulated_exit_price is None:
+            raise ValueError("回测模式下调用 sell_stock_by_market_price 必须提供 simulated_exit_price")
 
-        sell_price = (trigger_price * (Decimal('1.0') - self.service.SELL_SLIPPAGE_RATE))
+        sell_price = (simulated_exit_price * (Decimal('1.0') - self.service.SELL_SLIPPAGE_RATE))
         sell_price = sell_price.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
 
         amount = sell_price * position.quantity
@@ -8970,7 +9175,7 @@ class SimulateTradeHandler(ITradeHandler):
         net_income = amount - commission - stamp_duty
 
         self.service.cash_balance += net_income
-        logger.info(f"[回测] 卖出 {position.stock_code_id} {position.quantity}股 @{sell_price:.2f}, 现金余额: {self.service.cash_balance:.2f}")
+        logger.info(f"[回测] 卖出 {position.stock_code_id} {position.quantity}股 @{sell_price:.2f}, 原因: {reason}, 现金余额: {self.service.cash_balance:.2f}")
 
         position.status = Position.StatusChoices.CLOSED
         position.save()
