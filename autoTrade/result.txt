@@ -15,6 +15,8 @@
     📄 trade_report.html
     📄 user.json
     📄 uwsgi.ini
+    📄 互相关分析.py
+    📄 互相关分析.txt
     📄 交易变化.html
     📄 回测简单日志.txt
     📄 回测简单日志_v2.1.txt
@@ -347,6 +349,182 @@ def main():
 
 if __name__ == '__main__':
     main()
+
+####文件结束####
+
+####互相关分析.py####
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+from scipy.stats import pearsonr
+
+# 设置matplotlib以正确显示中文
+plt.rcParams['font.sans-serif'] = ['SimHei']  # 'SimHei' 是一个常用的中文字体
+plt.rcParams['axes.unicode_minus'] = False  # 正确显示负号
+
+# --- 1. 加载和准备数据 ---
+def load_and_prepare_data(filepath):
+    """加载CSV数据，并进行基本预处理"""
+    df = pd.read_csv(filepath)
+    
+    # 将'日期'列转换为datetime对象，并设为索引
+    df['日期'] = pd.to_datetime(df['日期'])
+    df = df.set_index('日期')
+    
+    # 按日期排序，确保时间序列是连续的
+    df = df.sort_index()
+    
+    print("原始数据预览：")
+    print(df.head())
+    print("\n")
+    
+    return df
+
+# --- 2. 计算日收益率 ---
+def calculate_returns(df):
+    """
+    计算日收益率。在金融分析中，分析收益率比分析原始价格更常见。
+    这有助于序列的平稳化，并关注相对变化。
+    """
+    # 使用 .pct_change() 计算百分比变化
+    df_returns = df.pct_change()
+    
+    # m值本身可能就是变化率，如果m值已经是类似收益率的指标，可以跳过对m值的处理
+    # 这里我们假设m值也需要处理，如果不需要，可以注释掉下面这行
+    # df_returns['m值'] = df['m值'] # 如果m值本身就是变化率，直接使用原始值
+    
+    # 删除第一行，因为其没有前一天的值，计算结果为NaN
+    df_returns = df_returns.dropna()
+    
+    print("日收益率数据预览：")
+    print(df_returns.head())
+    print("\n")
+    
+    return df_returns
+
+# --- 3. 互相关分析核心函数 ---
+def cross_correlation_analysis(series1, series2, max_lag):
+    """
+    计算两个时间序列在指定最大滞后范围内的互相关性。
+    
+    参数:
+    series1 (pd.Series): 第一个时间序列 (例如 m值的变化)
+    series2 (pd.Series): 第二个时间序列 (例如 沪深300的变化)
+    max_lag (int): 要测试的最大正负滞后天数
+    
+    返回:
+    lags (list): 滞后天数列表
+    corrs (list): 对应的相关系数列表
+    """
+    lags = []
+    corrs = []
+    
+    # 遍历从 -max_lag 到 +max_lag 的所有滞后期
+    for lag in range(-max_lag, max_lag + 1):
+        # 对 series1 进行移位操作
+        # lag > 0: series1 向前移动 (用未来的值对齐现在的series2)，代表series2领先
+        # lag < 0: series1 向后移动 (用过去的值对齐现在的series2)，代表series1领先
+        shifted_series1 = series1.shift(lag)
+        
+        # 将两个序列对齐，并移除因移位产生的NaN值
+        # 这会确保我们只在两个序列都有数据的日期上计算相关性
+        temp_df = pd.concat([shifted_series1, series2], axis=1)
+        temp_df.columns = ['s1_shifted', 's2']
+        temp_df = temp_df.dropna()
+        
+        if not temp_df.empty:
+            # 计算皮尔逊相关系数
+            corr, _ = pearsonr(temp_df['s1_shifted'], temp_df['s2'])
+            lags.append(lag)
+            corrs.append(corr)
+            
+    return lags, corrs
+
+def plot_and_interpret(lags, corrs, series1_name, series2_name):
+    """绘制互相关图，解读结果，并生成txt报告"""
+    
+    # 找到最大相关性及其对应的滞后期
+    max_corr = max(corrs)
+    best_lag = lags[np.argmax(corrs)]
+    
+    # --- 生成解读文本 ---
+    if best_lag > 0:
+        interpretation_text = f"解读: {series2_name} 的变化趋势平均领先于 {series1_name} {best_lag} 天。"
+    elif best_lag < 0:
+        interpretation_text = f"解读: {series1_name} 的变化趋势平均领先于 {series2_name} {-best_lag} 天。"
+    else:
+        interpretation_text = f"解读: {series1_name} 和 {series2_name} 的变化趋势基本同步。"
+    # --- 在控制台打印结果 ---
+    print("--- 分析结果 ---")
+    print(f"最大相关系数为: {max_corr:.4f}")
+    print(f"对应的最佳滞后期为: {best_lag} 天")
+    print(interpretation_text)
+    print("----------------\n")
+    # --- 生成并保存TXT报告 ---
+    report_filename = '互相关分析.txt'
+    report_content = f"""
+互相关分析报告
+================================
+分析对象:
+- 序列1: {series1_name}
+- 序列2: {series2_name}
+核心发现:
+--------------------------------
+- 最大相关系数: {max_corr:.4f}
+- 最佳滞后期: {best_lag} 天
+结论:
+--------------------------------
+{interpretation_text}
+================================
+报告生成于: {pd.Timestamp.now().strftime('%Y-%m-%d %H:%M:%S')}
+"""
+    try:
+        with open(report_filename, 'w', encoding='utf-8') as f:
+            f.write(report_content)
+        print(f"分析报告已成功保存为: {report_filename}")
+    except Exception as e:
+        print(f"保存报告失败: {e}")
+    # --- 绘制互相关图 ---
+    plt.figure(figsize=(12, 6))
+    # 使用修改后的代码，移除 use_line_collection
+    plt.stem(lags, corrs) 
+    plt.axvline(best_lag, color='r', linestyle='--', label=f'最佳滞后期: {best_lag}天')
+    plt.title(f'{series1_name} 与 {series2_name} 的互相关分析')
+    plt.xlabel('滞后期 (天)')
+    plt.ylabel('相关系数')
+    plt.grid(True)
+    plt.legend()
+    plt.show()
+
+
+# --- 主程序 ---
+if __name__ == '__main__':
+
+    # 1. 加载数据
+    df_raw = load_and_prepare_data('m_value_csi300.csv')
+    
+    # 2. 计算收益率
+    # 注意：如果你的'm值'本身就是一种变化率或指标，而不是价格，你可能不需要对它计算pct_change()
+    # 在这种情况下，你需要调整 calculate_returns 函数
+    df_returns = calculate_returns(df_raw)
+    
+    # 3. 执行互相关分析
+    # 我们将分析 'm值' 与 '沪深300收盘指数' 的收益率之间的关系
+    # 设置一个合理的最大滞后期，比如30个交易日
+    max_lag_days = 30
+    
+    # 注意这里的参数顺序：
+    # series1是m值，series2是沪深300。
+    # 结果中的正滞后意味着沪深300领先，负滞后意味着m值领先。
+    lags, corrs = cross_correlation_analysis(
+        df_returns['m值'], 
+        df_returns['沪深300收盘指数'], 
+        max_lag_days
+    )
+    
+    # 4. 可视化和解读
+    plot_and_interpret(lags, corrs, 'm值', '沪深300指数')
+
 
 ####文件结束####
 
@@ -1577,6 +1755,15 @@ class MDistributionBacktestLog(models.Model):
         decimal_places=4,
         help_text="该笔交易的实际收益率 ( (exit_price / entry_price) - 1 )"
     )
+
+    one_stratage_mode = models.CharField(
+        max_length=10,
+        null=True,
+        blank=True,
+        db_index=True, # 为GROUP BY和查询优化添加索引
+        help_text="单策略模式下使用的策略名 (MT, BO, QD, MR), 为空则为M动态策略"
+    )
+
     created_at = models.DateTimeField(
         auto_now_add=True
     )
@@ -1586,6 +1773,7 @@ class MDistributionBacktestLog(models.Model):
         verbose_name_plural = verbose_name
         indexes = [
             models.Index(fields=['backtest_run_id', 'plan_date']),
+            models.Index(fields=['backtest_run_id', 'one_stratage_mode'])
         ]
 ####文件结束####
 
@@ -2559,17 +2747,33 @@ class Command(BaseCommand):
 
     def add_arguments(self, parser: CommandParser):
         parser.add_argument(
-            '--years',
-            type=int,
-            default=10,
-            help='用于校准的历史数据年数，默认为10年。'
+            '--start-date',
+            type=str,
+            default=None,  # 或者设置为 None
+            help='用于校准的起始日期 (格式: YYYY-MM-DD)。'
+        )
+        parser.add_argument(
+            '--end-date',
+            type=str,
+            default=None,  # 或者设置为 None
+            help='用于校准的截止日期 (格式: YYYY-MM-DD)。'
         )
 
     def handle(self, *args, **options):
         self.stdout.write(self.style.SUCCESS("===== 开始校准M值固定分位锚点 ====="))
         
         # 1. 加载数据
-        df = pd.DataFrame.from_records(IndexQuotesCsi300.objects.all().values())
+        # df = pd.DataFrame.from_records(IndexQuotesCsi300.objects.all().values())
+        start_date = options['start_date']
+        end_date = options['end_date']
+        queryset = IndexQuotesCsi300.objects.all()
+        if start_date:
+            queryset = queryset.filter(trade_date__gte=start_date)
+        if end_date:
+            queryset = queryset.filter(trade_date__lte=end_date)
+        # 可以在这里加一句日志，方便确认
+        self.stdout.write(f"使用数据范围: 从 {start_date or '最早'} 到 {end_date or '最新'}")
+        df = pd.DataFrame.from_records(queryset.values())
         if df.empty:
             self.stdout.write(self.style.ERROR("数据库中没有沪深300指数数据，请先执行 backfill_csi300_data。"))
             return
@@ -4139,7 +4343,7 @@ class SelectionService:
     动态调整选股策略的维度权重，以适应不同的市场环境。
     """
 
-    def __init__(self, trade_date: date, mode: str = 'realtime'):
+    def __init__(self, trade_date: date, mode: str = 'realtime' , one_strategy: str = None):
         """
         初始化选股服务。
 
@@ -4166,6 +4370,7 @@ class SelectionService:
             # raise ValueError(error_msg)
             self.trade_date=trade_date
         self.mode = mode
+        self.one_strategy = one_strategy
         self.dynamic_params = {}
         self.dynamic_factor_defs = {}
         
@@ -4525,6 +4730,11 @@ class SelectionService:
             'QD': exp_A_QD / sum_exp_A,
             'MR': exp_A_MR / sum_exp_A,
         }
+        if self.one_strategy and self.one_strategy in weights:
+            logger.debug(f"单策略模式已激活，强制使用策略: {self.one_strategy}")
+            for key in weights:
+                weights[key] = 0.0
+            weights[self.one_strategy] = 1.0
         logger.debug(f"动态权重计算完成: MT={weights['MT']:.2%}, BO={weights['BO']:.2%}, MR={weights['MR']:.2%}, QD={weights['QD']:.2%}")
         return weights
 
@@ -5376,16 +5586,22 @@ class Command(BaseCommand):
             help='回测结束日期 (格式: YYYY-MM-DD)'
         )
 
+        parser.add_argument(
+            '--single_strategy_mode',
+            action='store_true', # 这会创建一个布尔标志，如果命令行包含此参数，则其值为True
+            help='开启单策略M值胜率分布回测模式，会额外为每个策略独立运行回测。'
+        )
+
     def handle(self, *args, **options):
         start_date = options['start']
         end_date = options['end']
-
+        single_strategy_mode = options['single_strategy_mode']
         self.stdout.write(self.style.SUCCESS('===== 开始执行M值胜率分布回测 ====='))
         self.stdout.write(f'  - 起始日期: {start_date}')
         self.stdout.write(f'  - 结束日期: {end_date}')
 
         try:
-            service = MDistributionBacktestService(start_date=start_date, end_date=end_date)
+            service = MDistributionBacktestService(start_date=start_date, end_date=end_date,single_strategy_mode=single_strategy_mode)
             service.run()
             
             self.stdout.write(self.style.SUCCESS('\n===== M值胜率分布回测执行完毕 ====='))
@@ -7064,7 +7280,7 @@ from .m_distribution_reporter import MDistributionReporter
 from trade_manager.service.simulate_trade import SimulateTradeService
 from trade_manager.service.simulate_trade_handler import SimulateTradeHandler
 logger = logging.getLogger(__name__)
-
+STRATEGIES = ['MT', 'BO', 'QD', 'MR']
 class MDistributionBacktestService:
     """
     M值胜率分布回测服务 (V2 - 修正版)。
@@ -7077,11 +7293,12 @@ class MDistributionBacktestService:
     5. 回测结束后，调用报告模块生成分析报告。
     """
     
-    def __init__(self, start_date: str, end_date: str):
+    def __init__(self, start_date: str, end_date: str, single_strategy_mode: bool = False):
         self.start_date = date.fromisoformat(start_date)
         self.end_date = date.fromisoformat(end_date)
         self.backtest_run_id = f"m_dist_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
         self.max_holding_days = 90
+        self.single_strategy_mode = single_strategy_mode
     def _get_next_trading_day(self, from_date: date) -> date | None: return (DailyQuotes.objects .filter(trade_date__gte=from_date) .order_by('trade_date') .values_list('trade_date', flat=True) .first())
     def _setup_backtest_schema(self):
         """
@@ -7203,21 +7420,32 @@ class MDistributionBacktestService:
                 for i, t_minus_1 in enumerate(trading_days):
                     logger.info(f"\n{'='*20} 模拟预案日: {t_minus_1} ({i+1}/{len(trading_days)}) {'='*20}")
 
-                    # 1. 运行选股服务，它会自动将预案（含策略DNA）保存到数据库
-                    selection_service = SelectionService(trade_date=t_minus_1, mode='backtest')
-                    selection_service.run_selection()
-
-                    # 2. 从数据库中查询刚刚生成的预案
+                    # 1. 运行标准的M动态策略
+                    logger.info(f"  Running M-Dynamic Strategy for {t_minus_1}...")
+                    selection_service_dynamic = SelectionService(trade_date=t_minus_1, mode='backtest', one_strategy=None)
+                    selection_service_dynamic.run_selection()
                     plan_date_for_t = t_minus_1 + timedelta(days=1)
-                    plans_for_today = DailyTradingPlan.objects.filter(plan_date=plan_date_for_t)
-
-                    if not plans_for_today.exists():
-                        logger.info(f"在 {t_minus_1} 未生成任何交易预案。")
-                        continue
-                    
-                    # 3. 对每个从数据库读出的预案进行前向追溯
-                    for plan in plans_for_today:
-                        self._trace_forward_and_log(t_minus_1, plan, selection_service.market_regime_M)
+                    plans_dynamic = DailyTradingPlan.objects.filter(plan_date=plan_date_for_t)
+                    if not plans_dynamic.exists():
+                        logger.info(f"    在M动态策略下未生成任何交易预案。")
+                    else:
+                        for plan in plans_dynamic:
+                            self._trace_forward_and_log(t_minus_1, plan, selection_service_dynamic.market_regime_M, one_stratage_mode=None)
+                    # 2. 如果开启了单策略模式，则循环运行
+                    if self.single_strategy_mode:
+                        for strategy_name in STRATEGIES:
+                            logger.info(f"  Running Single Strategy '{strategy_name}' for {t_minus_1}...")
+                            selection_service_single = SelectionService(trade_date=t_minus_1, mode='backtest', one_strategy=strategy_name)
+                            selection_service_single.run_selection()
+                            
+                            # 注意：run_selection会覆盖旧预案，所以需要重新查询
+                            plans_single = DailyTradingPlan.objects.filter(plan_date=plan_date_for_t)
+                            if not plans_single.exists():
+                                logger.info(f"    在单策略 {strategy_name} 下未生成任何交易预案。")
+                                continue
+                            
+                            for plan in plans_single:
+                                self._trace_forward_and_log(t_minus_1, plan, selection_service_single.market_regime_M, one_stratage_mode=strategy_name)
                     # --- 邮件发送逻辑 ---
                     is_last_day = (i == len(trading_days) - 1)
                     current_month = t_minus_1.month
@@ -7247,7 +7475,7 @@ class MDistributionBacktestService:
             # logger.info(f"已清理回测环境 Schema: {self.backtest_run_id}")
             pass
 
-    def _trace_forward_and_log(self, t_minus_1: date, plan_obj: DailyTradingPlan, m_value: float):
+    def _trace_forward_and_log(self, t_minus_1: date, plan_obj: DailyTradingPlan, m_value: float, one_stratage_mode: str = None):
         """对单个预案 (数据库对象) 进行前向追溯并记录结果"""
         stock_code = plan_obj.stock_code_id
         logger.debug(f"  -> 开始追溯股票: {stock_code}")
@@ -7320,7 +7548,8 @@ class MDistributionBacktestService:
             holding_period=exit_info['period'],
             preset_take_profit_rate=tp_rate,
             preset_stop_loss_rate=sl_rate,
-            actual_return_rate=actual_return
+            actual_return_rate=actual_return,
+            one_stratage_mode=one_stratage_mode
         )
         logger.info(f"    [记录成功] {stock_code}: 入场 {entry_date}@{entry_price:.2f}, 出场 {exit_info['date']}@{exit_info['price']:.2f}, 原因: {exit_info['reason']}")
 
@@ -7366,7 +7595,7 @@ class MDistributionBacktestService:
 ####文件结束####
 
 ####trade_manager\service\m_distribution_reporter.py####
-# trade_manager/service/m_distribution_reporter.py (新文件)
+# trade_manager/service/m_distribution_reporter.py (替换整个文件)
 
 import logging
 import base64
@@ -7378,86 +7607,75 @@ import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 from datetime import date, timedelta,datetime
-from django.db import connections
+from django.db.models import Q
 
 from common.models.backtest_logs import MDistributionBacktestLog
 from data_manager.service.email_handler import EmailHandler
-from .db_utils import use_backtest_schema
 
 logger = logging.getLogger(__name__)
 
 class MDistributionReporter:
     """
-    M值胜率分布回测的报告生成与发送器。
+    M值胜率分布回测的报告生成与发送器 (V2 - 多策略对比版)。
     """
-    def __init__(self, backtest_run_id: str,date_range_text:str):
+    def __init__(self, backtest_run_id: str, date_range_text: str):
         self.backtest_run_id = backtest_run_id
-        self.date_range_text=date_range_text
+        self.date_range_text = date_range_text
         self.email_handler = EmailHandler()
         self.recipients = ['876858298@qq.com']
 
-    def _fetch_data(self) -> pd.DataFrame:
-        """从数据库获取回测结果"""
-        logs = MDistributionBacktestLog.objects.filter(
+    def _fetch_data_for_strategy(self, query_filter: Q) -> pd.DataFrame:
+        """从数据库获取指定策略的回测结果"""
+        base_query = MDistributionBacktestLog.objects.filter(
             backtest_run_id=self.backtest_run_id
         ).exclude(
             exit_reason=MDistributionBacktestLog.ExitReason.END_OF_PERIOD
         )
+        
+        logs = base_query.filter(query_filter)
+        
         if not logs.exists():
             return pd.DataFrame()
         
         return pd.DataFrame.from_records(logs.values())
 
     def _analyze_data(self, df: pd.DataFrame) -> pd.DataFrame:
-        """对数据进行分箱和统计分析"""
+        """对单个策略的数据进行分箱和统计分析"""
         if df.empty:
             return pd.DataFrame()
 
-        # 定义M值的分箱区间
         bins = np.arange(-1.0, 1.1, 0.1)
         labels = [f"{i:.1f} to {i+0.1:.1f}" for i in bins[:-1]]
         
         df['m_interval'] = pd.cut(df['m_value_at_plan'].astype(float), bins=bins, labels=labels, right=False)
 
-        # 统计分析
         def agg_func(group):
             total_trades = len(group)
+            if total_trades == 0:
+                return pd.Series({
+                    'total_trades': 0, 'win_rate': 0, 'expected_return': 0
+                })
+            
             win_trades = (group['exit_reason'] == 'TAKE_PROFIT').sum()
-            loss_trades = (group['exit_reason'] == 'STOP_LOSS').sum()
+            win_rate = win_trades / total_trades
             
-            win_rate = win_trades / total_trades if total_trades > 0 else 0
+            avg_tp_rate = np.nan_to_num(group[group['exit_reason'] == 'TAKE_PROFIT']['preset_take_profit_rate'].astype(float).mean())
+            avg_sl_rate = np.nan_to_num(group[group['exit_reason'] == 'STOP_LOSS']['preset_stop_loss_rate'].astype(float).mean())
             
-            # 计算期望收益率
-            avg_tp_rate = np.nan_to_num(group[group['exit_reason'] == 'TAKE_PROFIT']['preset_take_profit_rate'].mean())
-            avg_sl_rate = np.nan_to_num(group[group['exit_reason'] == 'STOP_LOSS']['preset_stop_loss_rate'].mean())
+            expected_return = (win_rate * avg_tp_rate - (1 - win_rate) * avg_sl_rate)
             
-            expected_return = (win_rate * avg_tp_rate - (1 - win_rate) * avg_sl_rate) if total_trades > 0 else 0
-
-            # 计算因子比例
-            dna_list = group['strategy_dna'].str.split('|', expand=True)
-            dna_proportions = {}
-            for col in dna_list.columns:
-                parts = dna_list[col].str.split(':', expand=True)
-                if not parts.empty:
-                    strategy_name = parts.iloc[0, 0]
-                    avg_proportion = pd.to_numeric(parts[1], errors='coerce').mean()
-                    dna_proportions[f'prop_{strategy_name}'] = avg_proportion
-
             return pd.Series({
                 'total_trades': total_trades,
-                'win_trades': win_trades,
-                'loss_trades': loss_trades,
                 'win_rate': win_rate,
-                'expected_return': expected_return,
-                **dna_proportions
+                'expected_return': expected_return
             })
 
-        analysis_df = df.groupby('m_interval',observed=True).apply(agg_func, include_groups=False).reset_index()
+        analysis_df = df.groupby('m_interval', observed=True).apply(agg_func, include_groups=False).reset_index()
         return analysis_df
 
-    def _generate_plots_base64(self, analysis_df: pd.DataFrame) -> tuple[str, str]:
-        """生成胜率和期望收益图表的Base64编码"""
-        if analysis_df.empty:
+    def _generate_combined_plots_base64(self, all_analysis_results: dict) -> tuple[str, str]:
+        """生成包含多条曲线的组合图表"""
+        if not all_analysis_results:
             return "", ""
 
         try:
@@ -7466,65 +7684,71 @@ class MDistributionReporter:
         except Exception:
             pass
 
-        # 胜率图
-        fig_win, ax_win = plt.subplots(figsize=(12, 6))
-        ax_win.plot(analysis_df['m_interval'], analysis_df['win_rate'], marker='o', linestyle='-', color='b')
-        ax_win.set_title('Winning Rate/M Value', fontsize=16)
-        ax_win.set_xlabel('M Value', fontsize=12)
-        ax_win.set_ylabel('Winning Rate', fontsize=12)
+        # 胜率组合图
+        fig_win, ax_win = plt.subplots(figsize=(14, 7))
+        for name, df in all_analysis_results.items():
+            if not df.empty:
+                ax_win.plot(df['m_interval'], df['win_rate'], marker='o', linestyle='-', label=name)
+        
+        ax_win.set_title('各策略胜率 vs M值', fontsize=16)
+        ax_win.set_xlabel('M值区间', fontsize=12)
+        ax_win.set_ylabel('胜率', fontsize=12)
         ax_win.yaxis.set_major_formatter(plt.FuncFormatter('{:.0%}'.format))
-        ax_win.grid(True)
-        plt.xticks(rotation=45)
+        ax_win.grid(True, linestyle='--', alpha=0.6)
+        ax_win.legend()
+        plt.setp(ax_win.get_xticklabels(), rotation=45, ha="right")
         plt.tight_layout()
         buf_win = io.BytesIO()
-        fig_win.savefig(buf_win, format='png', dpi=100)
+        fig_win.savefig(buf_win, format='png', dpi=120)
         win_rate_b64 = base64.b64encode(buf_win.getvalue()).decode('utf-8')
         plt.close(fig_win)
 
-        # 期望收益图
-        fig_exp, ax_exp = plt.subplots(figsize=(12, 6))
-        ax_exp.plot(analysis_df['m_interval'], analysis_df['expected_return'], marker='s', linestyle='--', color='g')
-        ax_exp.set_title('Expected Rate/M Value', fontsize=16)
-        ax_exp.set_xlabel('M Value', fontsize=12)
-        ax_exp.set_ylabel('‌Expected Rate of Return‌', fontsize=12)
+        # 期望收益组合图
+        fig_exp, ax_exp = plt.subplots(figsize=(14, 7))
+        for name, df in all_analysis_results.items():
+            if not df.empty:
+                ax_exp.plot(df['m_interval'], df['expected_return'], marker='s', linestyle='--', label=name)
+
+        ax_exp.set_title('各策略期望收益率 vs M值', fontsize=16)
+        ax_exp.set_xlabel('M值区间', fontsize=12)
+        ax_exp.set_ylabel('期望收益率', fontsize=12)
         ax_exp.yaxis.set_major_formatter(plt.FuncFormatter('{:.2%}'.format))
         ax_exp.axhline(0, color='grey', linestyle=':', linewidth=1)
-        ax_exp.grid(True)
-        plt.xticks(rotation=45)
+        ax_exp.grid(True, linestyle='--', alpha=0.6)
+        ax_exp.legend()
+        plt.setp(ax_exp.get_xticklabels(), rotation=45, ha="right")
         plt.tight_layout()
         buf_exp = io.BytesIO()
-        fig_exp.savefig(buf_exp, format='png', dpi=100)
+        fig_exp.savefig(buf_exp, format='png', dpi=120)
         exp_return_b64 = base64.b64encode(buf_exp.getvalue()).decode('utf-8')
         plt.close(fig_exp)
 
         return win_rate_b64, exp_return_b64
 
-    def _format_html_content(self, analysis_df: pd.DataFrame, plot1_b64: str, plot2_b64: str) -> str:
+    def _format_html_content(self, all_analysis_results: dict, plot1_b64: str, plot2_b64: str) -> str:
         """将所有内容整合成HTML邮件"""
-        # 格式化DataFrame以便在HTML中显示
-        df_display = analysis_df.copy()
-        df_display['win_rate'] = df_display['win_rate'].apply(lambda x: f"{x:.2%}")
-        df_display['expected_return'] = df_display['expected_return'].apply(lambda x: f"{x:.2%}")
-        for col in [c for c in df_display.columns if c.startswith('prop_')]:
-            df_display[col] = df_display[col].apply(lambda x: f"{x:.2%}")
         
-        # 重命名列以提高可读性
-        df_display.rename(columns={
-            'm_interval': 'M值区间',
-            'total_trades': '总交易数',
-            'win_trades': '止盈数',
-            'loss_trades': '止损数',
-            'win_rate': '胜率',
-            'expected_return': '期望收益率',
-            'prop_MT': '趋势动能占比',
-            'prop_BO': '强势突破占比',
-            'prop_MR': '均值回归占比',
-            'prop_QD': '质量防御占比'
-        }, inplace=True)
-        
-        html_table = df_display.to_html(index=False, classes='styled-table', border=0)
+        # --- 生成所有表格 ---
+        tables_html = ""
+        for name, df in all_analysis_results.items():
+            tables_html += f"<h2>{name} - 详细数据统计</h2>"
+            if df.empty:
+                tables_html += "<p>该策略无有效交易数据。</p>"
+                continue
 
-        # HTML模板
+            df_display = df.copy()
+            df_display['win_rate'] = df_display['win_rate'].apply(lambda x: f"{x:.2%}")
+            df_display['expected_return'] = df_display['expected_return'].apply(lambda x: f"{x:.2%}")
+            df_display.rename(columns={
+                'm_interval': 'M值区间',
+                'total_trades': '总交易数',
+                'win_rate': '胜率',
+                'expected_return': '期望收益率',
+            }, inplace=True)
+            
+            tables_html += df_display.to_html(index=False, classes='styled-table', border=0)
+
+        # --- 最终HTML模板 ---
         html = f"""
         <!DOCTYPE html>
         <html lang="zh-CN">
@@ -7532,15 +7756,14 @@ class MDistributionReporter:
             <meta charset="UTF-8">
             <title>M值胜率分布回测报告</title>
             <style>
-                body {{ font-family: 'Segoe UI', 'Microsoft YaHei', sans-serif; margin: 20px; }}
-                h1, h2 {{ color: #0056b3; }}
-                .styled-table {{ border-collapse: collapse; margin: 25px 0; font-size: 0.9em; min-width: 400px; box-shadow: 0 0 20px rgba(0, 0, 0, 0.15); }}
-                .styled-table thead tr {{ background-color: #009879; color: #ffffff; text-align: left; }}
+                body {{ font-family: 'Segoe UI', 'Microsoft YaHei', sans-serif; margin: 20px; background-color: #f8f9fa; }}
+                h1, h2 {{ color: #0056b3; border-bottom: 2px solid #e9ecef; padding-bottom: 8px; }}
+                .styled-table {{ border-collapse: collapse; margin: 25px 0; font-size: 0.9em; min-width: 600px; box-shadow: 0 0 20px rgba(0, 0, 0, 0.1); }}
+                .styled-table thead tr {{ background-color: #007bff; color: #ffffff; text-align: left; }}
                 .styled-table th, .styled-table td {{ padding: 12px 15px; }}
                 .styled-table tbody tr {{ border-bottom: 1px solid #dddddd; }}
                 .styled-table tbody tr:nth-of-type(even) {{ background-color: #f3f3f3; }}
-                .styled-table tbody tr:last-of-type {{ border-bottom: 2px solid #009879; }}
-                .plot-container {{ text-align: center; margin-top: 20px; }}
+                .plot-container {{ text-align: center; margin-top: 20px; padding: 20px; background-color: #fff; border-radius: 8px; box-shadow: 0 0 20px rgba(0, 0, 0, 0.1); }}
                 img {{ max-width: 100%; height: auto; }}
             </style>
         </head>
@@ -7548,18 +7771,17 @@ class MDistributionReporter:
             <h1>M值胜率分布回测报告</h1>
             <h2>日期区间: {self.date_range_text}</h2>
             
-            <h2>详细数据统计</h2>
-            {html_table}
-            
-            <h2>胜率 vs M值</h2>
+            <h2>组合图表分析</h2>
             <div class="plot-container">
-                <img src="data:image/png;base64,{plot1_b64}" alt="Win Rate vs M-Value Plot">
+                <h3>各策略胜率 vs M值</h3>
+                <img src="data:image/png;base64,{plot1_b64}" alt="Win Rate Plot">
+            </div>
+            <div class.plot-container">
+                <h3>各策略期望收益率 vs M值</h3>
+                <img src="data:image/png;base64,{plot2_b64}" alt="Expected Return Plot">
             </div>
             
-            <h2>期望收益 vs M值</h2>
-            <div class="plot-container">
-                <img src="data:image/png;base64,{plot2_b64}" alt="Expected Return vs M-Value Plot">
-            </div>
+            {tables_html}
         </body>
         </html>
         """
@@ -7567,28 +7789,47 @@ class MDistributionReporter:
 
     def generate_and_send_report(self):
         """生成并发送报告邮件的主方法"""
-        logger.info(f"[{self.backtest_run_id}] 开始生成M值分布回测报告...")
+        logger.info(f"[{self.backtest_run_id}] 开始生成M值分布回测报告 (多策略版)...")
         try:
-            data_df = self._fetch_data()
-            if data_df.empty:
-                logger.warning(f"[{self.backtest_run_id}] 没有找到任何有效的回测日志，无法生成报告。")
+            # 1. 获取策略分组
+            strategy_groups_raw = MDistributionBacktestLog.objects.filter(
+                backtest_run_id=self.backtest_run_id
+            ).values_list('one_stratage_mode', flat=True).distinct()
+
+            if not strategy_groups_raw:
+                logger.warning(f"[{self.backtest_run_id}] 数据库中无任何日志，无法生成报告。")
                 return
 
-            analysis_df = self._analyze_data(data_df)
-            plot1_b64, plot2_b64 = self._generate_plots_base64(analysis_df)
-            html_content = self._format_html_content(analysis_df, plot1_b64, plot2_b64)
+            # 2. 整理和排序分组
+            groups_to_process = sorted(
+                [g if g is not None else 'M_DYNAMIC' for g in strategy_groups_raw],
+                key=lambda x: (x != 'M_DYNAMIC', x)
+            )
+
+            # 3. 循环获取数据并分析
+            all_analysis_results = {}
+            for strategy_key in groups_to_process:
+                display_name = "M动态策略" if strategy_key == 'M_DYNAMIC' else f"单策略 - {strategy_key}"
+                query_filter = Q(one_stratage_mode__isnull=True) if strategy_key == 'M_DYNAMIC' else Q(one_stratage_mode=strategy_key)
+                
+                strategy_df = self._fetch_data_for_strategy(query_filter)
+                analysis_df = self._analyze_data(strategy_df)
+                all_analysis_results[display_name] = analysis_df
+
+            # 4. 生成图表和HTML
+            plot1_b64, plot2_b64 = self._generate_combined_plots_base64(all_analysis_results)
+            html_content = self._format_html_content(all_analysis_results, plot1_b64, plot2_b64)
             
-            subject = f"M值胜率分布回测报告 - {datetime.now().strftime('%Y-%m-%d')}"
+            subject = f"M值胜率分布回测报告 (多策略版) - {datetime.now().strftime('%Y-%m-%d')}"
             
             self.email_handler.send_email(
                 recipients=self.recipients,
                 subject=subject,
                 html_content=html_content
             )
-            logger.info(f"[{self.backtest_run_id}] 回测报告邮件已成功发送。")
+            logger.info(f"[{self.backtest_run_id}] 多策略回测报告邮件已成功发送。")
         except Exception as e:
-            logger.error(f"[{self.backtest_run_id}] 生成或发送报告时失败: {e}", exc_info=True)
-
+            logger.error(f"[{self.backtest_run_id}] 生成或发送多策略报告时失败: {e}", exc_info=True)
 
 ####文件结束####
 
