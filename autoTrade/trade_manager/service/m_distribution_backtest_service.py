@@ -58,8 +58,8 @@ class MDistributionBacktestService:
         if open_p <= temp_sl:
             return 'SOLD', open_p, temp_sl, temp_tp
         # 加载参数 (这里简化处理，实际可从 DecisionOrderService 加载)
-        trailing_tp_increment_pct = Decimal('0.05')
-        trailing_sl_buffer_pct = Decimal('0.05')
+        trailing_tp_increment_pct = Decimal('0.02')
+        trailing_sl_buffer_pct = Decimal('0.015')
         # 2. 日内循环监控
         while True:
             action_taken_in_loop = False
@@ -74,7 +74,7 @@ class MDistributionBacktestService:
                     action_taken_in_loop = True
             if not action_taken_in_loop and temp_sl < entry_price:
                 base_price = max(entry_price, temp_sl)
-                cost_lock_price = min((base_price + temp_tp) / 2, base_price * Decimal('1.01'))
+                cost_lock_price = min((base_price + temp_tp) / 2, base_price * Decimal('1.012'))
                 if high_p > cost_lock_price:
                     new_sl = (base_price + cost_lock_price) / 2
                     if new_sl > temp_sl:
