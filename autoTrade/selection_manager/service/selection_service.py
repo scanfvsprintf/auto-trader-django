@@ -166,12 +166,12 @@ class SelectionService:
             'dynamic_m_csi300_anchor_turnover_p90': {'value': '0', 'group': 'M_CSI300_ANCHORS', 'desc': '量能状态-P90锚点'},
 
             # 动态权重 N_i(M(t)) 参数
-            'dynamic_c_MT': {'value': '1.2', 'group': 'N_ATTRACTION', 'desc': '吸引力函数强度系数: 趋势动能'},
-            'dynamic_c_BO': {'value': '0.7', 'group': 'N_ATTRACTION', 'desc': '吸引力函数强度系数: 强势突破'},
-            'dynamic_c_QD': {'value': '1.1', 'group': 'N_ATTRACTION', 'desc': '吸引力函数强度系数: 质量防御'},
-            'dynamic_c_MR': {'value': '1.5', 'group': 'N_ATTRACTION', 'desc': '吸引力函数强度系数: 均值回归'},
-            'dynamic_sigma_MR': {'value': '0.25', 'group': 'N_PARAMS', 'desc': '均值回归策略适用范围宽度'},
-            'dynamic_tau': {'value': '0.7', 'group': 'N_PARAMS', 'desc': 'Softmax温度系数(控制切换灵敏度)'},
+            'dynamic_c_MT': {'value': '1.1', 'group': 'N_ATTRACTION', 'desc': '吸引力函数强度系数: 趋势动能'},
+            'dynamic_c_BO': {'value': '1.8', 'group': 'N_ATTRACTION', 'desc': '吸引力函数强度系数: 强势突破'},
+            'dynamic_c_QD': {'value': '1.3', 'group': 'N_ATTRACTION', 'desc': '吸引力函数强度系数: 质量防御'},
+            'dynamic_c_MR': {'value': '0.8', 'group': 'N_ATTRACTION', 'desc': '吸引力函数强度系数: 均值回归'},
+            'dynamic_sigma_MR': {'value': '0.4', 'group': 'N_PARAMS', 'desc': '均值回归策略适用范围宽度'},
+            'dynamic_tau': {'value': '0.5', 'group': 'N_PARAMS', 'desc': 'Softmax温度系数(控制切换灵敏度)'},
 
             # 维度内部因子权重 (k_ij)
             'dynamic_k_MT1': {'value': '0.5', 'group': 'K_WEIGHTS_MT', 'desc': '趋势动能-MA20斜率权重'},
@@ -183,9 +183,9 @@ class SelectionService:
             'dynamic_k_MR1': {'value': '0.3', 'group': 'K_WEIGHTS_MR', 'desc': '均值回归-RSI超卖权重'},
             'dynamic_k_MR2': {'value': '0.5', 'group': 'K_WEIGHTS_MR', 'desc': '均值回归-负向偏离度权重'},
             'dynamic_k_MR3': {'value': '0.2', 'group': 'K_WEIGHTS_MR', 'desc': '均值回归-布林下轨支撑权重'},
-            'dynamic_k_QD1': {'value': '0.45', 'group': 'K_WEIGHTS_QD', 'desc': '质量防御-低波动率权重'},
-            'dynamic_k_QD2': {'value': '0.35', 'group': 'K_WEIGHTS_QD', 'desc': '质量防御-最大回撤权重'},
-            'dynamic_k_QD3': {'value': '0.2', 'group': 'K_WEIGHTS_QD', 'desc': '质量防御-下行风险权重'},
+            'dynamic_k_QD1': {'value': '0.4', 'group': 'K_WEIGHTS_QD', 'desc': '质量防御-低波动率权重'},
+            'dynamic_k_QD2': {'value': '0.3', 'group': 'K_WEIGHTS_QD', 'desc': '质量防御-最大回撤权重'},
+            'dynamic_k_QD3': {'value': '0.3', 'group': 'K_WEIGHTS_QD', 'desc': '质量防御-下行风险权重'},
             
             # 交易预案参数
             # 'dynamic_k_drop': {'value': '0.3', 'group': 'PLAN_PARAMS', 'desc': 'MIOP低开容忍系数'},

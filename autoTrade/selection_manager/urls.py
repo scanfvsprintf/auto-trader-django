@@ -18,6 +18,6 @@ from django.contrib import admin
 from django.urls import path,include
 from . import views
 urlpatterns = [
-    path('initSelectionStratage', views.init_strategy),
+    path('initParam', views.init_strategy),
     path('runSelection',views.run_selection)
 ]
