@@ -166,11 +166,11 @@ class SelectionService:
             # 'dynamic_m_csi300_anchor_turnover_p90': {'value': '0', 'group': 'M_CSI300_ANCHORS', 'desc': '量能状态-P90锚点'},
 
             # 动态权重 N_i(M(t)) 参数
-            'dynamic_c_MT': {'value': '1.1', 'group': 'N_ATTRACTION', 'desc': '吸引力函数强度系数: 趋势动能'},
-            'dynamic_c_BO': {'value': '1.8', 'group': 'N_ATTRACTION', 'desc': '吸引力函数强度系数: 强势突破'},
-            'dynamic_c_QD': {'value': '1.3', 'group': 'N_ATTRACTION', 'desc': '吸引力函数强度系数: 质量防御'},
-            'dynamic_c_MR': {'value': '0.8', 'group': 'N_ATTRACTION', 'desc': '吸引力函数强度系数: 均值回归'},
-            'dynamic_sigma_MR': {'value': '0.4', 'group': 'N_PARAMS', 'desc': '均值回归策略适用范围宽度'},
+            'dynamic_c_MT': {'value': '1.3', 'group': 'N_ATTRACTION', 'desc': '吸引力函数强度系数: 趋势动能'},
+            'dynamic_c_BO': {'value': '0.7', 'group': 'N_ATTRACTION', 'desc': '吸引力函数强度系数: 强势突破'},
+            'dynamic_c_QD': {'value': '1', 'group': 'N_ATTRACTION', 'desc': '吸引力函数强度系数: 质量防御'},
+            'dynamic_c_MR': {'value': '1.5', 'group': 'N_ATTRACTION', 'desc': '吸引力函数强度系数: 均值回归'},
+            'dynamic_sigma_MR': {'value': '0.25', 'group': 'N_PARAMS', 'desc': '均值回归策略适用范围宽度'},
             'dynamic_tau': {'value': '0.5', 'group': 'N_PARAMS', 'desc': 'Softmax温度系数(控制切换灵敏度)'},
 
             # 维度内部因子权重 (k_ij)
@@ -401,7 +401,8 @@ class SelectionService:
         # a. 计算各维度吸引力 A_i
         A_MT = p['dynamic_c_MT'] * M_t
         A_BO = p['dynamic_c_BO'] * M_t
-        A_QD = p['dynamic_c_QD'] * (-M_t)
+        # A_QD = p['dynamic_c_QD'] * (-M_t)
+        A_QD = p['dynamic_c_QD']
         A_MR = p['dynamic_c_MR'] * np.exp(- (M_t / p['dynamic_sigma_MR'])**2)
         
         # b. 通过Softmax计算最终权重 N_i
