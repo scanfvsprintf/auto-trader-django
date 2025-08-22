@@ -47,7 +47,7 @@ class PositionMonitorLogic:
             base_price = max(position.entry_price, position.current_stop_loss)
             cost_lock_price = min(
                 (base_price + position.current_take_profit) / 2,
-                base_price * Decimal('1.01')
+                base_price * Decimal('1.012')
             )
             if current_price > cost_lock_price:
                 new_sl = ((base_price + cost_lock_price) / 2)
