@@ -74,6 +74,9 @@
             📄 email_handler.py
             📄 email_service.py
             📄 stock_service.py
+    📂 logs/
+        📄 .__django.lock
+        📄 django.log
     📂 selection_manager/
         📄 __init__.py
         📄 admin.py
@@ -82,13 +85,13 @@
         📄 tests.py
         📄 urls.py
         📄 views.py
+        📂 management/
+            📂 commands/
+                📄 generate_m_value_csv.py
         📂 service/
             📄 selection_service.py
             📄 selection_service.py.old_v1
             📄 selection_service.py.old_v2
-        📂 management/
-            📂 commands/
-                📄 generate_m_value_csv.py
     📂 trade_manager/
         📄 __init__.py
         📄 admin.py
@@ -118,9 +121,6 @@
             📄 simulate_trade_handler.py
             📄 simulate_trade_old.py
             📄 trade_handler.py
-    📂 logs/
-        📄 .__django.lock
-        📄 django.log
 
 ========================
 
@@ -4177,7 +4177,7 @@ from django.contrib import admin
 from django.urls import path,include
 from . import views
 urlpatterns = [
-    path('initSelectionStratage', views.init_strategy),
+    path('initParam', views.init_strategy),
     path('runSelection',views.run_selection)
 ]
 
@@ -4208,6 +4208,104 @@ def run_selection(request):
             'data':json.loads(request.body)
         })
     
+
+####文件结束####
+
+####selection_manager\management\commands\generate_m_value_csv.py####
+# selection_manager/management/commands/generate_m_value_csv.py
+
+import logging
+import os
+from decimal import Decimal
+
+import pandas as pd
+from django.conf import settings
+from django.core.management.base import BaseCommand
+from tqdm import tqdm
+
+from common.models import IndexQuotesCsi300
+from selection_manager.service.selection_service import SelectionService
+
+# 获取logger实例
+logger = logging.getLogger(__name__)
+
+class Command(BaseCommand):
+    """
+    一个Django管理命令，用于计算沪深300指数从2010-08-19至2025-08-18的
+    完整历史M值，并生成一个CSV文件供分析脚本使用。
+    
+    运行方式:
+    python manage.py generate_m_value_csv
+    """
+    help = '计算沪深300历史M值并生成 m_value_csi300.csv 文件'
+
+    def handle(self, *args, **options):
+        self.stdout.write(self.style.SUCCESS('===== 开始计算沪深300历史M值 ====='))
+
+        try:
+            # 1. 一次性从数据库加载所有需要的沪深300行情数据
+            self.stdout.write("正在从数据库加载沪深300历史行情数据...")
+            quotes_qs = IndexQuotesCsi300.objects.all().order_by('trade_date').values('trade_date', 'close')
+            if not quotes_qs:
+                self.stdout.write(self.style.ERROR("错误：数据库表 tb_index_quotes_csi300 中没有数据。请先回填数据。"))
+                return
+            
+            all_quotes_df = pd.DataFrame.from_records(quotes_qs)
+            all_dates = all_quotes_df['trade_date'].tolist()
+            self.stdout.write(f"数据加载完成，共 {len(all_dates)} 个交易日。")
+
+            # 2. 初始化SelectionService并加载一次参数
+            # 使用第一个日期进行初始化，后续在循环中更新日期
+            service = SelectionService(trade_date=all_dates[0], mode='backtest')
+            service._load_dynamic_parameters_and_defs()
+            self.stdout.write("策略服务和参数初始化完成。")
+
+            # 3. 循环计算每一天的M值
+            results = []
+            self.stdout.write("开始逐日计算M值...")
+            LOOKBACK_BUFFER = 80
+            if len(all_dates) <= LOOKBACK_BUFFER:
+                self.stdout.write(self.style.ERROR(f"错误：总交易日数 ({len(all_dates)}) 不足以满足 {LOOKBACK_BUFFER} 天的回溯期。"))
+                return
+            # 使用tqdm创建进度条
+            for current_date in tqdm(all_dates[LOOKBACK_BUFFER:], desc="计算M值进度"):
+                # 更新服务的交易日期
+                service.trade_date = current_date
+                
+                # 调用核心方法计算M值，按要求传入空stock_pool
+                m_value = service._calculate_market_regime_M(stock_pool=[])
+                
+                # 从已加载的DataFrame中获取收盘价
+                close_price = all_quotes_df.loc[all_quotes_df['trade_date'] == current_date, 'close'].iloc[0]
+                
+                results.append({
+                    '日期': current_date,
+                    'm值': m_value,
+                    '沪深300收盘指数': float(close_price) # 转换为float以便pandas处理
+                })
+
+            if not results:
+                self.stdout.write(self.style.WARNING("计算完成，但没有生成任何结果。"))
+                return
+
+            # 4. 将结果转换为DataFrame并保存为CSV
+            self.stdout.write("所有M值计算完成，正在生成CSV文件...")
+            results_df = pd.DataFrame(results)
+            
+            # 定义输出路径为项目根目录
+            output_path = os.path.join(settings.BASE_DIR, 'm_value_csi300.csv')
+            
+            # 保存文件，使用 utf-8-sig 编码以确保Excel能正确打开
+            results_df.to_csv(output_path, index=False, encoding='utf-8-sig', float_format='%.4f')
+
+            self.stdout.write(self.style.SUCCESS(f"\n===== 任务成功完成！ ====="))
+            self.stdout.write(f"文件已保存至: {output_path}")
+            self.stdout.write(f"现在你可以运行 [M值关系分析.py] 脚本了。")
+
+        except Exception as e:
+            self.stdout.write(self.style.ERROR(f"任务执行过程中发生严重错误: {e}"))
+            logger.error("生成M值CSV文件失败", exc_info=True)
+
 
 ####文件结束####
 
@@ -4366,26 +4464,26 @@ class SelectionService:
             'dynamic_m_csi300_w_volatility': {'value': '0.2', 'group': 'M_CSI300_WEIGHTS', 'desc': '新M(t)权重: 波动水平'},
             'dynamic_m_csi300_w_turnover': {'value': '0.1', 'group': 'M_CSI300_WEIGHTS', 'desc': '新M(t)权重: 量能状态'},
             # 新版 M(t) 锚点参数 (由校准命令填充)
-            'dynamic_m_csi300_anchor_trend_p10': {'value': '0', 'group': 'M_CSI300_ANCHORS', 'desc': '趋势强度-P10锚点'},
-            'dynamic_m_csi300_anchor_trend_p50': {'value': '0', 'group': 'M_CSI300_ANCHORS', 'desc': '趋势强度-P50锚点'},
-            'dynamic_m_csi300_anchor_trend_p90': {'value': '0', 'group': 'M_CSI300_ANCHORS', 'desc': '趋势强度-P90锚点'},
-            'dynamic_m_csi300_anchor_momentum_p10': {'value': '0', 'group': 'M_CSI300_ANCHORS', 'desc': '短期动能-P10锚点'},
-            'dynamic_m_csi300_anchor_momentum_p50': {'value': '0', 'group': 'M_CSI300_ANCHORS', 'desc': '短期动能-P50锚点'},
-            'dynamic_m_csi300_anchor_momentum_p90': {'value': '0', 'group': 'M_CSI300_ANCHORS', 'desc': '短期动能-P90锚点'},
-            'dynamic_m_csi300_anchor_volatility_p10': {'value': '0', 'group': 'M_CSI300_ANCHORS', 'desc': '波动水平-P10锚点'},
-            'dynamic_m_csi300_anchor_volatility_p50': {'value': '0', 'group': 'M_CSI300_ANCHORS', 'desc': '波动水平-P50锚点'},
-            'dynamic_m_csi300_anchor_volatility_p90': {'value': '0', 'group': 'M_CSI300_ANCHORS', 'desc': '波动水平-P90锚点'},
-            'dynamic_m_csi300_anchor_turnover_p10': {'value': '0', 'group': 'M_CSI300_ANCHORS', 'desc': '量能状态-P10锚点'},
-            'dynamic_m_csi300_anchor_turnover_p50': {'value': '0', 'group': 'M_CSI300_ANCHORS', 'desc': '量能状态-P50锚点'},
-            'dynamic_m_csi300_anchor_turnover_p90': {'value': '0', 'group': 'M_CSI300_ANCHORS', 'desc': '量能状态-P90锚点'},
+            # 'dynamic_m_csi300_anchor_trend_p10': {'value': '0', 'group': 'M_CSI300_ANCHORS', 'desc': '趋势强度-P10锚点'},
+            # 'dynamic_m_csi300_anchor_trend_p50': {'value': '0', 'group': 'M_CSI300_ANCHORS', 'desc': '趋势强度-P50锚点'},
+            # 'dynamic_m_csi300_anchor_trend_p90': {'value': '0', 'group': 'M_CSI300_ANCHORS', 'desc': '趋势强度-P90锚点'},
+            # 'dynamic_m_csi300_anchor_momentum_p10': {'value': '0', 'group': 'M_CSI300_ANCHORS', 'desc': '短期动能-P10锚点'},
+            # 'dynamic_m_csi300_anchor_momentum_p50': {'value': '0', 'group': 'M_CSI300_ANCHORS', 'desc': '短期动能-P50锚点'},
+            # 'dynamic_m_csi300_anchor_momentum_p90': {'value': '0', 'group': 'M_CSI300_ANCHORS', 'desc': '短期动能-P90锚点'},
+            # 'dynamic_m_csi300_anchor_volatility_p10': {'value': '0', 'group': 'M_CSI300_ANCHORS', 'desc': '波动水平-P10锚点'},
+            # 'dynamic_m_csi300_anchor_volatility_p50': {'value': '0', 'group': 'M_CSI300_ANCHORS', 'desc': '波动水平-P50锚点'},
+            # 'dynamic_m_csi300_anchor_volatility_p90': {'value': '0', 'group': 'M_CSI300_ANCHORS', 'desc': '波动水平-P90锚点'},
+            # 'dynamic_m_csi300_anchor_turnover_p10': {'value': '0', 'group': 'M_CSI300_ANCHORS', 'desc': '量能状态-P10锚点'},
+            # 'dynamic_m_csi300_anchor_turnover_p50': {'value': '0', 'group': 'M_CSI300_ANCHORS', 'desc': '量能状态-P50锚点'},
+            # 'dynamic_m_csi300_anchor_turnover_p90': {'value': '0', 'group': 'M_CSI300_ANCHORS', 'desc': '量能状态-P90锚点'},
 
             # 动态权重 N_i(M(t)) 参数
-            'dynamic_c_MT': {'value': '1.2', 'group': 'N_ATTRACTION', 'desc': '吸引力函数强度系数: 趋势动能'},
-            'dynamic_c_BO': {'value': '0.7', 'group': 'N_ATTRACTION', 'desc': '吸引力函数强度系数: 强势突破'},
-            'dynamic_c_QD': {'value': '1.1', 'group': 'N_ATTRACTION', 'desc': '吸引力函数强度系数: 质量防御'},
-            'dynamic_c_MR': {'value': '1.5', 'group': 'N_ATTRACTION', 'desc': '吸引力函数强度系数: 均值回归'},
-            'dynamic_sigma_MR': {'value': '0.25', 'group': 'N_PARAMS', 'desc': '均值回归策略适用范围宽度'},
-            'dynamic_tau': {'value': '0.7', 'group': 'N_PARAMS', 'desc': 'Softmax温度系数(控制切换灵敏度)'},
+            'dynamic_c_MT': {'value': '1.1', 'group': 'N_ATTRACTION', 'desc': '吸引力函数强度系数: 趋势动能'},
+            'dynamic_c_BO': {'value': '1.8', 'group': 'N_ATTRACTION', 'desc': '吸引力函数强度系数: 强势突破'},
+            'dynamic_c_QD': {'value': '1.3', 'group': 'N_ATTRACTION', 'desc': '吸引力函数强度系数: 质量防御'},
+            'dynamic_c_MR': {'value': '0.8', 'group': 'N_ATTRACTION', 'desc': '吸引力函数强度系数: 均值回归'},
+            'dynamic_sigma_MR': {'value': '0.4', 'group': 'N_PARAMS', 'desc': '均值回归策略适用范围宽度'},
+            'dynamic_tau': {'value': '0.5', 'group': 'N_PARAMS', 'desc': 'Softmax温度系数(控制切换灵敏度)'},
 
             # 维度内部因子权重 (k_ij)
             'dynamic_k_MT1': {'value': '0.5', 'group': 'K_WEIGHTS_MT', 'desc': '趋势动能-MA20斜率权重'},
@@ -4397,9 +4495,9 @@ class SelectionService:
             'dynamic_k_MR1': {'value': '0.3', 'group': 'K_WEIGHTS_MR', 'desc': '均值回归-RSI超卖权重'},
             'dynamic_k_MR2': {'value': '0.5', 'group': 'K_WEIGHTS_MR', 'desc': '均值回归-负向偏离度权重'},
             'dynamic_k_MR3': {'value': '0.2', 'group': 'K_WEIGHTS_MR', 'desc': '均值回归-布林下轨支撑权重'},
-            'dynamic_k_QD1': {'value': '0.45', 'group': 'K_WEIGHTS_QD', 'desc': '质量防御-低波动率权重'},
-            'dynamic_k_QD2': {'value': '0.35', 'group': 'K_WEIGHTS_QD', 'desc': '质量防御-最大回撤权重'},
-            'dynamic_k_QD3': {'value': '0.2', 'group': 'K_WEIGHTS_QD', 'desc': '质量防御-下行风险权重'},
+            'dynamic_k_QD1': {'value': '0.4', 'group': 'K_WEIGHTS_QD', 'desc': '质量防御-低波动率权重'},
+            'dynamic_k_QD2': {'value': '0.3', 'group': 'K_WEIGHTS_QD', 'desc': '质量防御-最大回撤权重'},
+            'dynamic_k_QD3': {'value': '0.3', 'group': 'K_WEIGHTS_QD', 'desc': '质量防御-下行风险权重'},
             
             # 交易预案参数
             # 'dynamic_k_drop': {'value': '0.3', 'group': 'PLAN_PARAMS', 'desc': 'MIOP低开容忍系数'},
@@ -5279,104 +5377,6 @@ class SelectionService:
 
 ####文件结束####
 
-####selection_manager\management\commands\generate_m_value_csv.py####
-# selection_manager/management/commands/generate_m_value_csv.py
-
-import logging
-import os
-from decimal import Decimal
-
-import pandas as pd
-from django.conf import settings
-from django.core.management.base import BaseCommand
-from tqdm import tqdm
-
-from common.models import IndexQuotesCsi300
-from selection_manager.service.selection_service import SelectionService
-
-# 获取logger实例
-logger = logging.getLogger(__name__)
-
-class Command(BaseCommand):
-    """
-    一个Django管理命令，用于计算沪深300指数从2010-08-19至2025-08-18的
-    完整历史M值，并生成一个CSV文件供分析脚本使用。
-    
-    运行方式:
-    python manage.py generate_m_value_csv
-    """
-    help = '计算沪深300历史M值并生成 m_value_csi300.csv 文件'
-
-    def handle(self, *args, **options):
-        self.stdout.write(self.style.SUCCESS('===== 开始计算沪深300历史M值 ====='))
-
-        try:
-            # 1. 一次性从数据库加载所有需要的沪深300行情数据
-            self.stdout.write("正在从数据库加载沪深300历史行情数据...")
-            quotes_qs = IndexQuotesCsi300.objects.all().order_by('trade_date').values('trade_date', 'close')
-            if not quotes_qs:
-                self.stdout.write(self.style.ERROR("错误：数据库表 tb_index_quotes_csi300 中没有数据。请先回填数据。"))
-                return
-            
-            all_quotes_df = pd.DataFrame.from_records(quotes_qs)
-            all_dates = all_quotes_df['trade_date'].tolist()
-            self.stdout.write(f"数据加载完成，共 {len(all_dates)} 个交易日。")
-
-            # 2. 初始化SelectionService并加载一次参数
-            # 使用第一个日期进行初始化，后续在循环中更新日期
-            service = SelectionService(trade_date=all_dates[0], mode='backtest')
-            service._load_dynamic_parameters_and_defs()
-            self.stdout.write("策略服务和参数初始化完成。")
-
-            # 3. 循环计算每一天的M值
-            results = []
-            self.stdout.write("开始逐日计算M值...")
-            LOOKBACK_BUFFER = 80
-            if len(all_dates) <= LOOKBACK_BUFFER:
-                self.stdout.write(self.style.ERROR(f"错误：总交易日数 ({len(all_dates)}) 不足以满足 {LOOKBACK_BUFFER} 天的回溯期。"))
-                return
-            # 使用tqdm创建进度条
-            for current_date in tqdm(all_dates[LOOKBACK_BUFFER:], desc="计算M值进度"):
-                # 更新服务的交易日期
-                service.trade_date = current_date
-                
-                # 调用核心方法计算M值，按要求传入空stock_pool
-                m_value = service._calculate_market_regime_M(stock_pool=[])
-                
-                # 从已加载的DataFrame中获取收盘价
-                close_price = all_quotes_df.loc[all_quotes_df['trade_date'] == current_date, 'close'].iloc[0]
-                
-                results.append({
-                    '日期': current_date,
-                    'm值': m_value,
-                    '沪深300收盘指数': float(close_price) # 转换为float以便pandas处理
-                })
-
-            if not results:
-                self.stdout.write(self.style.WARNING("计算完成，但没有生成任何结果。"))
-                return
-
-            # 4. 将结果转换为DataFrame并保存为CSV
-            self.stdout.write("所有M值计算完成，正在生成CSV文件...")
-            results_df = pd.DataFrame(results)
-            
-            # 定义输出路径为项目根目录
-            output_path = os.path.join(settings.BASE_DIR, 'm_value_csi300.csv')
-            
-            # 保存文件，使用 utf-8-sig 编码以确保Excel能正确打开
-            results_df.to_csv(output_path, index=False, encoding='utf-8-sig', float_format='%.4f')
-
-            self.stdout.write(self.style.SUCCESS(f"\n===== 任务成功完成！ ====="))
-            self.stdout.write(f"文件已保存至: {output_path}")
-            self.stdout.write(f"现在你可以运行 [M值关系分析.py] 脚本了。")
-
-        except Exception as e:
-            self.stdout.write(self.style.ERROR(f"任务执行过程中发生严重错误: {e}"))
-            logger.error("生成M值CSV文件失败", exc_info=True)
-
-
-####文件结束####
-
 ####trade_manager\__init__.py####
 
 ####文件结束####
@@ -5679,7 +5679,7 @@ class BacktestReporter:
         self.current_date = current_date
         self.initial_capital = initial_capital
         self.email_handler = EmailHandler()
-        self.recipients = ['876858298@qq.com','850696281@qq.com']#,'285173686@qq.com'
+        self.recipients = ['876858298@qq.com']#,'285173686@qq.com','850696281@qq.com'
     def _execute_query(self, query: str, params: list = None) -> list[dict]:
         """在指定 schema 中执行原生 SQL 查询并返回结果"""
         with connections['default'].cursor() as cursor:
@@ -5740,8 +5740,15 @@ class BacktestReporter:
             """, [self.current_date]
         )
         for h in data['current_holdings']:
-            h['profit_rate'] = (h['current_take_profit'] / h['entry_price']) - 1 if h['entry_price'] > 0 else 0
-            h['loss_rate'] = 1 - (h['current_stop_loss'] / h['entry_price']) if h['entry_price'] > 0 else 0
+            entry_price = h['entry_price']
+            if entry_price and entry_price > 0:
+                # 新的计算方式：将止盈/止损价表示为成本价的百分比
+                h['profit_level_pct'] = h['current_take_profit'] / entry_price
+                h['loss_level_pct'] = h['current_stop_loss'] / entry_price
+            else:
+                # 处理 entry_price 无效的情况
+                h['profit_level_pct'] = Decimal('0.0')
+                h['loss_level_pct'] = Decimal('0.0')
 
         # 4. 收益排名
         all_ops = self._execute_query(f"SELECT stock_code, stock_name, direction, amount FROM {BacktestOperationLog._meta.db_table}")
@@ -5885,7 +5892,7 @@ class BacktestReporter:
         if data['current_holdings']:
             html += """
             <table class="data-table">
-                <thead><tr><th>股票代码</th><th>股票名称</th><th>入场价</th><th>当前价</th><th>浮动盈亏</th><th>止盈价格</th><th>止损价格</th><th>预设止盈率</th><th>预设止损率</th></tr></thead>
+                <thead><tr><th>股票代码</th><th>股票名称</th><th>入场价</th><th>当前价</th><th>浮动盈亏</th><th>止盈价格</th><th>止损价格</th><th>止盈线位置</th><th>止损线位置</th></tr></thead>
                 <tbody>
             """
             for h in data['current_holdings']:
@@ -5893,6 +5900,8 @@ class BacktestReporter:
                 profit_loss = current_price - h['entry_price']
                 profit_loss_rate = (current_price / h['entry_price'] - 1) if h['entry_price'] else 0
                 style = get_row_style(profit_loss)
+                profit_level_str = f"{h['profit_level_pct']:.2%}"
+                loss_level_str = f"{h['loss_level_pct']:.2%}"
                 html += f"""
                 <tr {style}>
                     <td>{h['stock_code']}</td>
@@ -5902,8 +5911,8 @@ class BacktestReporter:
                     <td>{profit_loss_rate:.2%}</td>
                     <td>{h['current_take_profit']:.2f}</td>
                     <td>{h['current_stop_loss']:.2f}</td>
-                    <td>{h['profit_rate']:.2%}</td>
-                    <td>{h['loss_rate']:.2%}</td>
+                    <td style="color: #c82333;">{profit_level_str}</td>
+                    <td style="color: #1e7e34;">{loss_level_str}</td>
                 </tr>
                 """
             html += "</tbody></table>"
@@ -6070,39 +6079,36 @@ class BeforeFixService:
         logger.warning(f"在过去 {self.MAX_PLAN_LOOKBACK_DAYS} 天内未找到任何待执行的交易预案。")
         return None
 
-    def _calculate_adjusted_price(self, t_minus_1_close: Decimal, events: list[CorporateAction]) -> Decimal:
+    def _calculate_adjustment_ratios(self, events: list[CorporateAction]) -> tuple[Decimal, Decimal]:
         """
         核心算法：根据事件列表计算除权除息参考价。
         处理顺序：1.除息 -> 2.送/转股 -> 3.配股
         """
-        adjusted_price = t_minus_1_close
+        price_ratio = Decimal('1.0')
+        quantity_ratio = Decimal('1.0')
+
+
         
         # 按事件类型优先级排序
         event_priority = {
             CorporateAction.EventType.DIVIDEND: 1,
             CorporateAction.EventType.BONUS: 2,
             CorporateAction.EventType.TRANSFER: 2,
-            CorporateAction.EventType.SPLIT: 2,
-            CorporateAction.EventType.RIGHTS: 3,
+            CorporateAction.EventType.SPLIT: 2
+            #CorporateAction.EventType.RIGHTS: 3,
         }
         sorted_events = sorted(events, key=lambda e: event_priority.get(e.event_type, 99))
 
         for event in sorted_events:
-            # 1. 现金分红 (除息)
-            if event.event_type == CorporateAction.EventType.DIVIDEND and event.dividend_per_share:
-                adjusted_price -= event.dividend_per_share
-            
-            # 2. 送股/转增股/并股/拆股 (除权)
-            elif event.event_type in [CorporateAction.EventType.BONUS, CorporateAction.EventType.TRANSFER, CorporateAction.EventType.SPLIT]:
+            # 送股/转增股/并股/拆股 (除权)
+            if event.event_type in [CorporateAction.EventType.BONUS, CorporateAction.EventType.TRANSFER, CorporateAction.EventType.SPLIT]:
                 if event.shares_before and event.shares_after and event.shares_after > 0:
-                    adjusted_price = adjusted_price * (event.shares_before / event.shares_after)
-
-            # 3. 配股 (除权) - 注意：按需求，此计算结果不用于常规校准，但逻辑保留
-            elif event.event_type == CorporateAction.EventType.RIGHTS:
-                if event.shares_before and event.shares_after and event.rights_issue_price is not None and event.shares_after > 0:
-                    adjusted_price = (event.shares_before * adjusted_price + (event.shares_after - event.shares_before) * event.rights_issue_price) / event.shares_after
+                    # 价格比率 = 旧股数 / 新股数
+                    price_ratio *= (event.shares_before / event.shares_after)
+                    # 数量比率 = 新股数 / 旧股数
+                    quantity_ratio *= (event.shares_after / event.shares_before)
         
-        return adjusted_price
+        return price_ratio, quantity_ratio
 
     @transaction.atomic
     def run(self):
@@ -6122,9 +6128,14 @@ class BeforeFixService:
         # 按股票代码分组事件
         events_by_stock = {}
         for event in events_on_t_day:
-            events_by_stock.setdefault(event.stock_code, []).append(event)
+            if event.event_type != CorporateAction.EventType.RIGHTS:
+                 events_by_stock.setdefault(event.stock_code, []).append(event)
         
         affected_codes = list(events_by_stock.keys())
+        if not affected_codes:
+            logger.info("T日只有配股事件，常规校准流程跳过。")
+            self._handle_rights_issue_special_case() # 仍然要处理配股的特殊情况
+            return
         logger.info(f"T日共有 {len(affected_codes)} 只股票发生股权事件。")
 
         # 获取这些股票在T-1日的收盘价
@@ -6134,7 +6145,7 @@ class BeforeFixService:
         )
         # 使用字典推导式构建我们需要的映射关系
         quotes_t_minus_1 = {quote.stock_code_id: quote for quote in quotes_qs}
-
+        self.adjustment_ratios = {} 
         # b. 计算价格调整比率
         for stock_code, events in events_by_stock.items():
             if stock_code not in quotes_t_minus_1:
@@ -6145,11 +6156,23 @@ class BeforeFixService:
             if close_t_minus_1 <= 0:
                 logger.warning(f"股票 {stock_code} 在T-1日收盘价为0或负数，不合理，跳过校准。")
                 continue
-
-            adjusted_close = self._calculate_adjusted_price(close_t_minus_1, events)
-            ratio = adjusted_close / close_t_minus_1
-            self.adjustment_ratios[stock_code] = ratio
-            logger.info(f"股票 {stock_code}: T-1收盘价={close_t_minus_1}, 校准后价格={adjusted_close:.2f}, 调整比率={ratio:.6f}")
+            # 1. 计算送/转/拆/并股的比率
+            price_ratio_st, quantity_ratio_st = self._calculate_adjustment_ratios(events)
+            # 2. 计算分红的价格影响
+            total_dividend = sum(e.dividend_per_share for e in events if e.event_type == CorporateAction.EventType.DIVIDEND and e.dividend_per_share)
+            
+            price_ratio_div = Decimal('1.0')
+            if total_dividend > 0:
+                # 分红的价格调整比率 = (收盘价 - 分红) / 收盘价
+                price_ratio_div = (close_t_minus_1 - total_dividend) / close_t_minus_1
+            # 3. 合并总比率
+            final_price_ratio = price_ratio_st * price_ratio_div
+            final_quantity_ratio = quantity_ratio_st # 分红不影响数量
+            self.adjustment_ratios[stock_code] = (final_price_ratio, final_quantity_ratio)
+            
+            logger.info(f"股票 {stock_code}: T-1收盘价={close_t_minus_1}, "
+                        f"价格调整比率={final_price_ratio:.6f}, "
+                        f"数量调整比率={final_quantity_ratio:.6f}")
 
         # c. 修正交易预案
         self._process_trading_plans()
@@ -6176,15 +6199,15 @@ class BeforeFixService:
 
         plans_to_update = []
         for plan in plans_to_fix:
-            ratio = self.adjustment_ratios[plan.stock_code_id]
+            price_ratio, _ = self.adjustment_ratios[plan.stock_code_id]
             original_miop = plan.miop
             original_maop = plan.maop
             
-            plan.miop = (original_miop * Decimal(str(ratio))).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
-            plan.maop = (original_maop * Decimal(str(ratio))).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+            plan.miop = (original_miop * price_ratio).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+            plan.maop = (original_maop * price_ratio).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
             
             plans_to_update.append(plan)
-            logger.info(f"交易预案修正: {plan.stock_code}, MIOP: {original_miop}->{plan.miop}, MAOP: {original_maop}->{plan.maop}")
+            logger.info(f"交易预案修正: {plan.stock_code_id}, MIOP: {original_miop}->{plan.miop}, MAOP: {original_maop}->{plan.maop}")
 
         if plans_to_update:
             DailyTradingPlan.objects.bulk_update(plans_to_update, ['miop', 'maop'])
@@ -6198,16 +6221,29 @@ class BeforeFixService:
         )
 
         positions_to_update = []
+        update_fields = ['entry_price', 'quantity', 'current_stop_loss', 'current_take_profit']
         for pos in positions_to_fix:
-            ratio = self.adjustment_ratios[pos.stock_code_id]
+            price_ratio, quantity_ratio = self.adjustment_ratios[pos.stock_code_id]
+            
+            original_ep = pos.entry_price
+            original_qty = pos.quantity
             original_sl = pos.current_stop_loss
             original_tp = pos.current_take_profit
-
-            pos.current_stop_loss = (original_sl * Decimal(str(ratio))).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
-            pos.current_take_profit = (original_tp * Decimal(str(ratio))).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+            # 【新增】调整成本价
+            pos.entry_price = (original_ep * price_ratio).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+            
+            # 【新增】调整持仓数量，并取整到股
+            pos.quantity = int((Decimal(str(original_qty)) * quantity_ratio).to_integral_value(rounding=ROUND_HALF_UP))
+            # 【修改】调整止盈止损价
+            pos.current_stop_loss = (original_sl * price_ratio).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+            pos.current_take_profit = (original_tp * price_ratio).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
             
             positions_to_update.append(pos)
-            logger.info(f"持仓风控修正: {pos.stock_code}, 止损: {original_sl}->{pos.current_stop_loss}, 止盈: {original_tp}->{pos.current_take_profit}")
+            logger.info(f"持仓风控修正: {pos.stock_code_id}, "
+                        f"成本价: {original_ep:.2f} -> {pos.entry_price:.2f}, "
+                        f"数量: {original_qty} -> {pos.quantity}, "
+                        f"止损: {original_sl:.2f} -> {pos.current_stop_loss:.2f}, "
+                        f"止盈: {original_tp:.2f} -> {pos.current_take_profit:.2f}")
 
         if positions_to_update:
             Position.objects.bulk_update(positions_to_update, ['current_stop_loss', 'current_take_profit'])
@@ -6565,11 +6601,11 @@ class DecisionOrderService:
             'k_slip': '0.002',
             'lookback_atr': '14',
             # 新版动态风险参数
-            'risk_adj_tp_pct_min': '0.08',
-            'risk_adj_tp_pct_max': '0.2',
-            'risk_adj_sl_atr_min': '2.5',
-            'risk_adj_sl_atr_max': '4',
-            'risk_adj_max_loss_pct': '0.12',
+            'risk_adj_tp_pct_min': '0.03',
+            'risk_adj_tp_pct_max': '0.07',
+            'risk_adj_sl_atr_min': '0.9',
+            'risk_adj_sl_atr_max': '1.8',
+            'risk_adj_max_loss_pct': '0.028',
             # 全新动态仓位参数
             'ORIGINAL_MAX_POSITIONS': '5',
             'MIN_POSITIONS_COUNT': '1',
@@ -6810,8 +6846,8 @@ class DecisionOrderService:
                 # 4.3 计算绝对最大亏损底线
                 z2_max_loss = aep * (1 - self.params['risk_adj_max_loss_pct'])
               
-                # 4.4 取最严格的止损位（价格最高者），但是止损率不能低于6%，避免无限被凌迟
-                stop_loss_price =min(aep *Decimal('0.94'),max(z1_dynamic_atr, z2_max_loss))
+                # 4.4 取最严格的止损位（价格最高者），但是止损率不能低于0.5%
+                stop_loss_price =min(aep *Decimal('0.995'),max(z1_dynamic_atr, z2_max_loss))
               
                 logger.debug(f"[{stock_code}] 止损线比较 (基于M(t)={market_regime_M:.4f}): "
                             f"动态ATR止损(乘数{k_h_dynamic:.2f})={z1_dynamic_atr:.2f}, "
@@ -6862,11 +6898,11 @@ class DecisionOrderService:
             'lookback_atr': {'value': '14', 'group': 'INDICATORS', 'desc': 'ATR计算周期'},
             
             # 新版 M(t) 驱动的动态风险参数
-            'risk_adj_tp_pct_min': {'value': '0.08', 'group': 'RISK_ADJUSTED', 'desc': 'M(t)驱动-最小止盈目标百分比 (熊市)'},
-            'risk_adj_tp_pct_max': {'value': '0.2', 'group': 'RISK_ADJUSTED', 'desc': 'M(t)驱动-最大止盈目标百分比 (牛市)'},
-            'risk_adj_sl_atr_min': {'value': '2.5', 'group': 'RISK_ADJUSTED', 'desc': 'M(t)驱动-最小ATR止损乘数 (熊市)'},
-            'risk_adj_sl_atr_max': {'value': '4.0', 'group': 'RISK_ADJUSTED', 'desc': 'M(t)驱动-最大ATR止损乘数 (牛市)'},
-            'risk_adj_max_loss_pct': {'value': '0.12', 'group': 'RISK_ADJUSTED', 'desc': 'M(t)驱动-绝对最大亏损百分比'},
+            'risk_adj_tp_pct_min': {'value': '0.03', 'group': 'RISK_ADJUSTED', 'desc': 'M(t)驱动-最小止盈目标百分比 (熊市)'},
+            'risk_adj_tp_pct_max': {'value': '0.07', 'group': 'RISK_ADJUSTED', 'desc': 'M(t)驱动-最大止盈目标百分比 (牛市)'},
+            'risk_adj_sl_atr_min': {'value': '0.9', 'group': 'RISK_ADJUSTED', 'desc': 'M(t)驱动-最小ATR止损乘数 (熊市)'},
+            'risk_adj_sl_atr_max': {'value': '1.8', 'group': 'RISK_ADJUSTED', 'desc': 'M(t)驱动-最大ATR止损乘数 (牛市)'},
+            'risk_adj_max_loss_pct': {'value': '0.028', 'group': 'RISK_ADJUSTED', 'desc': 'M(t)驱动-绝对最大亏损百分比'},
             # --- 全新动态仓位管理参数 ---
             'ORIGINAL_MAX_POSITIONS': {'value': '5', 'group': 'DYNAMIC_POS_MGMT', 'desc': '【动态仓位】策略基准最大持仓数'},
             'MIN_POSITIONS_COUNT': {'value': '1', 'group': 'DYNAMIC_POS_MGMT', 'desc': '【动态仓位】最小持仓数硬下限'},
@@ -6875,7 +6911,7 @@ class DecisionOrderService:
         
             # --- 追踪止盈参数 ---
             'trailing_tp_increment_pct': {'value': '0.02', 'group': 'TRAILING_STOP', 'desc': '追踪止盈的步进百分比'},
-            'trailing_sl_buffer_pct': {'value': '0.01', 'group': 'TRAILING_STOP', 'desc': '追踪止盈的回撤缓冲百分比'},
+            'trailing_sl_buffer_pct': {'value': '0.015', 'group': 'TRAILING_STOP', 'desc': '追踪止盈的回撤缓冲百分比'},
         
         }
 
@@ -7325,7 +7361,7 @@ class MDistributionBacktestService:
             return 'SOLD', open_p, temp_sl, temp_tp
         # 加载参数 (这里简化处理，实际可从 DecisionOrderService 加载)
         trailing_tp_increment_pct = Decimal('0.02')
-        trailing_sl_buffer_pct = Decimal('0.01')
+        trailing_sl_buffer_pct = Decimal('0.015')
         # 2. 日内循环监控
         while True:
             action_taken_in_loop = False
@@ -7340,7 +7376,7 @@ class MDistributionBacktestService:
                     action_taken_in_loop = True
             if not action_taken_in_loop and temp_sl < entry_price:
                 base_price = max(entry_price, temp_sl)
-                cost_lock_price = min((base_price + temp_tp) / 2, base_price * Decimal('1.01'))
+                cost_lock_price = min((base_price + temp_tp) / 2, base_price * Decimal('1.012'))
                 if high_p > cost_lock_price:
                     new_sl = (base_price + cost_lock_price) / 2
                     if new_sl > temp_sl:
@@ -8037,7 +8073,7 @@ class PositionMonitorLogic:
             base_price = max(position.entry_price, position.current_stop_loss)
             cost_lock_price = min(
                 (base_price + position.current_take_profit) / 2,
-                base_price * Decimal('1.01')
+                base_price * Decimal('1.012')
             )
             if current_price > cost_lock_price:
                 new_sl = ((base_price + cost_lock_price) / 2)

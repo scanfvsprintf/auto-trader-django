@@ -292,7 +292,7 @@ class MDistributionBacktestService:
         future_quotes_qs = DailyQuotes.objects.filter(
             stock_code_id=stock_code,
             trade_date__gt=entry_date
-        ).order_by('trade_date').values('trade_date', 'high', 'low', 'close')[:self.max_holding_days]
+        ).order_by('trade_date').values('trade_date', 'open', 'high', 'low', 'close')[:self.max_holding_days]
         
         future_quotes = list(future_quotes_qs)
         if not future_quotes:
