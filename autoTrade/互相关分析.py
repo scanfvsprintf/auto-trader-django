@@ -31,21 +31,30 @@ def calculate_returns(df):
     计算日收益率。在金融分析中，分析收益率比分析原始价格更常见。
     这有助于序列的平稳化，并关注相对变化。
     """
-    # 使用 .pct_change() 计算百分比变化
-    df_returns = df.pct_change()
+    # # 使用 .pct_change() 计算百分比变化
+    # df_returns = df.pct_change()
     
-    # m值本身可能就是变化率，如果m值已经是类似收益率的指标，可以跳过对m值的处理
-    # 这里我们假设m值也需要处理，如果不需要，可以注释掉下面这行
-    # df_returns['m值'] = df['m值'] # 如果m值本身就是变化率，直接使用原始值
+    # # m值本身可能就是变化率，如果m值已经是类似收益率的指标，可以跳过对m值的处理
+    # # 这里我们假设m值也需要处理，如果不需要，可以注释掉下面这行
+    # # df_returns['m值'] = df['m值'] # 如果m值本身就是变化率，直接使用原始值
     
-    # 删除第一行，因为其没有前一天的值，计算结果为NaN
-    df_returns = df_returns.dropna()
+    # # 删除第一行，因为其没有前一天的值，计算结果为NaN
+    # df_returns = df_returns.dropna()
+    df_processed = pd.DataFrame(index=df.index)
     
+    # 只对价格序列计算百分比变化
+    df_processed['沪深300指数_returns'] = df['沪深300收盘指数'].pct_change()
+    
+    # 直接使用m值，因为它可能已经是变化率
+    df_processed['m值'] = df['m值']
+    
+    # 删除第一行，因为收益率计算结果为NaN
+    df_processed = df_processed.dropna()
     print("日收益率数据预览：")
-    print(df_returns.head())
+    print(df_processed.head())
     print("\n")
     
-    return df_returns
+    return df_processed
 
 # --- 3. 互相关分析核心函数 ---
 def cross_correlation_analysis(series1, series2, max_lag):
@@ -163,7 +172,7 @@ if __name__ == '__main__':
     # 结果中的正滞后意味着沪深300领先，负滞后意味着m值领先。
     lags, corrs = cross_correlation_analysis(
         df_returns['m值'], 
-        df_returns['沪深300收盘指数'], 
+        df_returns['沪深300指数_returns'], 
         max_lag_days
     )
     
