@@ -80,13 +80,14 @@ class DecisionOrderService:
  
         # 2. 获取T-1日的市场状态M(t)
         market_regime_M = self._get_market_regime_M(t_minus_1_date)
+        market_regime_S = self._get_market_regime_S(t_minus_1_date)
         logger.info(f"获取到 T-1 ({t_minus_1_date}) 的 M(t) = {market_regime_M:.4f}")
  
         # 3. 计算当日动态最大持仓数
-        self.current_max_positions = self._calculate_dynamic_max_positions(market_regime_M)
+        self.current_max_positions = self._calculate_dynamic_max_positions(market_regime_S)
         
         # 4. 计算当日动态单位名义本金
-        self.final_nominal_principal = self._calculate_dynamic_nominal_principal(market_regime_M, t_minus_1_date)
+        self.final_nominal_principal = self._calculate_dynamic_nominal_principal(market_regime_S, t_minus_1_date)
  
     def _get_market_regime_M(self, t_minus_1_date: date) -> Decimal:
         """
@@ -102,6 +103,22 @@ class DecisionOrderService:
             return m_value_record.raw_value
         except DailyFactorValues.DoesNotExist:
             logger.error(f"严重警告: 无法在 {t_minus_1_date} 找到市场状态M(t)值！将使用最保守的中性值0.0进行计算。")
+            return Decimal('0.0')
+        
+    def _get_market_regime_S(self, t_minus_1_date: date) -> Decimal:
+        """
+        【全新方法】
+        从数据库获取指定日期的 S(t) 值。
+        """
+        try:
+            m_value_record = DailyFactorValues.objects.get(
+                stock_code_id=MARKET_INDICATOR_CODE,
+                trade_date=t_minus_1_date,
+                factor_code_id='dynamic_S_VALUE'
+            )
+            return m_value_record.raw_value
+        except DailyFactorValues.DoesNotExist:
+            logger.error(f"严重警告: 无法在 {t_minus_1_date} 找到市场状态S(t)值！将使用最保守的中性值0.0进行计算。")
             return Decimal('0.0')
  
     def _calculate_dynamic_max_positions(self, M_t: Decimal) -> int:
@@ -153,13 +170,13 @@ class DecisionOrderService:
         # iii. 计算单位名义本金风险缩放因子 S_cap(M(t))
         S_min_cap = self.params['RISK_ADJ_CAPITAL_FLOOR_PCT']
         S_cap = S_min_cap + (1 - S_min_cap) * (M_t + 1) / 2
-        if M_t > Decimal('0.0'):
+        if M_t > Decimal('0.5'):
             S_cap = Decimal('1.0')
-        elif M_t > Decimal('-0.3'):
+        elif M_t > Decimal('0.0'):
             S_cap = Decimal('0.5')
         else:
             S_cap = Decimal('0.0')
-        S_cap=Decimal('1.0')
+        #S_cap=Decimal('1.0')
         # iv. 计算动态调整后的名义本金
         adjusted_unit_principal = baseline_unit_principal * S_cap
         

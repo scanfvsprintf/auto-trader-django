@@ -232,7 +232,8 @@ class SelectionService:
 
             # 核心动态逻辑
             self.market_regime_M = self._calculate_market_regime_M(initial_stock_pool)
-            self.dynamic_weights = self._calculate_dynamic_weights(self.market_regime_M)
+            self.market_regime_S = self._calculate_market_regime_S()
+            self.dynamic_weights = self._calculate_dynamic_weights(self.market_regime_M,self.market_regime_S)
             
             self._load_market_data(initial_stock_pool)
             raw_factors_df = self._calculate_all_dynamic_factors()
@@ -354,6 +355,69 @@ class SelectionService:
         logger.info(f"M(t) 计算完成，值为: {m_t:.4f}，并已存入缓存。")
         return m_t
 
+    def _calculate_market_regime_S(self) -> float:
+        """
+        [新增] 计算市场状态变化率 S(t)。
+        此方法在 M(t) 计算之后调用。
+        """
+        logger.debug("开始计算市场状态变化率 S(t)...")
+        window_size = int(self.dynamic_params.get('dynamic_s_window_size', 10))
+        try:
+            # 1. 获取最近N个交易日的M(t)值
+            m_values_qs = DailyFactorValues.objects.filter(
+                stock_code_id=MARKET_INDICATOR_CODE,
+                factor_code_id='dynamic_M_VALUE',
+                trade_date__lte=self.trade_date
+            ).order_by('-trade_date')[:window_size]
+            if len(m_values_qs) < window_size:
+                logger.warning(f"M(t)历史数据不足 {window_size} 天，无法计算S(t)，返回0。")
+                return 0.0
+            # 将查询结果转换为pandas Series，并反转顺序使时间从远到近
+            m_values = pd.Series([float(m.raw_value) for m in m_values_qs]).iloc[::-1]
+            
+            # 2. 进行线性回归
+            time_series = np.arange(len(m_values))
+            slope, _, _, _, _ = linregress(x=time_series, y=m_values.values)
+            # 3. 缓存原始斜率
+            DailyFactorValues.objects.update_or_create(
+                stock_code_id=MARKET_INDICATOR_CODE,
+                trade_date=self.trade_date,
+                factor_code_id='dynamic_S_RAW_SLOPE',
+                defaults={'raw_value': Decimal(str(slope)), 'norm_score': Decimal(str(slope))}
+            )
+            
+            # 4. 进行绝对标准化
+            norm_s = self._norm_absolute_slope(slope)
+            # 5. 缓存标准化后的S(t)值
+            DailyFactorValues.objects.update_or_create(
+                stock_code_id=MARKET_INDICATOR_CODE,
+                trade_date=self.trade_date,
+                factor_code_id='dynamic_S_VALUE',
+                defaults={'raw_value': Decimal(str(norm_s)), 'norm_score': Decimal(str(norm_s))}
+            )
+            logger.info(f"S(t) 计算完成，原始斜率: {slope:.4f}, 标准化值: {norm_s:.4f}")
+            return norm_s
+        except Exception as e:
+            logger.error(f"计算S(t)时发生错误: {e}", exc_info=True)
+            return 0.0
+
+    def _norm_absolute_slope(self, raw_slope: float) -> float:
+        """
+        [新增] S(t)的绝对标准化函数。
+        """
+        upper_bound = self.dynamic_params.get('dynamic_s_norm_upper_bound', 0.1)
+        lower_bound = self.dynamic_params.get('dynamic_s_norm_lower_bound', -0.1)
+        if raw_slope >= upper_bound:
+            return 1.0
+        if raw_slope <= lower_bound:
+            return -1.0
+        
+        value_range = upper_bound - lower_bound
+        if value_range < 1e-9:
+            return 0.0
+    
+        # 线性插值到 [-1, 1]
+        return -1.0 + 2.0 * (raw_slope - lower_bound) / value_range
 
     def _norm_absolute(self, value, p10, p50, p90, direction):
         """使用固定分位锚点进行绝对标准化（分段线性插值）"""
@@ -393,17 +457,17 @@ class SelectionService:
             DailyFactorValues.objects.bulk_create(records, ignore_conflicts=True)
             logger.debug(f"成功将 {len(records)} 条M(t)基础指标原始值存入缓存。")
 
-    def _calculate_dynamic_weights(self, M_t: float) -> dict:
+    def _calculate_dynamic_weights(self, M_t: float, S_t: float) -> dict:
         """根据M(t)计算四个策略维度的动态权重"""
         logger.debug(f"根据 M(t)={M_t:.4f} 计算动态权重...")
         p = self.dynamic_params
-        
+        k=S_t
         # a. 计算各维度吸引力 A_i
-        A_MT = p['dynamic_c_MT'] * M_t
-        A_BO = p['dynamic_c_BO'] * M_t
+        A_MT = p['dynamic_c_MT'] * k
+        A_BO = p['dynamic_c_BO'] * k
         # A_QD = p['dynamic_c_QD'] * (-M_t)
         A_QD = p['dynamic_c_QD']
-        A_MR = p['dynamic_c_MR'] * np.exp(- (M_t / p['dynamic_sigma_MR'])**2)
+        A_MR = p['dynamic_c_MR'] * np.exp(- (k / p['dynamic_sigma_MR'])**2)
         
         # b. 通过Softmax计算最终权重 N_i
         tau = p['dynamic_tau']
