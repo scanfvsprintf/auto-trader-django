@@ -272,7 +272,7 @@ class SelectionService:
         logger.debug("开始计算市场状态 M(t) [V3.0]...")
         # --- 1. 参数声明 ---
         # D(t) 相关参数
-        H_LOOKBACK_K = 5      # h(t,k) 的最大回溯期 k
+        H_LOOKBACK_K = 10      # h(t,k) 的最大回溯期 k
         A_PARAM = 200.0      # tanh 激活函数的缩放系数
         # I(t) 相关参数
         ADX_PERIOD = 14       # ADX 计算周期
