@@ -277,7 +277,7 @@ class SelectionService:
         # I(t) 相关参数
         ADX_PERIOD = 14       # ADX 计算周期
         ADX_THRESHOLD = 20.0  # ADX 强度阈值
-        B_PARAM = 0.1         # sigmoid 激活函数的缩放系数
+        B_PARAM = 0.075         # sigmoid 激活函数的缩放系数
         # --- 2. 检查当日缓存 ---
         try:
             # cached_m = DailyFactorValues.objects.get(
@@ -366,13 +366,15 @@ class SelectionService:
         
         # f. 计算 I(t)
         adx_t = adx.iloc[-1]
-        if pd.isna(adx_t) or adx_t < ADX_THRESHOLD:
+        if pd.isna(adx_t):
             i_t = 0.0
-            logger.debug(f"ADX(t) = {adx_t:.2f} < {ADX_THRESHOLD} 或为NaN, I(t) 设为 0。")
+            logger.debug(f"ADX(t) 为NaN, I(t) 设为 0。")
         else:
-            sigmoid_input = B_PARAM * (adx_t - ADX_THRESHOLD)
-            i_t = 1 / (1 + np.exp(-sigmoid_input))
-            logger.debug(f"ADX(t) = {adx_t:.2f}, I(t) = sigmoid({B_PARAM}*({adx_t:.2f}-{ADX_THRESHOLD})) = {i_t:.4f}")
+            # 使用tanh构造一个在ADX_THRESHOLD处为0，并平滑增长的函数
+            raw_i = np.tanh(B_PARAM * (adx_t - ADX_THRESHOLD))
+            # 裁剪掉负值部分，使得ADX低于阈值时I(t)严格为0
+            i_t = max(0.0, raw_i)
+            logger.debug(f"ADX(t) = {adx_t:.2f}, I(t) = max(0, tanh({B_PARAM}*({adx_t:.2f}-{ADX_THRESHOLD}))) = {i_t:.4f}")
         # --- 5. 计算市场方向函数 D(t) ---
         logger.debug("计算市场方向 D(t)...")
         
