@@ -170,15 +170,17 @@ class DecisionOrderService:
         # iii. 计算单位名义本金风险缩放因子 S_cap(M(t))
         S_min_cap = self.params['RISK_ADJ_CAPITAL_FLOOR_PCT']
         S_cap = S_min_cap + (1 - S_min_cap) * (M_t + 1) / 2
-        if M_t > Decimal('0.5'):
-            S_cap = Decimal('1.0')
-        elif M_t > Decimal('0.0'):
-            S_cap = Decimal('0.5')
-        else:
-            S_cap = Decimal('0.0')
-        epsilon = 1e-9
+        # if M_t > Decimal('0.5'):
+        #     S_cap = Decimal('1.0')
+        # elif M_t > Decimal('0.0'):
+        #     S_cap = Decimal('0.5')
+        # else:
+        #     S_cap = Decimal('0.0')
+        epsilon = Decimal(1e-9)
         if abs(M_t) < epsilon:
-            pass
+            S_cap=Decimal('1.0')
+        elif M_t<Decimal('0.0'):
+            S_cap=Decimal('0.0')
         else:
             S_cap=M_t
         
