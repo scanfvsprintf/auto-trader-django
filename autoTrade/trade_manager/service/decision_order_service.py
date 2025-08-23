@@ -84,10 +84,10 @@ class DecisionOrderService:
         logger.info(f"获取到 T-1 ({t_minus_1_date}) 的 M(t) = {market_regime_M:.4f}")
  
         # 3. 计算当日动态最大持仓数
-        self.current_max_positions = self._calculate_dynamic_max_positions(market_regime_S)
+        self.current_max_positions = self._calculate_dynamic_max_positions(market_regime_M)
         
         # 4. 计算当日动态单位名义本金
-        self.final_nominal_principal = self._calculate_dynamic_nominal_principal(market_regime_S, t_minus_1_date)
+        self.final_nominal_principal = self._calculate_dynamic_nominal_principal(market_regime_M, t_minus_1_date)
  
     def _get_market_regime_M(self, t_minus_1_date: date) -> Decimal:
         """
