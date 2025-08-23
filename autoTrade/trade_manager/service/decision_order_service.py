@@ -178,7 +178,7 @@ class DecisionOrderService:
         #     S_cap = Decimal('0.0')
         epsilon = Decimal(1e-9)
         if abs(M_t) < epsilon:
-            S_cap=Decimal('1.0')
+            S_cap=Decimal('0.0')
         elif M_t<Decimal('0.0'):
             S_cap=Decimal('0.0')
         else:
