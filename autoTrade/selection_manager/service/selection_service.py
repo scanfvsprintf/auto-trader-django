@@ -431,14 +431,15 @@ class SelectionService:
         logger.debug("开始计算市场状态 M(t) [V2.0]...")
         # 1. 检查当日缓存
         try:
-            cached_m = DailyFactorValues.objects.get(
-                stock_code_id=MARKET_INDICATOR_CODE,
-                trade_date=self.trade_date,
-                factor_code_id='dynamic_M_VALUE'
-            )
-            m_value = float(cached_m.raw_value)
-            logger.debug(f"成功从缓存中读取当日 M(t) = {m_value:.4f}")
-            return m_value
+            # cached_m = DailyFactorValues.objects.get(
+            #     stock_code_id=MARKET_INDICATOR_CODE,
+            #     trade_date=self.trade_date,
+            #     factor_code_id='dynamic_M_VALUE'
+            # )
+            # m_value = float(cached_m.raw_value)
+            # logger.debug(f"成功从缓存中读取当日 M(t) = {m_value:.4f}")
+            # return m_value
+            pass
         except DailyFactorValues.DoesNotExist:
             logger.debug("当日 M(t) 缓存未命中，开始计算...")
         # 2. 加载计算所需数据 (约60个交易日)
