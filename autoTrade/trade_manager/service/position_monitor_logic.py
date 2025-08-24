@@ -32,30 +32,53 @@ class PositionMonitorLogic:
 
         # 阶段二：追踪止盈
         if current_price >= position.current_take_profit:
-            new_tp = position.current_take_profit * (1 + params['trailing_tp_increment_pct'])
-            new_sl = position.current_take_profit * (1 - params['trailing_sl_buffer_pct'])
-            return {
-                'action': 'UPDATE',
-                'updates': {
-                    'current_take_profit': new_tp.quantize(Decimal('0.01')),
-                    'current_stop_loss': new_sl.quantize(Decimal('0.01'))
+            
+                
+            change=(position.current_take_profit-max(position.current_stop_loss,position.entry_price))/2
+            if position.current_stop_loss>position.entry_price*1.3:
+                new_sl=current_price-0.01
+            else:
+                new_sl=position.current_take_profit-change
+            #new_tp = position.current_take_profit * (1 + params['trailing_tp_increment_pct'])
+            new_tp=max(position.current_take_profit+change,current_price)
+            #new_sl = position.current_take_profit * (1 - params['trailing_sl_buffer_pct'])
+
+            if current_price>=new_tp:
+                return {
+                    'action': 'SELL',
+                    'reason': TradeLog.ReasonChoices.TAKE_PROFIT,
+                    'exit_price': current_price
                 }
-            }
+            else:
+                return {
+                    'action': 'UPDATE',
+                    'updates': {
+                        'current_take_profit': new_tp.quantize(Decimal('0.01')),
+                        'current_stop_loss': new_sl.quantize(Decimal('0.01'))
+                    }
+                }
 
         # 阶段三：成本锁定
-        if position.current_stop_loss < position.entry_price:
-            base_price = max(position.entry_price, position.current_stop_loss)
-            cost_lock_price = min(
-                (base_price + position.current_take_profit) / 2,
-                base_price * Decimal('1.012')
-            )
-            if current_price > cost_lock_price:
-                new_sl = ((base_price + cost_lock_price) / 2)
-                # 确保新的止损价不会高于当前价，避免立即触发
-                if new_sl < current_price:
-                    return {
+        middle=(position.current_take_profit+position.entry_price)/2
+        if current_price>middle and position.current_stop_loss<position.entry_price:
+            new_sl=position.entry_price
+            return {
                         'action': 'UPDATE',
                         'updates': {'current_stop_loss': new_sl.quantize(Decimal('0.01'))}
                     }
+        # if position.current_stop_loss < position.entry_price:
+        #     base_price = max(position.entry_price, position.current_stop_loss)
+        #     cost_lock_price = min(
+        #         (base_price + position.current_take_profit) / 2,
+        #         base_price * Decimal('1.012')
+        #     )
+        #     if current_price > cost_lock_price:
+        #         new_sl = ((base_price + cost_lock_price) / 2)
+        #         # 确保新的止损价不会高于当前价，避免立即触发
+        #         if new_sl < current_price:
+        #             return {
+        #                 'action': 'UPDATE',
+        #                 'updates': {'current_stop_loss': new_sl.quantize(Decimal('0.01'))}
+        #             }
 
         return {'action': 'NONE'}

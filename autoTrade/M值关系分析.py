@@ -35,7 +35,7 @@ def load_data(file_path):
     df = df.set_index('日期').sort_index()
     return df
 
-def analyze_m_value_predictiveness(df, horizons=[5, 20, 60]):
+def analyze_m_value_predictiveness(df, horizons=[1,5, 20, 60]):
     """
     分析M值对未来沪深300指数收益和波动性的预测能力。
     """
@@ -172,7 +172,7 @@ def plot_analysis_results(results):
 if __name__ == "__main__":
     # 1. 定义文件路径和分析参数
     csv_file_path = 'm_value_csi300.csv'  # <--- 请确保这是您的文件名
-    analysis_horizons = [5, 20, 60]
+    analysis_horizons = [1,5, 20, 60]
 
     # 2. 加载数据
     df_raw = load_data(csv_file_path)

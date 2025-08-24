@@ -237,11 +237,11 @@ class DecisionOrderService:
             'k_slip': '0.002',
             'lookback_atr': '14',
             # 新版动态风险参数
-            'risk_adj_tp_pct_min': '0.03',
-            'risk_adj_tp_pct_max': '0.07',
-            'risk_adj_sl_atr_min': '0.9',
-            'risk_adj_sl_atr_max': '1.8',
-            'risk_adj_max_loss_pct': '0.028',
+            'risk_adj_tp_pct_min': '0.15',
+            'risk_adj_tp_pct_max': '0.15',
+            'risk_adj_sl_atr_min': '1',
+            'risk_adj_sl_atr_max': '1',
+            'risk_adj_max_loss_pct': '0.1',
             # 全新动态仓位参数
             'ORIGINAL_MAX_POSITIONS': '5',
             'MIN_POSITIONS_COUNT': '1',
@@ -534,11 +534,11 @@ class DecisionOrderService:
             'lookback_atr': {'value': '14', 'group': 'INDICATORS', 'desc': 'ATR计算周期'},
             
             # 新版 M(t) 驱动的动态风险参数
-            'risk_adj_tp_pct_min': {'value': '0.08', 'group': 'RISK_ADJUSTED', 'desc': 'M(t)驱动-最小止盈目标百分比 (熊市)'},
+            'risk_adj_tp_pct_min': {'value': '0.15', 'group': 'RISK_ADJUSTED', 'desc': 'M(t)驱动-最小止盈目标百分比 (熊市)'},
             'risk_adj_tp_pct_max': {'value': '0.15', 'group': 'RISK_ADJUSTED', 'desc': 'M(t)驱动-最大止盈目标百分比 (牛市)'},
-            'risk_adj_sl_atr_min': {'value': '0.9', 'group': 'RISK_ADJUSTED', 'desc': 'M(t)驱动-最小ATR止损乘数 (熊市)'},
-            'risk_adj_sl_atr_max': {'value': '1.8', 'group': 'RISK_ADJUSTED', 'desc': 'M(t)驱动-最大ATR止损乘数 (牛市)'},
-            'risk_adj_max_loss_pct': {'value': '0.028', 'group': 'RISK_ADJUSTED', 'desc': 'M(t)驱动-绝对最大亏损百分比'},
+            'risk_adj_sl_atr_min': {'value': '1', 'group': 'RISK_ADJUSTED', 'desc': 'M(t)驱动-最小ATR止损乘数 (熊市)'},
+            'risk_adj_sl_atr_max': {'value': '1', 'group': 'RISK_ADJUSTED', 'desc': 'M(t)驱动-最大ATR止损乘数 (牛市)'},
+            'risk_adj_max_loss_pct': {'value': '0.1', 'group': 'RISK_ADJUSTED', 'desc': 'M(t)驱动-绝对最大亏损百分比'},
             # --- 全新动态仓位管理参数 ---
             'ORIGINAL_MAX_POSITIONS': {'value': '5', 'group': 'DYNAMIC_POS_MGMT', 'desc': '【动态仓位】策略基准最大持仓数'},
             'MIN_POSITIONS_COUNT': {'value': '1', 'group': 'DYNAMIC_POS_MGMT', 'desc': '【动态仓位】最小持仓数硬下限'},
