@@ -61,7 +61,7 @@ class PositionMonitorLogic:
         # 阶段三：成本锁定
         middle=(position.current_take_profit+position.entry_price)/Decimal(2)
         if current_price>middle and position.current_stop_loss<position.entry_price:
-            new_sl=position.entry_price
+            new_sl=position.entry_price*Decimal(1.01)
             return {
                         'action': 'UPDATE',
                         'updates': {'current_stop_loss': new_sl.quantize(Decimal('0.01'))}
