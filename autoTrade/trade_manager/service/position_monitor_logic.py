@@ -34,9 +34,9 @@ class PositionMonitorLogic:
         if current_price >= position.current_take_profit:
             
                 
-            change=(position.current_take_profit-max(position.current_stop_loss,position.entry_price))/2
-            if position.current_stop_loss>position.entry_price*1.3:
-                new_sl=current_price-0.01
+            change=(position.current_take_profit-max(position.current_stop_loss,position.entry_price))/Decimal(2)
+            if position.current_stop_loss>position.entry_price*Decimal(1.3):
+                new_sl=current_price-Decimal(0.01)
             else:
                 new_sl=position.current_take_profit-change
             #new_tp = position.current_take_profit * (1 + params['trailing_tp_increment_pct'])
@@ -59,7 +59,7 @@ class PositionMonitorLogic:
                 }
 
         # 阶段三：成本锁定
-        middle=(position.current_take_profit+position.entry_price)/2
+        middle=(position.current_take_profit+position.entry_price)/Decimal(2)
         if current_price>middle and position.current_stop_loss<position.entry_price:
             new_sl=position.entry_price
             return {
