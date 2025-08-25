@@ -694,7 +694,7 @@ class SelectionService:
                         stock_code_id=stock_code,
                         trade_date=self.trade_date,
                         factor_code_id=factor_code,
-                        raw_value=Decimal(str(raw_value)),
+                        raw_value=min(Decimal(str(raw_value)),Decimal(999999)),
                         norm_score=Decimal(str(norm_score))
                     )
                 )
