@@ -21,6 +21,7 @@ from .m_distribution_reporter import MDistributionReporter
 from trade_manager.service.simulate_trade import SimulateTradeService
 from trade_manager.service.simulate_trade_handler import SimulateTradeHandler
 from .position_monitor_logic import PositionMonitorLogic
+from common.models import Position
 logger = logging.getLogger(__name__)
 STRATEGIES = ['MT', 'BO', 'QD', 'MR']
 class MDistributionBacktestService:
@@ -71,46 +72,108 @@ class MDistributionBacktestService:
         return master_panels
     def _get_next_trading_day(self, from_date: date) -> date | None: return (DailyQuotes.objects .filter(trade_date__gte=from_date) .order_by('trade_date') .values_list('trade_date', flat=True) .first())
     
+    # def _simulate_intraday_monitoring(self, position_dict: dict, daily_quote: dict) -> tuple[str, Decimal, Decimal, Decimal]:
+    #     """
+    #     对单个持仓在一天内进行高保真监控模拟。
+    #     这是一个纯逻辑函数，不直接操作数据库。
+    #     返回: (状态, 退出价格, 新止损, 新止盈)
+    #     """
+    #     open_p, high_p, low_p = daily_quote['open'], daily_quote['high'], daily_quote['low']
+        
+    #     temp_sl = position_dict['current_stop_loss']
+    #     temp_tp = position_dict['current_take_profit']
+    #     entry_price = position_dict['entry_price']
+    #     # 1. 开盘价检查
+    #     if open_p <= temp_sl:
+    #         return 'SOLD', open_p, temp_sl, temp_tp
+    #     # 加载参数 (这里简化处理，实际可从 DecisionOrderService 加载)
+    #     trailing_tp_increment_pct = Decimal('0.02')
+    #     trailing_sl_buffer_pct = Decimal('0.015')
+    #     # 2. 日内循环监控
+    #     while True:
+    #         action_taken_in_loop = False
+            
+    #         if low_p <= temp_sl:
+    #             return 'SOLD', temp_sl, temp_sl, temp_tp
+    #         if high_p >= temp_tp:
+    #             new_tp = temp_tp * (1 + trailing_tp_increment_pct)
+    #             new_sl = temp_tp * (1 - trailing_sl_buffer_pct)
+    #             if new_sl > temp_sl:
+    #                 temp_sl, temp_tp = new_sl, new_tp
+    #                 action_taken_in_loop = True
+    #         if not action_taken_in_loop and temp_sl < entry_price:
+    #             base_price = max(entry_price, temp_sl)
+    #             cost_lock_price = min((base_price + temp_tp) / 2, base_price * Decimal('1.012'))
+    #             if high_p > cost_lock_price:
+    #                 new_sl = (base_price + cost_lock_price) / 2
+    #                 if new_sl > temp_sl:
+    #                     temp_sl = new_sl
+    #                     action_taken_in_loop = True
+    #         if not action_taken_in_loop:
+    #             break
+        
+    #     return 'HOLD', Decimal('0.0'), temp_sl, temp_tp
+
     def _simulate_intraday_monitoring(self, position_dict: dict, daily_quote: dict) -> tuple[str, Decimal, Decimal, Decimal]:
         """
-        对单个持仓在一天内进行高保真监控模拟。
-        这是一个纯逻辑函数，不直接操作数据库。
-        返回: (状态, 退出价格, 新止损, 新止盈)
+        [重写] 对单个持仓在一天内进行高保真监控模拟。
+        此函数现在完全复用 PositionMonitorLogic 的逻辑。
         """
         open_p, high_p, low_p = daily_quote['open'], daily_quote['high'], daily_quote['low']
         
+        # 初始化临时的、内存中的持仓状态
         temp_sl = position_dict['current_stop_loss']
         temp_tp = position_dict['current_take_profit']
-        entry_price = position_dict['entry_price']
-        # 1. 开盘价检查
-        if open_p <= temp_sl:
-            return 'SOLD', open_p, temp_sl, temp_tp
-        # 加载参数 (这里简化处理，实际可从 DecisionOrderService 加载)
-        trailing_tp_increment_pct = Decimal('0.02')
-        trailing_sl_buffer_pct = Decimal('0.015')
-        # 2. 日内循环监控
+        
+        # 1. 开盘价检查 (黑天鹅事件)
+        # 创建一个临时的、不落表的Position对象以适配接口
+        temp_position_obj = Position(
+            entry_price=position_dict['entry_price'],
+            current_stop_loss=temp_sl,
+            current_take_profit=temp_tp
+        )
+        decision_open = PositionMonitorLogic.check_and_decide(temp_position_obj, open_p, self.params)
+        
+        if decision_open['action'] == 'SELL':
+            # 开盘价直接触发卖出，以开盘价成交
+            exit_price = min(open_p, decision_open['exit_price']) # 取更不利的价格
+            logger.debug(f"    -> 监控: 开盘价 {open_p:.2f} 触发卖出，成交价 {exit_price:.2f}")
+            return 'SOLD', exit_price, temp_sl, temp_tp
+        elif decision_open['action'] == 'UPDATE':
+            # 开盘价触发了风控线更新
+            temp_sl = decision_open['updates'].get('current_stop_loss', temp_sl)
+            temp_tp = decision_open['updates'].get('current_take_profit', temp_tp)
+            logger.debug(f"    -> 监控: 开盘价更新风控线. SL: {temp_sl:.2f}, TP: {temp_tp:.2f}")
+        # 2. 日内循环试探 (最低价 -> 最高价)
         while True:
             action_taken_in_loop = False
             
-            if low_p <= temp_sl:
-                return 'SOLD', temp_sl, temp_sl, temp_tp
-            if high_p >= temp_tp:
-                new_tp = temp_tp * (1 + trailing_tp_increment_pct)
-                new_sl = temp_tp * (1 - trailing_sl_buffer_pct)
-                if new_sl > temp_sl:
+            # 2.1 试探最低价是否触发卖出
+            temp_position_obj.current_stop_loss = temp_sl
+            temp_position_obj.current_take_profit = temp_tp
+            decision_low = PositionMonitorLogic.check_and_decide(temp_position_obj, low_p, self.params)
+            
+            if decision_low['action'] == 'SELL':
+                # 最低价触发卖出，以止损价成交
+                logger.debug(f"    -> 监控: 最低价 {low_p:.2f} 触发卖出，成交价 {decision_low['exit_price']:.2f}")
+                return 'SOLD', decision_low['exit_price'], temp_sl, temp_tp
+            # 2.2 试探最高价是否触发更新
+            decision_high = PositionMonitorLogic.check_and_decide(temp_position_obj, high_p, self.params)
+            
+            if decision_high['action'] == 'UPDATE':
+                new_sl = decision_high['updates'].get('current_stop_loss', temp_sl)
+                new_tp = decision_high['updates'].get('current_take_profit', temp_tp)
+                
+                # 只有当风控线实际发生变化时，才认为有动作发生
+                if new_sl != temp_sl or new_tp != temp_tp:
+                    logger.debug(f"    -> 监控: 最高价 {high_p:.2f} 触发风控线更新. SL: {new_sl:.2f}, TP: {new_tp:.2f}")
                     temp_sl, temp_tp = new_sl, new_tp
                     action_taken_in_loop = True
-            if not action_taken_in_loop and temp_sl < entry_price:
-                base_price = max(entry_price, temp_sl)
-                cost_lock_price = min((base_price + temp_tp) / 2, base_price * Decimal('1.012'))
-                if high_p > cost_lock_price:
-                    new_sl = (base_price + cost_lock_price) / 2
-                    if new_sl > temp_sl:
-                        temp_sl = new_sl
-                        action_taken_in_loop = True
+            # 如果本轮循环没有更新任何风控线，则说明价格波动已稳定在当前风控区间内，可以跳出循环
             if not action_taken_in_loop:
                 break
         
+        # 3. 如果未触发卖出，则返回持有状态和最终更新的风控线
         return 'HOLD', Decimal('0.0'), temp_sl, temp_tp
     
     def _setup_backtest_schema(self):
@@ -217,12 +280,31 @@ class MDistributionBacktestService:
                         cursor.execute(update_sequence_sql)
         
         logger.info("基础数据复制完成，并已完成索引优化。")
-
+    def _load_parameters(self):
+        """
+        [新增] 在回测开始前加载所有需要的策略参数。
+        参考 simulate_trade.py 的实现。
+        """
+        logger.info("加载回测所需策略参数...")
+        # 从 StrategyParameters 表中一次性加载所有参数
+        all_params = {p.param_name: p.param_value for p in StrategyParameters.objects.all()}
+        
+        # 定义 PositionMonitorLogic 中可能用到的参数及其默认值
+        required_params = {
+            'trailing_tp_increment_pct': '0.02',
+            'trailing_sl_buffer_pct': '0.015',
+            # 这里可以添加其他未来可能用到的参数
+        }
+        for key, default_value in required_params.items():
+            # 优先使用数据库的值，否则使用默认值
+            self.params[key] = all_params.get(key, Decimal(default_value))
+        
+        logger.info(f"策略参数加载完成: {self.params}")
     def run(self):
         try:
             with use_backtest_schema(self.backtest_run_id):
                 self._setup_backtest_schema()
-                
+                self._load_parameters()
                 trading_days = list(DailyQuotes.objects.filter(
                     trade_date__gte=self.start_date,
                     trade_date__lte=self.end_date
