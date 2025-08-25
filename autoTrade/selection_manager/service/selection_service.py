@@ -66,7 +66,17 @@ class SelectionService:
         self.panel_volume = None
         self.panel_turnover = None
         self.panel_hfq_close = None
-
+        # --- 性能优化：处理预加载数据 ---
+        if preloaded_panels:
+            logger.debug("检测到预加载面板数据，直接赋值。")
+            self.panel_open = preloaded_panels.get('open')
+            self.panel_high = preloaded_panels.get('high')
+            self.panel_low = preloaded_panels.get('low')
+            self.panel_close = preloaded_panels.get('close')
+            self.panel_volume = preloaded_panels.get('volume')
+            self.panel_turnover = preloaded_panels.get('turnover')
+            self.panel_hfq_close = preloaded_panels.get('hfq_close')
+        # --- 结束 ---
         logger.debug(f"--- SelectionService 初始化 ---")
         logger.debug(f"交易日期 (T-1): {self.trade_date}")
         logger.debug(f"运行模式: {self.mode}")
@@ -170,7 +180,10 @@ class SelectionService:
                 return
 
             # 步骤 3: 加载行情数据并构建面板
-            self._load_market_data(initial_stock_pool)
+            if self.panel_close is None:
+                self._load_market_data(initial_stock_pool)
+            else:
+                logger.debug("使用预加载的面板数据，跳过 _load_market_data。")
 
             # 步骤 4: 计算所有因子原始值
             raw_factors_df = self._calculate_all_factors()
@@ -214,11 +227,12 @@ class SelectionService:
 
     def _log_to_db(self, level, message):
         """辅助方法：将日志写入数据库"""
-        SystemLog.objects.create(
-            log_level=level,
-            module_name=MODULE_NAME,
-            message=message
-        )
+        # SystemLog.objects.create(
+        #     log_level=level,
+        #     module_name=MODULE_NAME,
+        #     message=message
+        # )
+        pass
 
     def _load_parameters_and_defs(self):
         """从数据库加载所有策略参数和因子定义到内存"""
