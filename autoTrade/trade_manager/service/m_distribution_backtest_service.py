@@ -312,7 +312,7 @@ class MDistributionBacktestService:
                     if self.single_strategy_mode:
                         for strategy_name in STRATEGIES:
                             logger.info(f"  Running Single Strategy '{strategy_name}' for {t_minus_1}...")
-                            selection_service_single = SelectionService(trade_date=t_minus_1, mode='backtest', one_strategy=strategy_name,preloaded_panels=daily_panels)
+                            selection_service_single = SelectionService(trade_date=t_minus_1, mode='backtest', one_strategy=strategy_name,preloaded_panels=rolling_panels)
                             selection_service_single.run_selection()
                             
                             # 注意：run_selection会覆盖旧预案，所以需要重新查询
