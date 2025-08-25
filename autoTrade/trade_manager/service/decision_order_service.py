@@ -182,8 +182,8 @@ class DecisionOrderService:
         elif M_t<Decimal('0.0'):
             S_cap=Decimal('0.0')
         else:
-            # S_cap=M_t
-            Decimal('1.0')
+            S_cap=M_t
+            #Decimal('1.0')
         
         #S_cap=Decimal('1.0')
         # iv. 计算动态调整后的名义本金
