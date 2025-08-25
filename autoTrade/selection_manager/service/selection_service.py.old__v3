@@ -128,11 +128,9 @@ class SelectionService:
             {'factor_code': 'dynamic_M4_RAW', 'factor_name': '动态-M4原始值(20日平均波动率)', 'direction': 'negative'},
             
             # 趋势动能 (MT) 维度因子
+            {'factor_code': 'dynamic_MA20_SLOPE', 'factor_name': '动态-20日均线斜率', 'direction': 'positive'},
+            {'factor_code': 'dynamic_MA_SCORE', 'factor_name': '动态-均线排列评分', 'direction': 'positive'},
             {'factor_code': 'dynamic_ADX_CONFIRM', 'factor_name': '动态-ADX趋势确认', 'direction': 'positive'},
-            {'factor_code': 'dynamic_v2_MA_SLOPE', 'factor_name': '动态V2-均线斜率因子', 'direction': 'positive'},
-            {'factor_code': 'dynamic_v2_MA_SCORE', 'factor_name': '动态V2-均线排列评分', 'direction': 'positive'},
-            {'factor_code': 'dynamic_v2_CPC_Factor', 'factor_name': '动态V2-K线路径一致性', 'direction': 'positive'},
-            {'factor_code': 'dynamic_v2_VPCF', 'factor_name': '动态V2-量价协同因子', 'direction': 'positive'},
             
             # 强势突破 (BO) 维度因子
             {'factor_code': 'dynamic_BREAKOUT_PWR', 'factor_name': '动态-突破强度', 'direction': 'positive'},
@@ -191,11 +189,6 @@ class SelectionService:
             'dynamic_k_MT1': {'value': '0.5', 'group': 'K_WEIGHTS_MT', 'desc': '趋势动能-MA20斜率权重'},
             'dynamic_k_MT2': {'value': '0.3', 'group': 'K_WEIGHTS_MT', 'desc': '趋势动能-均线排列权重'},
             'dynamic_k_MT3': {'value': '0.2', 'group': 'K_WEIGHTS_MT', 'desc': '趋势动能-ADX确认权重'},
-            'dynamic_k_MT_ADX_CONFIRM': {'value': '0.3', 'group': 'K_WEIGHTS_MT', 'desc': '趋势动能-ADX确认权重'},
-            'dynamic_k_MT_MA_SLOPE': {'value': '0.1', 'group': 'K_WEIGHTS_MT', 'desc': '趋势动能V2-均线斜率权重'},
-            'dynamic_k_MT_MA_SCORE': {'value': '0.1', 'group': 'K_WEIGHTS_MT', 'desc': '趋势动能V2-均线排列评分权重'},
-            'dynamic_k_MT_CPC_Factor': {'value': '0.25', 'group': 'K_WEIGHTS_MT', 'desc': '趋势动能V2-K线路径一致性权重'},
-            'dynamic_k_MT_VPCF': {'value': '0.25', 'group': 'K_WEIGHTS_MT', 'desc': '趋势动能V2-量价协同因子权重'},
             'dynamic_k_BO1': {'value': '0.45', 'group': 'K_WEIGHTS_BO', 'desc': '强势突破-突破强度权重'},
             'dynamic_k_BO2': {'value': '0.35', 'group': 'K_WEIGHTS_BO', 'desc': '强势突破-成交量激增权重'},
             'dynamic_k_BO3': {'value': '0.2', 'group': 'K_WEIGHTS_BO', 'desc': '强势突破-动能加速度权重'},
@@ -220,10 +213,6 @@ class SelectionService:
             
             # 筛选与计算参数
             'dynamic_lookback_new_stock': {'value': '60', 'group': 'FILTERS', 'desc': '次新股定义天数(自然日)'},
-            'dynamic_v2_cpc_n': {'value': '10', 'group': 'FACTOR_PARAMS', 'desc': 'CPC因子-平滑周期N'},
-            'dynamic_v2_vpcf_s': {'value': '5', 'group': 'FACTOR_PARAMS', 'desc': 'VPCF因子-短期均线周期s'},
-            'dynamic_v2_vpcf_l': {'value': '20', 'group': 'FACTOR_PARAMS', 'desc': 'VPCF因子-长期均线周期l'},
-            'dynamic_v2_vpcf_n_smooth': {'value': '5', 'group': 'FACTOR_PARAMS', 'desc': 'VPCF因子-最终平滑周期N_smooth'},
             'dynamic_min_liquidity': {'value': '100000000', 'group': 'FILTERS', 'desc': '最低日均成交额(元)'},
             'dynamic_top_n': {'value': '10', 'group': 'SELECTION', 'desc': '最终选取股票数量'},
         }
@@ -705,11 +694,9 @@ class SelectionService:
         scores = pd.DataFrame(index=norm_scores_df.index)
 
         scores['Score_MT'] = (
-            norm_scores_df['dynamic_ADX_CONFIRM'] * p['dynamic_k_MT_ADX_CONFIRM'] +
-            norm_scores_df['dynamic_v2_MA_SLOPE'] * p['dynamic_k_MT_MA_SLOPE'] +
-            norm_scores_df['dynamic_v2_MA_SCORE'] * p['dynamic_k_MT_MA_SCORE'] +
-            norm_scores_df['dynamic_v2_CPC_Factor'] * p['dynamic_k_MT_CPC_Factor'] +
-            norm_scores_df['dynamic_v2_VPCF'] * p['dynamic_k_MT_VPCF']
+            norm_scores_df['dynamic_MA20_SLOPE'] * p['dynamic_k_MT1'] +
+            norm_scores_df['dynamic_MA_SCORE'] * p['dynamic_k_MT2'] +
+            norm_scores_df['dynamic_ADX_CONFIRM'] * p['dynamic_k_MT3']
         )
         scores['Score_BO'] = (
             norm_scores_df['dynamic_BREAKOUT_PWR'] * p['dynamic_k_BO1'] +
@@ -748,11 +735,9 @@ class SelectionService:
         logger.debug("开始计算所有动态因子...")
         
         factor_calculators = {
+            'dynamic_MA20_SLOPE': self._calc_factor_ma20_slope,
+            'dynamic_MA_SCORE': self._calc_factor_ma_score,
             'dynamic_ADX_CONFIRM': self._calc_factor_adx_confirm,
-            'dynamic_v2_MA_SLOPE': self._calc_factor_v2_ma_slope,
-            'dynamic_v2_MA_SCORE': self._calc_factor_v2_ma_score,
-            'dynamic_v2_CPC_Factor': self._calc_factor_v2_cpc_factor,
-            'dynamic_v2_VPCF': self._calc_factor_v2_vpcf,
             'dynamic_BREAKOUT_PWR': self._calc_factor_breakout_pwr,
             'dynamic_VOLUME_SURGE': self._calc_factor_volume_surge,
             'dynamic_MOM_ACCEL': self._calc_factor_mom_accel,
@@ -802,108 +787,45 @@ class SelectionService:
         return raw_factors_df
 
     # --- MT 因子 ---
-    def _calc_factor_v2_ma_slope(self) -> pd.Series:
+    def _calc_factor_ma20_slope(self) -> pd.Series:
         """
-        计算MA20在过去20个交易日中每一天的日度变化率的指数移动平均。
+        计算20日均线的20日线性回归斜率。
+        使用numpy.linalg.lstsq进行向量化计算，避免了低效的rolling.apply()。
         """
-        epsilon = 1e-9
-        try:
-            # 1. 计算MA20
-            ma20 = self.panel_hfq_close.rolling(window=20, min_periods=20).mean()
-            
-            # 2. 计算MA20的日度变化率
-            daily_roc = ma20.pct_change(1)
-            
-            # 3. 计算变化率的20日指数移动平均
-            # 使用 .ewm() 计算，alpha = 2 / (span + 1)
-            factor_panel = daily_roc.ewm(span=20, adjust=False, min_periods=20).mean()
-            
-            # 4. 返回最后一天的值
-            return factor_panel.iloc[-1]
-        except Exception as e:
-            logger.error(f"计算 dynamic_v2_MA_SLOPE 时出错: {e}")
+        ma20 = self.panel_hfq_close.rolling(20).mean()
+        
+        # 我们只需要最后20个MA20值来计算当前斜率
+        last_20_ma20 = ma20.tail(20)
+        
+        # 如果数据不足20天，则无法计算
+        if len(last_20_ma20) < 20:
+            # 返回一个全为NaN的Series，保持与原输出结构一致
             return pd.Series(np.nan, index=self.panel_hfq_close.columns)
-    def _calc_factor_v2_ma_score(self) -> pd.Series:
-        """
-        计算三个归一化的均线离差的加权和。
-        """
-        epsilon = 1e-9
-        try:
-            close = self.panel_hfq_close
-            ma5 = close.rolling(window=5, min_periods=5).mean()
-            ma10 = close.rolling(window=10, min_periods=10).mean()
-            ma20 = close.rolling(window=20, min_periods=20).mean()
-            
-            # 1. 计算三个归一化的均线离差
-            spread1 = (close - ma5) / (ma5 + epsilon)
-            spread2 = (ma5 - ma10) / (ma10 + epsilon)
-            spread3 = (ma10 - ma20) / (ma20 + epsilon)
-            
-            # 2. 等权重加权求和
-            # 权重可以参数化，但根据文档，这里使用等权重
-            factor_panel = 0.333 * spread1 + 0.333 * spread2 + 0.333 * spread3
-            
-            # 3. 返回最后一天的值
-            return factor_panel.iloc[-1]
-        except Exception as e:
-            logger.error(f"计算 dynamic_v2_MA_SCORE 时出错: {e}")
-            return pd.Series(np.nan, index=self.panel_hfq_close.columns)
-    def _calc_factor_v2_cpc_factor(self) -> pd.Series:
-        """
-        计算K线路径一致性 (CPC_Factor)。
-        """
-        epsilon = 1e-9
-        try:
-            # 1. 统一价格到后复权空间
-            adjustment_factor = self.panel_hfq_close / (self.panel_close + epsilon)
-            hfq_high = self.panel_high * adjustment_factor
-            hfq_low = self.panel_low * adjustment_factor
-            hfq_close = self.panel_hfq_close
-            # 2. 计算每日收盘强度 (DCP_t)
-            price_range = hfq_high - hfq_low
-            # 使用 where 避免除以零
-            dcp_panel = np.where(
-                price_range > epsilon,
-                (2 * hfq_close - hfq_high - hfq_low) / (price_range + epsilon),
-                0.0
-            )
-            # 将numpy数组转回DataFrame以使用ewm
-            dcp_panel_df = pd.DataFrame(dcp_panel, index=hfq_close.index, columns=hfq_close.columns)
-            # 3. 计算最终因子 (EWMA)
-            n_period = int(self.dynamic_params.get('dynamic_v2_cpc_n', 10))
-            factor_panel = dcp_panel_df.ewm(span=n_period, adjust=False, min_periods=n_period).mean()
-            
-            return factor_panel.iloc[-1]
-        except Exception as e:
-            logger.error(f"计算 dynamic_v2_CPC_Factor 时出错: {e}")
-            return pd.Series(np.nan, index=self.panel_hfq_close.columns)
-    
-    def _calc_factor_v2_vpcf(self) -> pd.Series:
-        """
-        计算量价协同因子 (VPCF)。
-        """
-        epsilon = 1e-9
-        try:
-            # 1. 获取参数
-            s = int(self.dynamic_params.get('dynamic_v2_vpcf_s', 10))
-            l = int(self.dynamic_params.get('dynamic_v2_vpcf_l', 30))
-            n_smooth = int(self.dynamic_params.get('dynamic_v2_vpcf_n_smooth', 10))
-            # 2. 计算平滑日度价格动量
-            ma_close_s = self.panel_hfq_close.rolling(window=s, min_periods=s).mean()
-            price_momentum = ma_close_s.pct_change(1) # (MA_t / MA_{t-1}) - 1
-            # 3. 计算相对成交量水平
-            ma_vol_s = self.panel_volume.rolling(window=s, min_periods=s).mean()
-            ma_vol_l = self.panel_volume.rolling(window=l, min_periods=l).mean()
-            volume_level = (ma_vol_s / (ma_vol_l + epsilon)) - 1
-            # 4. 计算日度协同分
-            daily_score = price_momentum * volume_level
-            # 5. 计算最终因子 (EWMA)
-            factor_panel = daily_score.ewm(span=n_smooth, adjust=False, min_periods=n_smooth).mean()
-            
-            return factor_panel.iloc[-1]
-        except Exception as e:
-            logger.error(f"计算 dynamic_v2_VPCF 时出错: {e}")
-            return pd.Series(np.nan, index=self.panel_hfq_close.columns)
+        # 准备最小二乘法求解
+        # x是时间自变量 [0, 1, 2, ..., 19]
+        x = np.arange(20)
+        # 我们需要一个常数项，所以构建一个 (20, 2) 的矩阵A
+        A = np.vstack([x, np.ones(20)]).T
+        
+        # y是因变量，即每个股票的最后20个MA20值
+        y = last_20_ma20.values
+        
+        # np.linalg.lstsq 会为y的每一列（每个股票）解出 Ax = y 中的 x
+        # 返回结果的第一个元素是解的矩阵，其中第一行是斜率(m)，第二行是截距(c)
+        slopes, _ = np.linalg.lstsq(A, y, rcond=None)[0]
+        
+        # 将结果转换回pandas Series
+        return pd.Series(slopes, index=last_20_ma20.columns)
+
+    def _calc_factor_ma_score(self) -> pd.Series:
+        close, ma5, ma10, ma20 = (
+            self.panel_hfq_close.iloc[-1],
+            self.panel_hfq_close.rolling(5).mean().iloc[-1],
+            self.panel_hfq_close.rolling(10).mean().iloc[-1],
+            self.panel_hfq_close.rolling(20).mean().iloc[-1]
+        )
+        return (close > ma5).astype(int) + (ma5 > ma10).astype(int) + (ma10 > ma20).astype(int)
+
     # def _calc_factor_adx_confirm(self) -> pd.Series:
     #     adx_df = self.panel_hfq_close.apply(lambda s: ta.adx(self.panel_high[s.name], self.panel_low[s.name], s, length=14).iloc[-1])
     #     adx_df = adx_df.T
