@@ -26,7 +26,7 @@ from common.models.daily_trading_plan import DailyTradingPlan
 MODULE_NAME = '日终选股与预案生成'
 logger = logging.getLogger(MODULE_NAME)
 # endregion
-
+MARKET_INDICATOR_CODE = '_MARKET_REGIME_INDICATOR_'
 
 class SelectionService:
     """
@@ -43,7 +43,7 @@ class SelectionService:
     8. 将所有结果持久化到数据库。
     """
 
-    def __init__(self, trade_date: date, mode: str = 'realtime'):
+    def __init__(self, trade_date: date, mode: str = 'realtime', one_strategy: str = None, preloaded_panels: dict = None):
         """
         初始化选股服务。
 
