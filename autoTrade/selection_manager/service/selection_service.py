@@ -812,7 +812,7 @@ class SelectionService:
             ma20 = self.panel_hfq_close.rolling(window=20, min_periods=20).mean()
             
             # 2. 计算MA20的日度变化率
-            daily_roc = ma20.pct_change(1)
+            daily_roc = ma20.pct_change(1, fill_method=None)
             
             # 3. 计算变化率的20日指数移动平均
             # 使用 .ewm() 计算，alpha = 2 / (span + 1)
