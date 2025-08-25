@@ -36,7 +36,7 @@ class PositionMonitorLogic:
                 return {
                     'action': 'SELL',
                     'reason': TradeLog.ReasonChoices.TAKE_PROFIT,
-                    'exit_price': TradeLog.ReasonChoices.TAKE_PROFIT
+                    'exit_price': position.current_take_profit
                 }
                 
             change=(position.current_take_profit-max(position.current_stop_loss,position.entry_price))/Decimal(2)
