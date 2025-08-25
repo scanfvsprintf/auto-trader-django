@@ -32,7 +32,12 @@ class PositionMonitorLogic:
 
         # 阶段二：追踪止盈
         if current_price >= position.current_take_profit:
-            
+            if 1+1>0:
+                return {
+                    'action': 'SELL',
+                    'reason': TradeLog.ReasonChoices.TAKE_PROFIT,
+                    'exit_price': TradeLog.ReasonChoices.TAKE_PROFIT
+                }
                 
             change=(position.current_take_profit-max(position.current_stop_loss,position.entry_price))/Decimal(2)
             if position.current_stop_loss>position.entry_price*Decimal(1.3):
@@ -60,7 +65,7 @@ class PositionMonitorLogic:
 
         # 阶段三：成本锁定
         middle=(position.current_take_profit+position.entry_price)/Decimal(2)
-        if current_price>middle and position.current_stop_loss<position.entry_price:
+        if current_price>middle and position.current_stop_loss<position.entry_price and False:
             new_sl=position.entry_price*Decimal(1.01)
             return {
                         'action': 'UPDATE',
