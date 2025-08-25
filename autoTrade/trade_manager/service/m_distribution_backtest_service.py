@@ -41,6 +41,34 @@ class MDistributionBacktestService:
         self.backtest_run_id = f"m_dist_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
         self.max_holding_days = 90
         self.single_strategy_mode = single_strategy_mode
+    def _preload_data_for_backtest(self, trading_days: list[date]) -> dict:
+        """
+        [新增] 为整个回测期间预加载所有需要的行情数据并构建主面板。
+        """
+        if not trading_days:
+            return {}
+        lookback_period = 250
+        first_day = trading_days[0]
+        last_day = trading_days[-1]
+        preload_start_date = first_day - timedelta(days=lookback_period + 100)
+        logger.info(f"开始预加载数据，时间窗口: {preload_start_date} to {last_day}")
+        quotes_qs = DailyQuotes.objects.filter(
+            trade_date__gte=preload_start_date,
+            trade_date__lte=last_day
+        ).values('trade_date', 'stock_code_id', 'open', 'high', 'low', 'close', 'volume', 'turnover', 'hfq_close')
+        if not quotes_qs:
+            raise ValueError("在预加载时间窗口内未找到任何行情数据。")
+        df = pd.DataFrame.from_records(quotes_qs)
+        df['trade_date'] = pd.to_datetime(df['trade_date'])
+        
+        logger.info("正在构建主数据面板(Master Panels)...")
+        master_panels = {}
+        for col in ['open', 'high', 'low', 'close', 'volume', 'turnover', 'hfq_close']:
+            panel = df.pivot(index='trade_date', columns='stock_code_id', values=col).astype(float)
+            master_panels[col] = panel
+        
+        logger.info("数据预加载和主面板构建完成。")
+        return master_panels
     def _get_next_trading_day(self, from_date: date) -> date | None: return (DailyQuotes.objects .filter(trade_date__gte=from_date) .order_by('trade_date') .values_list('trade_date', flat=True) .first())
     
     def _simulate_intraday_monitoring(self, position_dict: dict, daily_quote: dict) -> tuple[str, Decimal, Decimal, Decimal]:
@@ -199,15 +227,18 @@ class MDistributionBacktestService:
                     trade_date__gte=self.start_date,
                     trade_date__lte=self.end_date
                 ).values_list('trade_date', flat=True).distinct().order_by('trade_date'))
-
+                master_panels = self._preload_data_for_backtest(trading_days)
                 logger.info(f"--- 2. 开始日度回测循环 ({len(trading_days)}天) ---")
                 last_sent_month = None
                 for i, t_minus_1 in enumerate(trading_days):
                     logger.info(f"\n{'='*20} 模拟预案日: {t_minus_1} ({i+1}/{len(trading_days)}) {'='*20}")
-
+                    current_day_dt = pd.to_datetime(t_minus_1)
+                    daily_panels = {
+                        key: panel.loc[:current_day_dt] for key, panel in master_panels.items()
+                    }
                     # 1. 运行标准的M动态策略
                     logger.info(f"  Running M-Dynamic Strategy for {t_minus_1}...")
-                    selection_service_dynamic = SelectionService(trade_date=t_minus_1, mode='backtest', one_strategy=None)
+                    selection_service_dynamic = SelectionService(trade_date=t_minus_1, mode='backtest', one_strategy=None,preloaded_panels=daily_panels)
                     selection_service_dynamic.run_selection()
                     plan_date_for_t = t_minus_1 + timedelta(days=1)
                     plans_dynamic = DailyTradingPlan.objects.filter(plan_date=plan_date_for_t)
@@ -220,7 +251,7 @@ class MDistributionBacktestService:
                     if self.single_strategy_mode:
                         for strategy_name in STRATEGIES:
                             logger.info(f"  Running Single Strategy '{strategy_name}' for {t_minus_1}...")
-                            selection_service_single = SelectionService(trade_date=t_minus_1, mode='backtest', one_strategy=strategy_name)
+                            selection_service_single = SelectionService(trade_date=t_minus_1, mode='backtest', one_strategy=strategy_name,preloaded_panels=daily_panels)
                             selection_service_single.run_selection()
                             
                             # 注意：run_selection会覆盖旧预案，所以需要重新查询

@@ -74,6 +74,9 @@
             📄 email_handler.py
             📄 email_service.py
             📄 stock_service.py
+    📂 logs/
+        📄 .__django.lock
+        📄 django.log
     📂 selection_manager/
         📄 __init__.py
         📄 admin.py
@@ -82,13 +85,13 @@
         📄 tests.py
         📄 urls.py
         📄 views.py
+        📂 management/
+            📂 commands/
+                📄 generate_m_value_csv.py
         📂 service/
             📄 selection_service.py
             📄 selection_service.py.old_v1
             📄 selection_service.py.old_v2
-        📂 management/
-            📂 commands/
-                📄 generate_m_value_csv.py
     📂 trade_manager/
         📄 __init__.py
         📄 admin.py
@@ -118,9 +121,6 @@
             📄 simulate_trade_handler.py
             📄 simulate_trade_old.py
             📄 trade_handler.py
-    📂 logs/
-        📄 .__django.lock
-        📄 django.log
 
 ========================
 
@@ -164,7 +164,7 @@ def load_data(file_path):
     df = df.set_index('日期').sort_index()
     return df
 
-def analyze_m_value_predictiveness(df, horizons=[5, 20, 60]):
+def analyze_m_value_predictiveness(df, horizons=[1,5, 20, 60]):
     """
     分析M值对未来沪深300指数收益和波动性的预测能力。
     """
@@ -301,7 +301,7 @@ def plot_analysis_results(results):
 if __name__ == "__main__":
     # 1. 定义文件路径和分析参数
     csv_file_path = 'm_value_csi300.csv'  # <--- 请确保这是您的文件名
-    analysis_horizons = [5, 20, 60]
+    analysis_horizons = [1,5, 20, 60]
 
     # 2. 加载数据
     df_raw = load_data(csv_file_path)
@@ -387,21 +387,30 @@ def calculate_returns(df):
     计算日收益率。在金融分析中，分析收益率比分析原始价格更常见。
     这有助于序列的平稳化，并关注相对变化。
     """
-    # 使用 .pct_change() 计算百分比变化
-    df_returns = df.pct_change()
+    # # 使用 .pct_change() 计算百分比变化
+    # df_returns = df.pct_change()
     
-    # m值本身可能就是变化率，如果m值已经是类似收益率的指标，可以跳过对m值的处理
-    # 这里我们假设m值也需要处理，如果不需要，可以注释掉下面这行
-    # df_returns['m值'] = df['m值'] # 如果m值本身就是变化率，直接使用原始值
+    # # m值本身可能就是变化率，如果m值已经是类似收益率的指标，可以跳过对m值的处理
+    # # 这里我们假设m值也需要处理，如果不需要，可以注释掉下面这行
+    # # df_returns['m值'] = df['m值'] # 如果m值本身就是变化率，直接使用原始值
     
-    # 删除第一行，因为其没有前一天的值，计算结果为NaN
-    df_returns = df_returns.dropna()
+    # # 删除第一行，因为其没有前一天的值，计算结果为NaN
+    # df_returns = df_returns.dropna()
+    df_processed = pd.DataFrame(index=df.index)
     
+    # 只对价格序列计算百分比变化
+    df_processed['沪深300指数_returns'] = df['沪深300收盘指数'].pct_change()
+    
+    # 直接使用m值，因为它可能已经是变化率
+    df_processed['m值'] = df['m值']
+    
+    # 删除第一行，因为收益率计算结果为NaN
+    df_processed = df_processed.dropna()
     print("日收益率数据预览：")
-    print(df_returns.head())
+    print(df_processed.head())
     print("\n")
     
-    return df_returns
+    return df_processed
 
 # --- 3. 互相关分析核心函数 ---
 def cross_correlation_analysis(series1, series2, max_lag):
@@ -519,7 +528,7 @@ if __name__ == '__main__':
     # 结果中的正滞后意味着沪深300领先，负滞后意味着m值领先。
     lags, corrs = cross_correlation_analysis(
         df_returns['m值'], 
-        df_returns['沪深300收盘指数'], 
+        df_returns['沪深300指数_returns'], 
         max_lag_days
     )
     
@@ -4211,6 +4220,104 @@ def run_selection(request):
 
 ####文件结束####
 
+####selection_manager\management\commands\generate_m_value_csv.py####
+# selection_manager/management/commands/generate_m_value_csv.py
+
+import logging
+import os
+from decimal import Decimal
+
+import pandas as pd
+from django.conf import settings
+from django.core.management.base import BaseCommand
+from tqdm import tqdm
+
+from common.models import IndexQuotesCsi300
+from selection_manager.service.selection_service import SelectionService
+
+# 获取logger实例
+logger = logging.getLogger(__name__)
+
+class Command(BaseCommand):
+    """
+    一个Django管理命令，用于计算沪深300指数从2010-08-19至2025-08-18的
+    完整历史M值，并生成一个CSV文件供分析脚本使用。
+    
+    运行方式:
+    python manage.py generate_m_value_csv
+    """
+    help = '计算沪深300历史M值并生成 m_value_csi300.csv 文件'
+
+    def handle(self, *args, **options):
+        self.stdout.write(self.style.SUCCESS('===== 开始计算沪深300历史M值 ====='))
+
+        try:
+            # 1. 一次性从数据库加载所有需要的沪深300行情数据
+            self.stdout.write("正在从数据库加载沪深300历史行情数据...")
+            quotes_qs = IndexQuotesCsi300.objects.all().order_by('trade_date').values('trade_date', 'close')
+            if not quotes_qs:
+                self.stdout.write(self.style.ERROR("错误：数据库表 tb_index_quotes_csi300 中没有数据。请先回填数据。"))
+                return
+            
+            all_quotes_df = pd.DataFrame.from_records(quotes_qs)
+            all_dates = all_quotes_df['trade_date'].tolist()
+            self.stdout.write(f"数据加载完成，共 {len(all_dates)} 个交易日。")
+
+            # 2. 初始化SelectionService并加载一次参数
+            # 使用第一个日期进行初始化，后续在循环中更新日期
+            service = SelectionService(trade_date=all_dates[0], mode='backtest')
+            service._load_dynamic_parameters_and_defs()
+            self.stdout.write("策略服务和参数初始化完成。")
+
+            # 3. 循环计算每一天的M值
+            results = []
+            self.stdout.write("开始逐日计算M值...")
+            LOOKBACK_BUFFER = 80
+            if len(all_dates) <= LOOKBACK_BUFFER:
+                self.stdout.write(self.style.ERROR(f"错误：总交易日数 ({len(all_dates)}) 不足以满足 {LOOKBACK_BUFFER} 天的回溯期。"))
+                return
+            # 使用tqdm创建进度条
+            for current_date in tqdm(all_dates[LOOKBACK_BUFFER:], desc="计算M值进度"):
+                # 更新服务的交易日期
+                service.trade_date = current_date
+                
+                # 调用核心方法计算M值，按要求传入空stock_pool
+                m_value = service._calculate_market_regime_M(stock_pool=[])
+                
+                # 从已加载的DataFrame中获取收盘价
+                close_price = all_quotes_df.loc[all_quotes_df['trade_date'] == current_date, 'close'].iloc[0]
+                
+                results.append({
+                    '日期': current_date,
+                    'm值': m_value,
+                    '沪深300收盘指数': float(close_price) # 转换为float以便pandas处理
+                })
+
+            if not results:
+                self.stdout.write(self.style.WARNING("计算完成，但没有生成任何结果。"))
+                return
+
+            # 4. 将结果转换为DataFrame并保存为CSV
+            self.stdout.write("所有M值计算完成，正在生成CSV文件...")
+            results_df = pd.DataFrame(results)
+            
+            # 定义输出路径为项目根目录
+            output_path = os.path.join(settings.BASE_DIR, 'm_value_csi300.csv')
+            
+            # 保存文件，使用 utf-8-sig 编码以确保Excel能正确打开
+            results_df.to_csv(output_path, index=False, encoding='utf-8-sig', float_format='%.4f')
+
+            self.stdout.write(self.style.SUCCESS(f"\n===== 任务成功完成！ ====="))
+            self.stdout.write(f"文件已保存至: {output_path}")
+            self.stdout.write(f"现在你可以运行 [M值关系分析.py] 脚本了。")
+
+        except Exception as e:
+            self.stdout.write(self.style.ERROR(f"任务执行过程中发生严重错误: {e}"))
+            logger.error("生成M值CSV文件失败", exc_info=True)
+
+
+####文件结束####
+
 ####selection_manager\service\selection_service.py####
 # selection_manager/service/selection_service.py
 
@@ -4446,7 +4553,8 @@ class SelectionService:
 
             # 核心动态逻辑
             self.market_regime_M = self._calculate_market_regime_M(initial_stock_pool)
-            self.dynamic_weights = self._calculate_dynamic_weights(self.market_regime_M)
+            self.market_regime_S = self._calculate_market_regime_S()
+            self.dynamic_weights = self._calculate_dynamic_weights(self.market_regime_M,self.market_regime_S)
             
             self._load_market_data(initial_stock_pool)
             raw_factors_df = self._calculate_all_dynamic_factors()
@@ -4475,23 +4583,187 @@ class SelectionService:
     # endregion
 
     # region: --- 2. 核心动态逻辑实现 ---
-
     def _calculate_market_regime_M(self, stock_pool: list[str]) -> float:
         """
-        计算市场状态函数 M(t) - V2.0 沪深300基准版
+        计算市场状态函数 M(t) - V3.0 回归方向与ADX强度版
+        M(t) = D(t) * I(t)
+        D(t): 基于收盘价回归斜率计算的市场方向
+        I(t): 基于ADX计算的市场趋势强度
+        """
+        logger.debug("开始计算市场状态 M(t) [V3.0]...")
+        # --- 1. 参数声明 ---
+        # D(t) 相关参数
+        H_LOOKBACK_K = 20      # h(t,k) 的最大回溯期 k
+        A_PARAM = 200.0      # tanh 激活函数的缩放系数
+        # I(t) 相关参数
+        ADX_PERIOD = 14       # ADX 计算周期
+        ADX_THRESHOLD = 20.0  # ADX 强度阈值
+        B_PARAM = 0.075         # sigmoid 激活函数的缩放系数
+        # --- 2. 检查当日缓存 ---
+        try:
+            # cached_m = DailyFactorValues.objects.get(
+            #     stock_code_id=MARKET_INDICATOR_CODE,
+            #     trade_date=self.trade_date,
+            #     factor_code_id='dynamic_M_VALUE'
+            # )
+            # m_value = float(cached_m.raw_value)
+            # logger.debug(f"成功从缓存中读取当日 M(t) = {m_value:.4f}")
+            # return m_value
+            pass
+        except DailyFactorValues.DoesNotExist:
+            logger.debug("当日 M(t) 缓存未命中，开始计算...")
+        # --- 3. 加载计算所需数据 ---
+        # D(t)需要 H_LOOKBACK_K+1 天数据, ADX需要约 2*ADX_PERIOD 天数据
+        # 我们取一个更长的回溯期以确保数据充足
+        lookback_days = (H_LOOKBACK_K + ADX_PERIOD) * 3 # 넉넉하게 buffer
+        start_date = self.trade_date - timedelta(days=lookback_days)
+        
+        try:
+            quotes_qs = IndexQuotesCsi300.objects.filter(
+                trade_date__gte=start_date,
+                trade_date__lte=self.trade_date
+            ).order_by('trade_date')
+            # 确保数据足够进行最长的计算
+            if len(quotes_qs) < (ADX_PERIOD * 2):
+                raise ValueError(f"沪深300历史数据不足 {ADX_PERIOD * 2} 天，无法计算M值。")
+            df = pd.DataFrame.from_records(quotes_qs.values())
+            df['trade_date'] = pd.to_datetime(df['trade_date'])
+            df.set_index('trade_date', inplace=True)
+            
+            # 将所需列转换为数值类型
+            columns_to_convert = ['open', 'high', 'low', 'close']
+            for col in columns_to_convert:
+                df[col] = pd.to_numeric(df[col], errors='coerce')
+            
+            # 检查转换后是否有NaN值，以防数据质量问题
+            if df[columns_to_convert].isnull().values.any():
+                raise ValueError("沪深300行情数据中存在非数值(NaN)项。")
+        except (ValueError, IndexQuotesCsi300.DoesNotExist) as e:
+            logger.error(f"获取或处理沪深300数据失败: {e}。将启用容错机制。")
+            # 容错机制: 沿用前一个交易日的M值
+            try:
+                latest_m = DailyFactorValues.objects.filter(
+                    stock_code_id=MARKET_INDICATOR_CODE,
+                    factor_code_id='dynamic_M_VALUE'
+                ).latest('trade_date')
+                logger.warning(f"数据获取失败，沿用 {latest_m.trade_date} 的M值: {float(latest_m.raw_value):.4f}")
+                return float(latest_m.raw_value)
+            except DailyFactorValues.DoesNotExist:
+                logger.critical("数据库中无任何历史M值，无法回退，返回0。")
+                return 0.0
+        # --- 4. 计算市场趋势强度函数 I(t) ---
+        logger.debug("计算市场趋势强度 I(t)...")
+        
+        # 准备ADX计算所需的数据序列
+        high = df['high']
+        low = df['low']
+        close = df['close']
+        # a. 计算 +DM, -DM, TR
+        move_up = high.diff()
+        move_down = -low.diff()
+        
+        plus_dm = pd.Series(np.where((move_up > move_down) & (move_up > 0), move_up, 0.0), index=df.index)
+        minus_dm = pd.Series(np.where((move_down > move_up) & (move_down > 0), move_down, 0.0), index=df.index)
+        prev_close = close.shift(1)
+        tr1 = high - low
+        tr2 = abs(high - prev_close)
+        tr3 = abs(low - prev_close)
+        true_range = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
+        # b. 平滑处理 (Wilder's Smoothing)
+        alpha = 1 / ADX_PERIOD
+        atr = true_range.ewm(alpha=alpha, adjust=False, min_periods=ADX_PERIOD).mean()
+        plus_dm_smooth = plus_dm.ewm(alpha=alpha, adjust=False, min_periods=ADX_PERIOD).mean()
+        minus_dm_smooth = minus_dm.ewm(alpha=alpha, adjust=False, min_periods=ADX_PERIOD).mean()
+        # c. 计算 +DI, -DI
+        epsilon = 1e-9 # 防止除以零
+        plus_di = 100 * (plus_dm_smooth / (atr + epsilon))
+        minus_di = 100 * (minus_dm_smooth / (atr + epsilon))
+        # d. 计算 DX
+        di_sum = plus_di + minus_di
+        di_diff_abs = abs(plus_di - minus_di)
+        dx = 100 * (di_diff_abs / (di_sum + epsilon))
+        # e. 计算最终 ADX
+        adx = dx.ewm(alpha=alpha, adjust=False, min_periods=ADX_PERIOD).mean()
+        
+        # f. 计算 I(t)
+        adx_t = adx.iloc[-1]
+        if pd.isna(adx_t):
+            i_t = 0.0
+            logger.debug(f"ADX(t) 为NaN, I(t) 设为 0。")
+        else:
+            # 使用tanh构造一个在ADX_THRESHOLD处为0，并平滑增长的函数
+            raw_i = np.tanh(B_PARAM * (adx_t - ADX_THRESHOLD))
+            # 裁剪掉负值部分，使得ADX低于阈值时I(t)严格为0
+            i_t = max(0.0, raw_i)
+            logger.debug(f"ADX(t) = {adx_t:.2f}, I(t) = max(0, tanh({B_PARAM}*({adx_t:.2f}-{ADX_THRESHOLD}))) = {i_t:.4f}")
+        # --- 5. 计算市场方向函数 D(t) ---
+        logger.debug("计算市场方向 D(t)...")
+        
+        g_values = []
+        close_prices = df['close']
+        # 确保有足够的数据进行回归计算
+        if len(close_prices) < H_LOOKBACK_K + 1:
+            logger.warning(f"数据不足 {H_LOOKBACK_K + 1} 天，无法计算 D(t)，将设为 0。")
+            h_t_k = 0.0
+        else:
+            for k in range(1, H_LOOKBACK_K + 1):
+                # a. 截取 k+1 个数据点
+                y_series = close_prices.iloc[-(k + 1):]
+                
+                # b. 创建自变量 x
+                x_series = np.arange(k + 1)
+                
+                # c. 线性回归
+                slope, _, _, _, _ = linregress(x=x_series, y=y_series)
+                
+                # d. 获取 t-k 日的收盘价
+                close_t_minus_k = close_prices.iloc[-(k + 1)]
+                
+                # e. 计算 g(t,k)
+                if abs(close_t_minus_k) < epsilon:
+                    g_tk = 0.0 # 避免除以零
+                else:
+                    # 您的定义是 "绝对值的斜率除以t-k的沪深300指数值"
+                    # 这里我理解为 slope / close_t_minus_k
+                    g_tk = slope / close_t_minus_k
+                
+                g_values.append(g_tk)
+                logger.debug(f"  - g(t, k={k}): slope={slope:.2f}, close(t-{k})={close_t_minus_k:.2f}, g_tk={g_tk:.6f}")
+            # f. 计算 h(t,k)
+            h_t_k = np.mean(g_values) if g_values else 0.0
+            logger.debug(f"h(t, k={H_LOOKBACK_K}) = mean(g_values) = {h_t_k:.6f}")
+        # g. 计算 D(t)
+        d_t = np.tanh(A_PARAM * h_t_k)
+        logger.debug(f"D(t) = tanh({A_PARAM} * {h_t_k:.6f}) = {d_t:.4f}")
+        # --- 6. 合成最终 M(t) ---
+        m_t = d_t * i_t
+        logger.info(f"M(t) 计算完成: D(t)={d_t:.4f} * I(t)={i_t:.4f} = {m_t:.4f}")
+        # --- 7. 缓存最终的 M(t) 值 ---
+        DailyFactorValues.objects.update_or_create(
+            stock_code_id=MARKET_INDICATOR_CODE,
+            trade_date=self.trade_date,
+            factor_code_id='dynamic_M_VALUE',
+            defaults={'raw_value': Decimal(str(m_t)), 'norm_score': Decimal(str(m_t))}
+        )
+        logger.debug(f"M(t) = {m_t:.4f} 已存入缓存。")
+        return m_t
+    def _calculate_market_regime_M_old(self, stock_pool: list[str]) -> float:
+        """
+        计算市场状态函数 M(t) - V2.0 沪深300基准版 ----老版本暂时废弃
         使用固定分位锚点法进行绝对标准化，并具备容错机制。
         """
         logger.debug("开始计算市场状态 M(t) [V2.0]...")
         # 1. 检查当日缓存
         try:
-            cached_m = DailyFactorValues.objects.get(
-                stock_code_id=MARKET_INDICATOR_CODE,
-                trade_date=self.trade_date,
-                factor_code_id='dynamic_M_VALUE'
-            )
-            m_value = float(cached_m.raw_value)
-            logger.debug(f"成功从缓存中读取当日 M(t) = {m_value:.4f}")
-            return m_value
+            # cached_m = DailyFactorValues.objects.get(
+            #     stock_code_id=MARKET_INDICATOR_CODE,
+            #     trade_date=self.trade_date,
+            #     factor_code_id='dynamic_M_VALUE'
+            # )
+            # m_value = float(cached_m.raw_value)
+            # logger.debug(f"成功从缓存中读取当日 M(t) = {m_value:.4f}")
+            # return m_value
+            pass
         except DailyFactorValues.DoesNotExist:
             logger.debug("当日 M(t) 缓存未命中，开始计算...")
         # 2. 加载计算所需数据 (约60个交易日)
@@ -4568,6 +4840,69 @@ class SelectionService:
         logger.info(f"M(t) 计算完成，值为: {m_t:.4f}，并已存入缓存。")
         return m_t
 
+    def _calculate_market_regime_S(self) -> float:
+        """
+        [新增] 计算市场状态变化率 S(t)。
+        此方法在 M(t) 计算之后调用。
+        """
+        logger.debug("开始计算市场状态变化率 S(t)...")
+        window_size = int(self.dynamic_params.get('dynamic_s_window_size', 10))
+        try:
+            # 1. 获取最近N个交易日的M(t)值
+            m_values_qs = DailyFactorValues.objects.filter(
+                stock_code_id=MARKET_INDICATOR_CODE,
+                factor_code_id='dynamic_M_VALUE',
+                trade_date__lte=self.trade_date
+            ).order_by('-trade_date')[:window_size]
+            if len(m_values_qs) < window_size:
+                logger.warning(f"M(t)历史数据不足 {window_size} 天，无法计算S(t)，返回0。")
+                return 0.0
+            # 将查询结果转换为pandas Series，并反转顺序使时间从远到近
+            m_values = pd.Series([float(m.raw_value) for m in m_values_qs]).iloc[::-1]
+            
+            # 2. 进行线性回归
+            time_series = np.arange(len(m_values))
+            slope, _, _, _, _ = linregress(x=time_series, y=m_values.values)
+            # 3. 缓存原始斜率
+            DailyFactorValues.objects.update_or_create(
+                stock_code_id=MARKET_INDICATOR_CODE,
+                trade_date=self.trade_date,
+                factor_code_id='dynamic_S_RAW_SLOPE',
+                defaults={'raw_value': Decimal(str(slope)), 'norm_score': Decimal(str(slope))}
+            )
+            
+            # 4. 进行绝对标准化
+            norm_s = self._norm_absolute_slope(slope)
+            # 5. 缓存标准化后的S(t)值
+            DailyFactorValues.objects.update_or_create(
+                stock_code_id=MARKET_INDICATOR_CODE,
+                trade_date=self.trade_date,
+                factor_code_id='dynamic_S_VALUE',
+                defaults={'raw_value': Decimal(str(norm_s)), 'norm_score': Decimal(str(norm_s))}
+            )
+            logger.info(f"S(t) 计算完成，原始斜率: {slope:.4f}, 标准化值: {norm_s:.4f}")
+            return norm_s
+        except Exception as e:
+            logger.error(f"计算S(t)时发生错误: {e}", exc_info=True)
+            return 0.0
+
+    def _norm_absolute_slope(self, raw_slope: float) -> float:
+        """
+        [新增] S(t)的绝对标准化函数。
+        """
+        upper_bound = self.dynamic_params.get('dynamic_s_norm_upper_bound', 0.1)
+        lower_bound = self.dynamic_params.get('dynamic_s_norm_lower_bound', -0.1)
+        if raw_slope >= upper_bound:
+            return 1.0
+        if raw_slope <= lower_bound:
+            return -1.0
+        
+        value_range = upper_bound - lower_bound
+        if value_range < 1e-9:
+            return 0.0
+    
+        # 线性插值到 [-1, 1]
+        return -1.0 + 2.0 * (raw_slope - lower_bound) / value_range
 
     def _norm_absolute(self, value, p10, p50, p90, direction):
         """使用固定分位锚点进行绝对标准化（分段线性插值）"""
@@ -4607,17 +4942,17 @@ class SelectionService:
             DailyFactorValues.objects.bulk_create(records, ignore_conflicts=True)
             logger.debug(f"成功将 {len(records)} 条M(t)基础指标原始值存入缓存。")
 
-    def _calculate_dynamic_weights(self, M_t: float) -> dict:
+    def _calculate_dynamic_weights(self, M_t: float, S_t: float) -> dict:
         """根据M(t)计算四个策略维度的动态权重"""
         logger.debug(f"根据 M(t)={M_t:.4f} 计算动态权重...")
         p = self.dynamic_params
-        
+        k=M_t
         # a. 计算各维度吸引力 A_i
-        A_MT = p['dynamic_c_MT'] * M_t
-        A_BO = p['dynamic_c_BO'] * M_t
+        A_MT = p['dynamic_c_MT'] * k
+        A_BO = p['dynamic_c_BO'] * k
         # A_QD = p['dynamic_c_QD'] * (-M_t)
         A_QD = p['dynamic_c_QD']
-        A_MR = p['dynamic_c_MR'] * np.exp(- (M_t / p['dynamic_sigma_MR'])**2)
+        A_MR = p['dynamic_c_MR'] * np.exp(- (k / p['dynamic_sigma_MR'])**2)
         
         # b. 通过Softmax计算最终权重 N_i
         tau = p['dynamic_tau']
@@ -4634,6 +4969,23 @@ class SelectionService:
             'QD': exp_A_QD / sum_exp_A,
             'MR': exp_A_MR / sum_exp_A,
         }
+        epsilon = 1e-9
+        if abs(M_t) < epsilon:
+            weights = {
+            'MT': 0.0,
+            'BO': 0.0,
+            'QD': 0.0,
+            'MR': 1.0
+            }
+        else:
+
+            weights = {
+            'MT': 0.55,
+            'BO': 0.25,
+            'QD': 0.1,
+            'MR': 0.1,
+        }
+
         if self.one_strategy and self.one_strategy in weights:
             logger.debug(f"单策略模式已激活，强制使用策略: {self.one_strategy}")
             for key in weights:
@@ -5280,104 +5632,6 @@ class SelectionService:
 
 ####文件结束####
 
-####selection_manager\management\commands\generate_m_value_csv.py####
-# selection_manager/management/commands/generate_m_value_csv.py
-
-import logging
-import os
-from decimal import Decimal
-
-import pandas as pd
-from django.conf import settings
-from django.core.management.base import BaseCommand
-from tqdm import tqdm
-
-from common.models import IndexQuotesCsi300
-from selection_manager.service.selection_service import SelectionService
-
-# 获取logger实例
-logger = logging.getLogger(__name__)
-
-class Command(BaseCommand):
-    """
-    一个Django管理命令，用于计算沪深300指数从2010-08-19至2025-08-18的
-    完整历史M值，并生成一个CSV文件供分析脚本使用。
-    
-    运行方式:
-    python manage.py generate_m_value_csv
-    """
-    help = '计算沪深300历史M值并生成 m_value_csi300.csv 文件'
-
-    def handle(self, *args, **options):
-        self.stdout.write(self.style.SUCCESS('===== 开始计算沪深300历史M值 ====='))
-
-        try:
-            # 1. 一次性从数据库加载所有需要的沪深300行情数据
-            self.stdout.write("正在从数据库加载沪深300历史行情数据...")
-            quotes_qs = IndexQuotesCsi300.objects.all().order_by('trade_date').values('trade_date', 'close')
-            if not quotes_qs:
-                self.stdout.write(self.style.ERROR("错误：数据库表 tb_index_quotes_csi300 中没有数据。请先回填数据。"))
-                return
-            
-            all_quotes_df = pd.DataFrame.from_records(quotes_qs)
-            all_dates = all_quotes_df['trade_date'].tolist()
-            self.stdout.write(f"数据加载完成，共 {len(all_dates)} 个交易日。")
-
-            # 2. 初始化SelectionService并加载一次参数
-            # 使用第一个日期进行初始化，后续在循环中更新日期
-            service = SelectionService(trade_date=all_dates[0], mode='backtest')
-            service._load_dynamic_parameters_and_defs()
-            self.stdout.write("策略服务和参数初始化完成。")
-
-            # 3. 循环计算每一天的M值
-            results = []
-            self.stdout.write("开始逐日计算M值...")
-            LOOKBACK_BUFFER = 80
-            if len(all_dates) <= LOOKBACK_BUFFER:
-                self.stdout.write(self.style.ERROR(f"错误：总交易日数 ({len(all_dates)}) 不足以满足 {LOOKBACK_BUFFER} 天的回溯期。"))
-                return
-            # 使用tqdm创建进度条
-            for current_date in tqdm(all_dates[LOOKBACK_BUFFER:], desc="计算M值进度"):
-                # 更新服务的交易日期
-                service.trade_date = current_date
-                
-                # 调用核心方法计算M值，按要求传入空stock_pool
-                m_value = service._calculate_market_regime_M(stock_pool=[])
-                
-                # 从已加载的DataFrame中获取收盘价
-                close_price = all_quotes_df.loc[all_quotes_df['trade_date'] == current_date, 'close'].iloc[0]
-                
-                results.append({
-                    '日期': current_date,
-                    'm值': m_value,
-                    '沪深300收盘指数': float(close_price) # 转换为float以便pandas处理
-                })
-
-            if not results:
-                self.stdout.write(self.style.WARNING("计算完成，但没有生成任何结果。"))
-                return
-
-            # 4. 将结果转换为DataFrame并保存为CSV
-            self.stdout.write("所有M值计算完成，正在生成CSV文件...")
-            results_df = pd.DataFrame(results)
-            
-            # 定义输出路径为项目根目录
-            output_path = os.path.join(settings.BASE_DIR, 'm_value_csi300.csv')
-            
-            # 保存文件，使用 utf-8-sig 编码以确保Excel能正确打开
-            results_df.to_csv(output_path, index=False, encoding='utf-8-sig', float_format='%.4f')
-
-            self.stdout.write(self.style.SUCCESS(f"\n===== 任务成功完成！ ====="))
-            self.stdout.write(f"文件已保存至: {output_path}")
-            self.stdout.write(f"现在你可以运行 [M值关系分析.py] 脚本了。")
-
-        except Exception as e:
-            self.stdout.write(self.style.ERROR(f"任务执行过程中发生严重错误: {e}"))
-            logger.error("生成M值CSV文件失败", exc_info=True)
-
-
-####文件结束####
-
 ####trade_manager\__init__.py####
 
 ####文件结束####
@@ -5680,7 +5934,7 @@ class BacktestReporter:
         self.current_date = current_date
         self.initial_capital = initial_capital
         self.email_handler = EmailHandler()
-        self.recipients = ['876858298@qq.com']#,'285173686@qq.com','850696281@qq.com'
+        self.recipients = ['876858298@qq.com','850696281@qq.com']#,'285173686@qq.com','850696281@qq.com'
     def _execute_query(self, query: str, params: list = None) -> list[dict]:
         """在指定 schema 中执行原生 SQL 查询并返回结果"""
         with connections['default'].cursor() as cursor:
@@ -6470,6 +6724,7 @@ class DecisionOrderService:
  
         # 2. 获取T-1日的市场状态M(t)
         market_regime_M = self._get_market_regime_M(t_minus_1_date)
+        market_regime_S = self._get_market_regime_S(t_minus_1_date)
         logger.info(f"获取到 T-1 ({t_minus_1_date}) 的 M(t) = {market_regime_M:.4f}")
  
         # 3. 计算当日动态最大持仓数
@@ -6492,6 +6747,22 @@ class DecisionOrderService:
             return m_value_record.raw_value
         except DailyFactorValues.DoesNotExist:
             logger.error(f"严重警告: 无法在 {t_minus_1_date} 找到市场状态M(t)值！将使用最保守的中性值0.0进行计算。")
+            return Decimal('0.0')
+        
+    def _get_market_regime_S(self, t_minus_1_date: date) -> Decimal:
+        """
+        【全新方法】
+        从数据库获取指定日期的 S(t) 值。
+        """
+        try:
+            m_value_record = DailyFactorValues.objects.get(
+                stock_code_id=MARKET_INDICATOR_CODE,
+                trade_date=t_minus_1_date,
+                factor_code_id='dynamic_S_VALUE'
+            )
+            return m_value_record.raw_value
+        except DailyFactorValues.DoesNotExist:
+            logger.error(f"严重警告: 无法在 {t_minus_1_date} 找到市场状态S(t)值！将使用最保守的中性值0.0进行计算。")
             return Decimal('0.0')
  
     def _calculate_dynamic_max_positions(self, M_t: Decimal) -> int:
@@ -6543,13 +6814,21 @@ class DecisionOrderService:
         # iii. 计算单位名义本金风险缩放因子 S_cap(M(t))
         S_min_cap = self.params['RISK_ADJ_CAPITAL_FLOOR_PCT']
         S_cap = S_min_cap + (1 - S_min_cap) * (M_t + 1) / 2
-        if M_t > Decimal('0.0'):
-            S_cap = Decimal('1.0')
-        elif M_t > Decimal('-0.3'):
-            S_cap = Decimal('0.5')
+        # if M_t > Decimal('0.5'):
+        #     S_cap = Decimal('1.0')
+        # elif M_t > Decimal('0.0'):
+        #     S_cap = Decimal('0.5')
+        # else:
+        #     S_cap = Decimal('0.0')
+        epsilon = Decimal(1e-9)
+        if abs(M_t) < epsilon:
+            S_cap=Decimal('0.0')
+        elif M_t<Decimal('0.0'):
+            S_cap=Decimal('0.0')
         else:
-            S_cap = Decimal('0.0')
-        S_cap=Decimal('1.0')
+            S_cap=M_t
+        
+        #S_cap=Decimal('1.0')
         # iv. 计算动态调整后的名义本金
         adjusted_unit_principal = baseline_unit_principal * S_cap
         
@@ -6602,11 +6881,11 @@ class DecisionOrderService:
             'k_slip': '0.002',
             'lookback_atr': '14',
             # 新版动态风险参数
-            'risk_adj_tp_pct_min': '0.03',
-            'risk_adj_tp_pct_max': '0.07',
-            'risk_adj_sl_atr_min': '0.9',
-            'risk_adj_sl_atr_max': '1.8',
-            'risk_adj_max_loss_pct': '0.028',
+            'risk_adj_tp_pct_min': '0.15',
+            'risk_adj_tp_pct_max': '0.15',
+            'risk_adj_sl_atr_min': '1',
+            'risk_adj_sl_atr_max': '1',
+            'risk_adj_max_loss_pct': '0.1',
             # 全新动态仓位参数
             'ORIGINAL_MAX_POSITIONS': '5',
             'MIN_POSITIONS_COUNT': '1',
@@ -6899,11 +7178,11 @@ class DecisionOrderService:
             'lookback_atr': {'value': '14', 'group': 'INDICATORS', 'desc': 'ATR计算周期'},
             
             # 新版 M(t) 驱动的动态风险参数
-            'risk_adj_tp_pct_min': {'value': '0.08', 'group': 'RISK_ADJUSTED', 'desc': 'M(t)驱动-最小止盈目标百分比 (熊市)'},
+            'risk_adj_tp_pct_min': {'value': '0.15', 'group': 'RISK_ADJUSTED', 'desc': 'M(t)驱动-最小止盈目标百分比 (熊市)'},
             'risk_adj_tp_pct_max': {'value': '0.15', 'group': 'RISK_ADJUSTED', 'desc': 'M(t)驱动-最大止盈目标百分比 (牛市)'},
-            'risk_adj_sl_atr_min': {'value': '0.9', 'group': 'RISK_ADJUSTED', 'desc': 'M(t)驱动-最小ATR止损乘数 (熊市)'},
-            'risk_adj_sl_atr_max': {'value': '1.8', 'group': 'RISK_ADJUSTED', 'desc': 'M(t)驱动-最大ATR止损乘数 (牛市)'},
-            'risk_adj_max_loss_pct': {'value': '0.028', 'group': 'RISK_ADJUSTED', 'desc': 'M(t)驱动-绝对最大亏损百分比'},
+            'risk_adj_sl_atr_min': {'value': '1', 'group': 'RISK_ADJUSTED', 'desc': 'M(t)驱动-最小ATR止损乘数 (熊市)'},
+            'risk_adj_sl_atr_max': {'value': '1', 'group': 'RISK_ADJUSTED', 'desc': 'M(t)驱动-最大ATR止损乘数 (牛市)'},
+            'risk_adj_max_loss_pct': {'value': '0.1', 'group': 'RISK_ADJUSTED', 'desc': 'M(t)驱动-绝对最大亏损百分比'},
             # --- 全新动态仓位管理参数 ---
             'ORIGINAL_MAX_POSITIONS': {'value': '5', 'group': 'DYNAMIC_POS_MGMT', 'desc': '【动态仓位】策略基准最大持仓数'},
             'MIN_POSITIONS_COUNT': {'value': '1', 'group': 'DYNAMIC_POS_MGMT', 'desc': '【动态仓位】最小持仓数硬下限'},
@@ -8059,31 +8338,54 @@ class PositionMonitorLogic:
 
         # 阶段二：追踪止盈
         if current_price >= position.current_take_profit:
-            new_tp = position.current_take_profit * (1 + params['trailing_tp_increment_pct'])
-            new_sl = position.current_take_profit * (1 - params['trailing_sl_buffer_pct'])
-            return {
-                'action': 'UPDATE',
-                'updates': {
-                    'current_take_profit': new_tp.quantize(Decimal('0.01')),
-                    'current_stop_loss': new_sl.quantize(Decimal('0.01'))
+            
+                
+            change=(position.current_take_profit-max(position.current_stop_loss,position.entry_price))/Decimal(2)
+            if position.current_stop_loss>position.entry_price*Decimal(1.3):
+                new_sl=current_price-Decimal(0.01)
+            else:
+                new_sl=position.current_take_profit-change
+            #new_tp = position.current_take_profit * (1 + params['trailing_tp_increment_pct'])
+            new_tp=max(position.current_take_profit+change,current_price)
+            #new_sl = position.current_take_profit * (1 - params['trailing_sl_buffer_pct'])
+
+            if current_price>=new_tp:
+                return {
+                    'action': 'SELL',
+                    'reason': TradeLog.ReasonChoices.TAKE_PROFIT,
+                    'exit_price': current_price
                 }
-            }
+            else:
+                return {
+                    'action': 'UPDATE',
+                    'updates': {
+                        'current_take_profit': new_tp.quantize(Decimal('0.01')),
+                        'current_stop_loss': new_sl.quantize(Decimal('0.01'))
+                    }
+                }
 
         # 阶段三：成本锁定
-        if position.current_stop_loss < position.entry_price:
-            base_price = max(position.entry_price, position.current_stop_loss)
-            cost_lock_price = min(
-                (base_price + position.current_take_profit) / 2,
-                base_price * Decimal('1.012')
-            )
-            if current_price > cost_lock_price:
-                new_sl = ((base_price + cost_lock_price) / 2)
-                # 确保新的止损价不会高于当前价，避免立即触发
-                if new_sl < current_price:
-                    return {
+        middle=(position.current_take_profit+position.entry_price)/Decimal(2)
+        if current_price>middle and position.current_stop_loss<position.entry_price:
+            new_sl=position.entry_price*Decimal(1.01)
+            return {
                         'action': 'UPDATE',
                         'updates': {'current_stop_loss': new_sl.quantize(Decimal('0.01'))}
                     }
+        # if position.current_stop_loss < position.entry_price:
+        #     base_price = max(position.entry_price, position.current_stop_loss)
+        #     cost_lock_price = min(
+        #         (base_price + position.current_take_profit) / 2,
+        #         base_price * Decimal('1.012')
+        #     )
+        #     if current_price > cost_lock_price:
+        #         new_sl = ((base_price + cost_lock_price) / 2)
+        #         # 确保新的止损价不会高于当前价，避免立即触发
+        #         if new_sl < current_price:
+        #             return {
+        #                 'action': 'UPDATE',
+        #                 'updates': {'current_stop_loss': new_sl.quantize(Decimal('0.01'))}
+        #             }
 
         return {'action': 'NONE'}
 

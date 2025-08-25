@@ -49,6 +49,39 @@ class SimulateTradeService:
         self.last_buy_trade_id = None
         self.backtest_run_id: str = None # 新增：回测唯一ID
         self.params: dict = {}
+    def _preload_data_for_backtest(self, trading_days: list[date]) -> dict:
+        """
+        [新增] 为整个回测期间预加载所有需要的行情数据并构建主面板。
+        """
+        if not trading_days:
+            return {}
+        lookback_period = 250  # 因子计算所需的最大回溯期
+        
+        # 确定数据查询的完整时间窗口
+        # 需要从第一个交易日再往前推250个工作日
+        # 为了简化，我们直接往前推更多自然日来保证覆盖
+        first_day = trading_days[0]
+        last_day = trading_days[-1]
+        preload_start_date = first_day - timedelta(days=lookback_period + 20)
+        logger.info(f"开始预加载数据，时间窗口: {preload_start_date} to {last_day}")
+        # 一次性查询所有数据
+        quotes_qs = DailyQuotes.objects.filter(
+            trade_date__gte=preload_start_date,
+            trade_date__lte=last_day
+        ).values('trade_date', 'stock_code_id', 'open', 'high', 'low', 'close', 'volume', 'turnover', 'hfq_close')
+        if not quotes_qs:
+            raise ValueError("在预加载时间窗口内未找到任何行情数据。")
+        df = pd.DataFrame.from_records(quotes_qs)
+        df['trade_date'] = pd.to_datetime(df['trade_date'])
+        
+        logger.info("正在构建主数据面板(Master Panels)...")
+        master_panels = {}
+        for col in ['open', 'high', 'low', 'close', 'volume', 'turnover', 'hfq_close']:
+            panel = df.pivot(index='trade_date', columns='stock_code_id', values=col).astype(float)
+            master_panels[col] = panel
+        
+        logger.info("数据预加载和主面板构建完成。")
+        return master_panels
     def _persist_risk_prices_if_changed(self, position, new_sl, new_tp, label='盘中'):
         if new_sl != position.current_stop_loss or new_tp != position.current_take_profit:
             position.current_stop_loss = new_sl
@@ -302,7 +335,7 @@ class SimulateTradeService:
                 if not trading_days:
                     logger.error("在指定日期范围内未找到任何交易日，回测终止。")
                     return {}
-
+                master_panels = self._preload_data_for_backtest(trading_days)
                 logger.info(f"--- 2. 开始日度回测循环 ({len(trading_days)}天) ---")
                 
                 last_sent_month = None # 用于邮件触发
@@ -360,7 +393,11 @@ class SimulateTradeService:
 
 
                     logger.info(f"-> [T日 盘后选股] 基于 {self.current_date} 的数据为下一交易日做准备...")
-                    selection_service = SelectionService(trade_date=self.current_date, mode='backtest')
+                    current_day_dt = pd.to_datetime(current_day)
+                    daily_panels = {
+                        key: panel.loc[:current_day_dt] for key, panel in master_panels.items()
+                    }
+                    selection_service = SelectionService(trade_date=self.current_date, mode='backtest',preloaded_panels=daily_panels)
                     selection_service.run_selection()
                     
                     self._record_daily_log()

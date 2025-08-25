@@ -32,7 +32,7 @@ class SelectionService:
     动态调整选股策略的维度权重，以适应不同的市场环境。
     """
 
-    def __init__(self, trade_date: date, mode: str = 'realtime' , one_strategy: str = None):
+    def __init__(self, trade_date: date, mode: str = 'realtime' , one_strategy: str = None, preloaded_panels: dict = None):
         """
         初始化选股服务。
 
@@ -75,6 +75,18 @@ class SelectionService:
         self.panel_volume = None
         self.panel_turnover = None
         self.panel_hfq_close = None
+
+        # --- 性能优化：处理预加载数据 ---
+        if preloaded_panels:
+            logger.debug("检测到预加载面板数据，直接赋值。")
+            self.panel_open = preloaded_panels.get('open')
+            self.panel_high = preloaded_panels.get('high')
+            self.panel_low = preloaded_panels.get('low')
+            self.panel_close = preloaded_panels.get('close')
+            self.panel_volume = preloaded_panels.get('volume')
+            self.panel_turnover = preloaded_panels.get('turnover')
+            self.panel_hfq_close = preloaded_panels.get('hfq_close')
+        # --- 结束 ---
 
         logger.debug(f"--- SelectionService(动态版) 初始化 ---")
         logger.debug(f"交易日期 (T-1): {self.trade_date}")
@@ -234,8 +246,10 @@ class SelectionService:
             self.market_regime_M = self._calculate_market_regime_M(initial_stock_pool)
             self.market_regime_S = self._calculate_market_regime_S()
             self.dynamic_weights = self._calculate_dynamic_weights(self.market_regime_M,self.market_regime_S)
-            
-            self._load_market_data(initial_stock_pool)
+            if self.panel_close is None:
+                self._load_market_data(initial_stock_pool)
+            else:
+                logger.debug("使用预加载的面板数据，跳过 _load_market_data。")
             raw_factors_df = self._calculate_all_dynamic_factors()
             norm_scores_df = self._standardize_factors(raw_factors_df)
             
@@ -1178,14 +1192,40 @@ class SelectionService:
         # === 核心修正点在这里 ===
         # 使用不复权的 self.panel_close 作为 apply 的主体，确保 lambda 中的 's' 是不复权收盘价序列
         logger.debug("正在基于不复权价格计算ATR...")
-        atr14 = self.panel_close.apply(
-            lambda s: ta.atr(
-                high=self.panel_high[s.name].astype(float), 
-                low=self.panel_low[s.name].astype(float), 
-                close=s.astype(float),  # 这里的 's' 现在是正确的不复权收盘价序列
-                length=14
-            ).iloc[-1]
-        )
+        # atr14 = self.panel_close.apply(
+        #     lambda s: ta.atr(
+        #         high=self.panel_high[s.name].astype(float), 
+        #         low=self.panel_low[s.name].astype(float), 
+        #         close=s.astype(float),  # 这里的 's' 现在是正确的不复权收盘价序列
+        #         length=14
+        #     ).iloc[-1]
+        # )
+        # 1. 准备基础数据面板
+        high = self.panel_high
+        low = self.panel_low
+        close = self.panel_close
+        
+        # 2. 计算前一日收盘价 (整个面板一次性操作)
+        prev_close = close.shift(1)
+        
+        # 3. 向量化计算TR的三个组成部分
+        range1 = high - low
+        range2 = (high - prev_close).abs()
+        range3 = (low - prev_close).abs()
+        
+        # 4. 向量化计算真实波幅 (True Range)
+        #    使用 np.maximum 逐元素比较，找出三者中的最大值。这比多次concat+max更高效。
+        true_range = np.maximum(range1, range2)
+        true_range = np.maximum(true_range, range3)
+        
+        # 5. 使用ewm(指数加权移动)计算ATR，这等同于技术分析中的Wilder's Smoothing
+        #    - alpha = 1/length 是Wilder平滑的定义
+        #    - adjust=False 使用递归平滑公式，与标准技术指标库行为一致
+        #    - min_periods=14 确保有足够数据才开始计算
+        atr_panel = true_range.ewm(alpha=1/14, adjust=False, min_periods=14).mean()
+        
+        # 6. 获取最后一天的ATR值，得到一个Series，其结构与原代码输出完全一致
+        atr14 = atr_panel.iloc[-1]
         # === 修正结束 ===
  
         # 准备后续计算所需的数据
@@ -1269,38 +1309,90 @@ class SelectionService:
     @transaction.atomic
     def _save_results(self, raw_factors_df, norm_scores_df, trading_plan_df):
         logger.debug("开始将结果保存到数据库...")
+        from django.db import connection
+        logger.debug("开始将结果高速保存到数据库 (临时禁用触发器)...")
         
-        # 1. 保存每日因子值
-        factor_values_to_create = []
-        for stock_code, row in raw_factors_df.iterrows():
-            for factor_code, raw_value in row.items():
-                norm_score = norm_scores_df.loc[stock_code, factor_code]
-                factor_values_to_create.append(
-                    DailyFactorValues(
-                        stock_code_id=stock_code, trade_date=self.trade_date,
-                        factor_code_id=factor_code, raw_value=Decimal(str(raw_value)),
-                        norm_score=Decimal(str(norm_score))
+        factor_table = DailyFactorValues._meta.db_table
+        plan_table = DailyTradingPlan._meta.db_table
+        with connection.cursor() as cursor:
+            try:
+                # 1. 临时禁用目标表的触发器 (包括外键约束)
+                logger.debug(f"禁用表 {factor_table} 和 {plan_table} 的触发器...")
+                cursor.execute(f'ALTER TABLE "{factor_table}" DISABLE TRIGGER ALL;')
+                cursor.execute(f'ALTER TABLE "{plan_table}" DISABLE TRIGGER ALL;')
+                # 2. 准备并写入每日因子值
+                # 优化：先删除当日旧数据，再用纯粹的 bulk_create，比 ignore_conflicts 更快
+                DailyFactorValues.objects.filter(trade_date=self.trade_date).delete()
+                
+                factor_values_to_create = []
+                for stock_code, row in raw_factors_df.iterrows():
+                    for factor_code, raw_value in row.items():
+                        norm_score = norm_scores_df.loc[stock_code, factor_code]
+                        factor_values_to_create.append(
+                            DailyFactorValues(
+                                stock_code_id=stock_code, trade_date=self.trade_date,
+                                factor_code_id=factor_code, raw_value=Decimal(str(raw_value)),
+                                norm_score=Decimal(str(norm_score))
+                            )
+                        )
+                # 优化：增加 batch_size 进一步提升性能和降低内存占用
+                DailyFactorValues.objects.bulk_create(factor_values_to_create, batch_size=1000)
+                logger.debug(f"已高速写入 {len(factor_values_to_create)} 条因子数据。")
+                # 3. 准备并写入每日交易预案
+                plan_date = self.trade_date + timedelta(days=1)
+                DailyTradingPlan.objects.filter(plan_date=plan_date).delete()
+                
+                plans_to_create = []
+                for _, row in trading_plan_df.iterrows():
+                    plans_to_create.append(
+                        DailyTradingPlan(
+                            plan_date=plan_date, stock_code_id=row['stock_code'],
+                            rank=row['rank'], final_score=Decimal(str(row['final_score'])),
+                            miop=Decimal(str(row['miop'])).quantize(Decimal('0.01')),
+                            maop=Decimal(str(row['maop'])).quantize(Decimal('0.01')),
+                            status=DailyTradingPlan.StatusChoices.PENDING,
+                            strategy_dna=row['strategy_dna']
+                        )
                     )
-                )
-        DailyFactorValues.objects.bulk_create(factor_values_to_create, ignore_conflicts=True)
-
-        # 2. 保存每日交易预案
-        plan_date = self.trade_date + timedelta(days=1)
-        DailyTradingPlan.objects.filter(plan_date=plan_date).delete()
+                DailyTradingPlan.objects.bulk_create(plans_to_create, batch_size=1000)
+                logger.debug(f"已高速写入 {len(plans_to_create)} 条交易预案。")
+            finally:
+                # 4. 无论成功与否，都必须重新启用触发器！
+                logger.debug(f"重新启用表 {factor_table} 和 {plan_table} 的触发器...")
+                cursor.execute(f'ALTER TABLE "{factor_table}" ENABLE TRIGGER ALL;')
+                cursor.execute(f'ALTER TABLE "{plan_table}" ENABLE TRIGGER ALL;')
         
-        plans_to_create = []
-        for _, row in trading_plan_df.iterrows():
-            plans_to_create.append(
-                DailyTradingPlan(
-                    plan_date=plan_date, stock_code_id=row['stock_code'],
-                    rank=row['rank'], final_score=Decimal(str(row['final_score'])),
-                    miop=Decimal(str(row['miop'])).quantize(Decimal('0.01')),
-                    maop=Decimal(str(row['maop'])).quantize(Decimal('0.01')),
-                    status=DailyTradingPlan.StatusChoices.PENDING,
-                    strategy_dna=row['strategy_dna']
-                )
-            )
-        DailyTradingPlan.objects.bulk_create(plans_to_create)
+        # # 1. 保存每日因子值
+        # factor_values_to_create = []
+        # for stock_code, row in raw_factors_df.iterrows():
+        #     for factor_code, raw_value in row.items():
+        #         norm_score = norm_scores_df.loc[stock_code, factor_code]
+        #         factor_values_to_create.append(
+        #             DailyFactorValues(
+        #                 stock_code_id=stock_code, trade_date=self.trade_date,
+        #                 factor_code_id=factor_code, raw_value=Decimal(str(raw_value)),
+        #                 norm_score=Decimal(str(norm_score))
+        #             )
+        #         )
+        # DailyFactorValues.objects.bulk_create(factor_values_to_create, ignore_conflicts=True)
+
+        # # 2. 保存每日交易预案
+        # plan_date = self.trade_date + timedelta(days=1)
+        # DailyTradingPlan.objects.filter(plan_date=plan_date).delete()
+        
+        # plans_to_create = []
+        # for _, row in trading_plan_df.iterrows():
+        #     plans_to_create.append(
+        #         DailyTradingPlan(
+        #             plan_date=plan_date, stock_code_id=row['stock_code'],
+        #             rank=row['rank'], final_score=Decimal(str(row['final_score'])),
+        #             miop=Decimal(str(row['miop'])).quantize(Decimal('0.01')),
+        #             maop=Decimal(str(row['maop'])).quantize(Decimal('0.01')),
+        #             status=DailyTradingPlan.StatusChoices.PENDING,
+        #             strategy_dna=row['strategy_dna']
+        #         )
+        #     )
+        # DailyTradingPlan.objects.bulk_create(plans_to_create)
         
         log_message = f"T-1日({self.trade_date})动态选股完成, T日({plan_date})预案如下:\n"
         log_message += trading_plan_df.to_string(index=False)
