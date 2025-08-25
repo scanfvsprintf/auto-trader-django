@@ -42,6 +42,7 @@ class MDistributionBacktestService:
         self.backtest_run_id = f"m_dist_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
         self.max_holding_days = 90
         self.single_strategy_mode = single_strategy_mode
+        self.params = {}
     def _preload_data_for_backtest(self, trading_days: list[date]) -> dict:
         """
         [新增] 为整个回测期间预加载所有需要的行情数据并构建主面板。
