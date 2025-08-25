@@ -49,39 +49,6 @@ class SimulateTradeService:
         self.last_buy_trade_id = None
         self.backtest_run_id: str = None # 新增：回测唯一ID
         self.params: dict = {}
-    def _preload_data_for_backtest(self, trading_days: list[date]) -> dict:
-        """
-        [新增] 为整个回测期间预加载所有需要的行情数据并构建主面板。
-        """
-        if not trading_days:
-            return {}
-        lookback_period = 250  # 因子计算所需的最大回溯期
-        
-        # 确定数据查询的完整时间窗口
-        # 需要从第一个交易日再往前推250个工作日
-        # 为了简化，我们直接往前推更多自然日来保证覆盖
-        first_day = trading_days[0]
-        last_day = trading_days[-1]
-        preload_start_date = first_day - timedelta(days=lookback_period + 20)
-        logger.info(f"开始预加载数据，时间窗口: {preload_start_date} to {last_day}")
-        # 一次性查询所有数据
-        quotes_qs = DailyQuotes.objects.filter(
-            trade_date__gte=preload_start_date,
-            trade_date__lte=last_day
-        ).values('trade_date', 'stock_code_id', 'open', 'high', 'low', 'close', 'volume', 'turnover', 'hfq_close')
-        if not quotes_qs:
-            raise ValueError("在预加载时间窗口内未找到任何行情数据。")
-        df = pd.DataFrame.from_records(quotes_qs)
-        df['trade_date'] = pd.to_datetime(df['trade_date'])
-        
-        logger.info("正在构建主数据面板(Master Panels)...")
-        master_panels = {}
-        for col in ['open', 'high', 'low', 'close', 'volume', 'turnover', 'hfq_close']:
-            panel = df.pivot(index='trade_date', columns='stock_code_id', values=col).astype(float)
-            master_panels[col] = panel
-        
-        logger.info("数据预加载和主面板构建完成。")
-        return master_panels
     def _persist_risk_prices_if_changed(self, position, new_sl, new_tp, label='盘中'):
         if new_sl != position.current_stop_loss or new_tp != position.current_take_profit:
             position.current_stop_loss = new_sl
@@ -335,7 +302,56 @@ class SimulateTradeService:
                 if not trading_days:
                     logger.error("在指定日期范围内未找到任何交易日，回测终止。")
                     return {}
-                master_panels = self._preload_data_for_backtest(trading_days)
+                #master_panels = self._preload_data_for_backtest(trading_days)
+                logger.info("--- [滚动窗口] 开始准备数据 ---")
+                lookback_window_size = 250  # 因子计算所需的最大回溯期
+                # 为了保证有足够的交易日，我们回溯更多的自然日
+                extra_buffer_days = 20 
+                
+                # 1. 直接计算预加载的起始日期，不再扫描全表
+                preload_start_date = trading_days[0] - timedelta(days=lookback_window_size + extra_buffer_days)
+                
+                logger.info(f"一次性查询数据库，时间窗口: {preload_start_date} to {self.end_date}")
+                
+                quotes_iterator = DailyQuotes.objects.filter(
+                    trade_date__gte=preload_start_date,
+                    trade_date__lte=self.end_date
+                ).order_by('trade_date', 'stock_code_id').values(
+                    'trade_date', 'stock_code_id', 'open', 'high', 'low', 'close', 'volume', 'turnover', 'hfq_close'
+                ).iterator(chunk_size=20000)
+                logger.info("将迭代器数据按日期分组到字典中...")
+                quotes_by_date = {}
+                for row in quotes_iterator:
+                    trade_date = row['trade_date']
+                    if trade_date not in quotes_by_date:
+                        quotes_by_date[trade_date] = []
+                    quotes_by_date[trade_date].append(row)
+                
+                # 2. 初始化第一个滚动窗口
+                logger.info("初始化第一个滚动窗口面板...")
+                # 获取所有已加载的日期，并排序
+                all_loaded_dates = sorted(quotes_by_date.keys())
+                
+                # 找到第一个回测日
+                first_backtest_day = trading_days[0]
+                
+                # 从已加载的日期中，筛选出用于初始化的部分
+                initial_window_dates = [d for d in all_loaded_dates if d <= first_backtest_day]
+                initial_rows = []
+                for d in initial_window_dates:
+                    initial_rows.extend(quotes_by_date.get(d, []))
+                
+                if not initial_rows:
+                    raise ValueError("初始化滚动窗口失败，没有获取到任何数据。")
+                df_window = pd.DataFrame(initial_rows)
+                df_window['trade_date'] = pd.to_datetime(df_window['trade_date'])
+                
+                rolling_panels = {}
+                for col in ['open', 'high', 'low', 'close', 'volume', 'turnover', 'hfq_close']:
+                    panel = df_window.pivot(index='trade_date', columns='stock_code_id', values=col).astype(float)
+                    rolling_panels[col] = panel
+                
+                logger.info(f"滚动窗口初始化完成，包含 {len(initial_window_dates)} 天数据。")
                 logger.info(f"--- 2. 开始日度回测循环 ({len(trading_days)}天) ---")
                 
                 last_sent_month = None # 用于邮件触发
@@ -343,7 +359,25 @@ class SimulateTradeService:
                 for i, current_day in enumerate(trading_days):
                     self.current_date = current_day
                     logger.info(f"\n{'='*20} 模拟日: {self.current_date} ({i+1}/{len(trading_days)}) {'='*20}")
-
+                    if i > 0:
+                        # 检查新的一天是否有数据，有才滚动
+                        new_day_data = quotes_by_date.get(current_day)
+                        if new_day_data:
+                            logger.debug(f"滚动窗口: 移除 {rolling_panels['close'].index[0].date()}, 添加 {current_day}")
+                            # 移除最老的一天
+                            for key in rolling_panels:
+                                rolling_panels[key] = rolling_panels[key].iloc[1:]
+                            
+                            # 添加新的一天
+                            df_new_day = pd.DataFrame(new_day_data)
+                            df_new_day['trade_date'] = pd.to_datetime(df_new_day['trade_date'])
+                            
+                            for col in ['open', 'high', 'low', 'close', 'volume', 'turnover', 'hfq_close']:
+                                new_row = df_new_day.pivot(index='trade_date', columns='stock_code_id', values=col).astype(float)
+                                # 使用 pd.concat 合并，比 append 更推荐
+                                rolling_panels[col] = pd.concat([rolling_panels[col], new_row])
+                        else:
+                            logger.warning(f"日期 {current_day} 在预加载数据中不存在，窗口未滚动。")
 
                     logger.info("-> [T日 盘前校准] ...")
                     before_fix_service = BeforeFixService(execution_date=self.current_date)
@@ -394,10 +428,7 @@ class SimulateTradeService:
 
                     logger.info(f"-> [T日 盘后选股] 基于 {self.current_date} 的数据为下一交易日做准备...")
                     current_day_dt = pd.to_datetime(current_day)
-                    daily_panels = {
-                        key: panel.loc[:current_day_dt] for key, panel in master_panels.items()
-                    }
-                    selection_service = SelectionService(trade_date=self.current_date, mode='backtest',preloaded_panels=daily_panels)
+                    selection_service = SelectionService(trade_date=self.current_date, mode='backtest',preloaded_panels=rolling_panels)
                     selection_service.run_selection()
                     
                     self._record_daily_log()
