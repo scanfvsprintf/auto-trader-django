@@ -52,7 +52,7 @@ class MDistributionBacktestService:
         lookback_period = 250
         first_day = trading_days[0]
         last_day = trading_days[-1]
-        preload_start_date = first_day - timedelta(days=lookback_period + 100)
+        preload_start_date = first_day - timedelta(days=lookback_period + 20)
         logger.info(f"开始预加载数据，时间窗口: {preload_start_date} to {last_day}")
         quotes_qs = DailyQuotes.objects.filter(
             trade_date__gte=preload_start_date,
