@@ -1400,7 +1400,11 @@ class SelectionService:
                 cursor.execute(f'ALTER TABLE "{plan_table}" DISABLE TRIGGER ALL;')
                 # 2. 准备并写入每日因子值
                 # 优化：先删除当日旧数据，再用纯粹的 bulk_create，比 ignore_conflicts 更快
-                DailyFactorValues.objects.filter(trade_date=self.trade_date).delete()
+                DailyFactorValues.objects.filter(
+                    trade_date=self.trade_date
+                ).exclude(
+                    stock_code_id=MARKET_INDICATOR_CODE
+                ).delete()
                 
                 factor_values_to_create = []
                 for stock_code, row in raw_factors_df.iterrows():
