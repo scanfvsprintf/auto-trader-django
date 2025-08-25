@@ -890,7 +890,7 @@ class SelectionService:
             n_smooth = int(self.dynamic_params.get('dynamic_v2_vpcf_n_smooth', 10))
             # 2. 计算平滑日度价格动量
             ma_close_s = self.panel_hfq_close.rolling(window=s, min_periods=s).mean()
-            price_momentum = ma_close_s.pct_change(1) # (MA_t / MA_{t-1}) - 1
+            price_momentum = ma_close_s.pct_change(1, fill_method=None) # (MA_t / MA_{t-1}) - 1
             # 3. 计算相对成交量水平
             ma_vol_s = self.panel_volume.rolling(window=s, min_periods=s).mean()
             ma_vol_l = self.panel_volume.rolling(window=l, min_periods=l).mean()
