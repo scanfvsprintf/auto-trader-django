@@ -684,10 +684,10 @@ class SelectionService:
         else:
 
             weights = {
-            'MT': 0.8,
-            'BO': 0.2,
-            'QD': 0.0,
-            'MR': 0.0,
+            'MT': 0.5,
+            'BO': 0.25,
+            'QD': 0.05,
+            'MR': 0.2,
         }
 
         if self.one_strategy and self.one_strategy in weights:
