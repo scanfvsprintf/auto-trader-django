@@ -707,8 +707,8 @@ class SelectionService:
         scores = pd.DataFrame(index=norm_scores_df.index)
 
         scores['Score_MT'] = (
-            0* norm_scores_df['dynamic_ADX_CONFIRM'] * p['dynamic_k_MT_ADX_CONFIRM'] +
-            norm_scores_df['dynamic_v2_MA_SLOPE'] * p['dynamic_k_MT_MA_SLOPE'] +
+            norm_scores_df['dynamic_ADX_CONFIRM'] * p['dynamic_k_MT_ADX_CONFIRM'] +
+            0*norm_scores_df['dynamic_v2_MA_SLOPE'] * p['dynamic_k_MT_MA_SLOPE'] +
             0*norm_scores_df['dynamic_v2_MA_SCORE'] * p['dynamic_k_MT_MA_SCORE'] +
             0*norm_scores_df['dynamic_v2_CPC_Factor'] * p['dynamic_k_MT_CPC_Factor'] +
             0*norm_scores_df['dynamic_v2_VPCF'] * p['dynamic_k_MT_VPCF']#good
