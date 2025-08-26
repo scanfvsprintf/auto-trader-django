@@ -685,10 +685,10 @@ class SelectionService:
         else:
 
             weights = {
-            'MT': 0.4,
-            'BO': 0.4,
-            'QD': 0.1,
-            'MR': 0.1,
+            'MT': 1.0,
+            'BO': 0.0,
+            'QD': 0.0,
+            'MR': 0.0,
             'OLD':0.0
         }
 
@@ -776,14 +776,22 @@ class SelectionService:
             'dynamic_MAX_DD': self._calc_factor_max_dd,
             'dynamic_DOWNSIDE_RISK': self._calc_factor_downside_risk,
             #old
-            'MA20_SLOPE': self._calc_factor_x1_ma20_slope,
-            'MA_ALIGNMENT': self._calc_factor_x2_ma_alignment,
-            'ADX_TREND': self._calc_factor_x3_adx_trend,
-            'ROC10': self._calc_factor_x4_roc,
-            'VOL_BREAKOUT': self._calc_factor_x5_vol_breakout,
-            'NEW_HIGH_MOMENTUM': self._calc_factor_x6_new_high_momentum,
-            'VOLATILITY20': self._calc_factor_x7_volatility,
-            'LIQUIDITY20': self._calc_factor_x8_liquidity,
+            # 'MA20_SLOPE': self._calc_factor_x1_ma20_slope,
+            # 'MA_ALIGNMENT': self._calc_factor_x2_ma_alignment,
+            # 'ADX_TREND': self._calc_factor_x3_adx_trend,
+            # 'ROC10': self._calc_factor_x4_roc,
+            # 'VOL_BREAKOUT': self._calc_factor_x5_vol_breakout,
+            # 'NEW_HIGH_MOMENTUM': self._calc_factor_x6_new_high_momentum,
+            # 'VOLATILITY20': self._calc_factor_x7_volatility,
+            # 'LIQUIDITY20': self._calc_factor_x8_liquidity,
+            'MA20_SLOPE': self._calc_factor_volume_surge,
+            'MA_ALIGNMENT': self._calc_factor_volume_surge,
+            'ADX_TREND': self._calc_factor_volume_surge,
+            'ROC10': self._calc_factor_volume_surge,
+            'VOL_BREAKOUT': self._calc_factor_volume_surge,
+            'NEW_HIGH_MOMENTUM': self._calc_factor_volume_surge,
+            'VOLATILITY20': self._calc_factor_volume_surge,
+            'LIQUIDITY20': self._calc_factor_volume_surge,
         }
         
         all_factors = {}
@@ -1504,6 +1512,8 @@ class SelectionService:
                 ssw['QD'] * p['dynamic_miopmaop_k_drop_base_qd'] +
                 ssw['OLD'] * p['k_drop']
             )
+            k_gap_dynamic=p['k_gap']
+            k_drop_dynamic=p['k_drop']
             # --- 核心动态逻辑结束 ---
  
             # 获取该股票的不复权收盘价和正确的ATR值
