@@ -676,20 +676,20 @@ class SelectionService:
         epsilon = 1e-9
         if abs(M_t) < epsilon:
             weights = {
-            'MT': 0.0,
-            'BO': 0.0,
+            'MT': 0.25,
+            'BO': 0.25,
             'QD': 0.0,
-            'MR': 1.0,
-            'OLD':0.0
+            'MR': 0.25,
+            'OLD':0.25
             }
         else:
 
             weights = {
-            'MT': 1.0,
-            'BO': 0.0,
+            'MT': 0.25,
+            'BO': 0.25,
             'QD': 0.0,
-            'MR': 0.0,
-            'OLD':0.0
+            'MR': 0.25,
+            'OLD':0.25
         }
 
         if self.one_strategy and self.one_strategy in weights:
