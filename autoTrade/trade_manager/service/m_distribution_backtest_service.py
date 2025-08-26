@@ -23,7 +23,7 @@ from trade_manager.service.simulate_trade_handler import SimulateTradeHandler
 from .position_monitor_logic import PositionMonitorLogic
 from common.models import Position
 logger = logging.getLogger(__name__)
-STRATEGIES = ['MT', 'BO', 'QD', 'MR']
+STRATEGIES = ['MT', 'BO', 'QD', 'MR','OLD']
 class MDistributionBacktestService:
     """
     M值胜率分布回测服务 (V2 - 修正版)。
