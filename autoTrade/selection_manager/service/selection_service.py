@@ -707,11 +707,11 @@ class SelectionService:
         scores = pd.DataFrame(index=norm_scores_df.index)
 
         scores['Score_MT'] = (
-            Decimal(0.0)* norm_scores_df['dynamic_ADX_CONFIRM'] * p['dynamic_k_MT_ADX_CONFIRM'] +
-            Decimal(0.0)*norm_scores_df['dynamic_v2_MA_SLOPE'] * p['dynamic_k_MT_MA_SLOPE'] +
-            Decimal(0.0)*norm_scores_df['dynamic_v2_MA_SCORE'] * p['dynamic_k_MT_MA_SCORE'] +
+            0* norm_scores_df['dynamic_ADX_CONFIRM'] * p['dynamic_k_MT_ADX_CONFIRM'] +
+            0*norm_scores_df['dynamic_v2_MA_SLOPE'] * p['dynamic_k_MT_MA_SLOPE'] +
+            0*norm_scores_df['dynamic_v2_MA_SCORE'] * p['dynamic_k_MT_MA_SCORE'] +
             norm_scores_df['dynamic_v2_CPC_Factor'] * p['dynamic_k_MT_CPC_Factor'] +
-            Decimal(0.0)*norm_scores_df['dynamic_v2_VPCF'] * p['dynamic_k_MT_VPCF']
+            0*norm_scores_df['dynamic_v2_VPCF'] * p['dynamic_k_MT_VPCF']
         )
         scores['Score_BO'] = (
             norm_scores_df['dynamic_BREAKOUT_PWR'] * p['dynamic_k_BO1'] +
