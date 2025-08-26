@@ -1283,7 +1283,11 @@ class SelectionService:
         #params_qs = StrategyParameters.objects.filter(param_name__startswith='dynamic_')
         params_qs = StrategyParameters.objects.all()
         self.dynamic_params = {p.param_name: float(p.param_value) for p in params_qs}
-        
+        for p in params_qs:
+            if p.param_name.startswith('lookback_') or p.param_name in ['param_top_n', 'param_adx_threshold']:
+                self.dynamic_params[p.param_name] = int(p.param_value)
+            else:
+                self.dynamic_params[p.param_name] = float(p.param_value)
         #defs_qs = FactorDefinitions.objects.filter(is_active=True, factor_code__startswith='dynamic_')
         defs_qs = FactorDefinitions.objects.all()
         self.dynamic_factor_defs = {f.factor_code: {'direction': f.direction} for f in defs_qs}
