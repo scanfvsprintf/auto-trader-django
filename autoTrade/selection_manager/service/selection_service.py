@@ -1487,7 +1487,7 @@ class SelectionService:
                 'BO': self.dynamic_weights['BO'] * top_dimension_scores.loc[stock_code, 'Score_BO'],
                 'MR': self.dynamic_weights['MR'] * top_dimension_scores.loc[stock_code, 'Score_MR'],
                 'QD': self.dynamic_weights['QD'] * top_dimension_scores.loc[stock_code, 'Score_QD'],
-                'OLD': self.dynamic_weights['QD'] * top_dimension_scores.loc[stock_code, 'Score_OLD'],
+                'OLD': self.dynamic_weights['OLD'] * top_dimension_scores.loc[stock_code, 'Score_OLD'],
             }
             
             # 步骤2: 提取正向贡献值 (PDCV) 并计算策略DNA权重 (SSW)
