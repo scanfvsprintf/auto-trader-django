@@ -1609,7 +1609,7 @@ class SelectionService:
                 DailyTradingPlan.objects.bulk_create(plans_to_create, batch_size=1000)
                 logger.debug(f"已高速写入 {len(plans_to_create)} 条交易预案。")
             except Exception as e:
-                logger.error(f"因子写入数据库错误{e}")
+                logger.critical(f"数据库写入事务发生根本性错误，即将回滚。根本原因: {e}", exc_info=True)
             finally:
                 # 4. 无论成功与否，都必须重新启用触发器！
                 logger.debug(f"重新启用表 {factor_table} 和 {plan_table} 的触发器...")
