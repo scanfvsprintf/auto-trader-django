@@ -676,20 +676,20 @@ class SelectionService:
         epsilon = 1e-9
         if abs(M_t) < epsilon:
             weights = {
-            'MT': 0.25,
-            'BO': 0.25,
+            'MT': 0.0,
+            'BO': 0.0,
             'QD': 0.0,
-            'MR': 0.25,
-            'OLD':0.25
+            'MR': 1.0,
+            'OLD':0.0
             }
         else:
 
             weights = {
-            'MT': 0.25,
-            'BO': 0.25,
+            'MT': 0.0,
+            'BO': 0.0,
             'QD': 0.0,
-            'MR': 0.25,
-            'OLD':0.25
+            'MR': 0.0,
+            'OLD':1.0
         }
 
         if self.one_strategy and self.one_strategy in weights:
@@ -738,11 +738,11 @@ class SelectionService:
             self.dynamic_params['w_quality']*(norm_scores_df['VOLATILITY20'] * self.dynamic_params['k7'] +
             norm_scores_df['LIQUIDITY20'] * self.dynamic_params['k8'])
         )
-        scores['Score_MT'] = norm_scores_df['dynamic_ADX_CONFIRM']
-        scores['Score_BO'] = norm_scores_df['dynamic_v2_MA_SLOPE']
-        scores['Score_MR'] = norm_scores_df['dynamic_v2_MA_SCORE']
-        scores['Score_QD'] = norm_scores_df['dynamic_v2_CPC_Factor']
-        scores['Score_OLD'] = norm_scores_df['dynamic_v2_VPCF']
+        # scores['Score_MT'] = norm_scores_df['dynamic_ADX_CONFIRM']
+        # scores['Score_BO'] = norm_scores_df['dynamic_v2_MA_SLOPE']
+        # scores['Score_MR'] = norm_scores_df['dynamic_v2_MA_SCORE']
+        # scores['Score_QD'] = norm_scores_df['dynamic_v2_CPC_Factor']
+        # scores['Score_OLD'] = norm_scores_df['dynamic_v2_VPCF']
         return scores
 
     def _calculate_final_dynamic_score(self, dimension_scores_df: pd.DataFrame, weights: dict) -> pd.Series:
