@@ -658,7 +658,7 @@ class SelectionService:
             #old
             'MA20_SLOPE': self._calc_factor_x1_ma20_slope,
             'MA_ALIGNMENT': self._calc_factor_x2_ma_alignment,
-            'ADX_TREND': self._calc_factor_x3_adx_trend,
+            'ADX_TREND': self._calc_factor_adx_confirm,
             'ROC10': self._calc_factor_x4_roc,
             'VOL_BREAKOUT': self._calc_factor_x5_vol_breakout,
             'NEW_HIGH_MOMENTUM': self._calc_factor_x6_new_high_momentum,
@@ -872,7 +872,7 @@ class SelectionService:
         minus_di_final = minus_di.iloc[-1]
         
         # 条件判断现在是在Series上进行，完全向量化
-        condition = (adx_final > 20) & (plus_di_final > minus_di_final)
+        condition = (adx_final > 25) & (plus_di_final > minus_di_final)
         
         # .where() 也是一个高效的向量化操作
         # 返回的Series结构与原函数完全一致
