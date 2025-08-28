@@ -77,7 +77,7 @@ rm -f nohup.out
 # --- 3. 更新代码 ---
 
 log_info "--- 步骤 4: 从 Git 拉取最新代码 ---"
-git pull
+#git pull
 log_info "代码更新成功。"
 
 # --- 4. 启动新服务 ---
