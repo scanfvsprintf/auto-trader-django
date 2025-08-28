@@ -554,8 +554,8 @@ class SelectionService:
             'MT': 0.0,
             'BO': 0.0,
             'QD': 0.0,
-            'MR': 1.0,
-            'OLD':0.0
+            'MR': 0.0,
+            'OLD':1.0
             }
         else:
 
