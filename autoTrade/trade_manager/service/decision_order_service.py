@@ -182,7 +182,7 @@ class DecisionOrderService:
         elif M_t<Decimal('0.0'):
             S_cap=Decimal('0.0')
         else:
-            S_cap=max(M_t*2,Decimal('1.0'))
+            S_cap=min(M_t*2,Decimal('1.0'))
             #Decimal('1.0')
         
         #S_cap=Decimal('1.0')
