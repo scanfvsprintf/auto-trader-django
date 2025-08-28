@@ -42,7 +42,7 @@ class MValueService:
         self._dependencies_loaded = True
 
     def _prepare_input_data(self, csi300_df: pd.DataFrame) -> np.ndarray:
-        """数据准备逻辑保持不变"""
+        """数据准备逻辑，使用推荐的填充方法。"""
         if len(csi300_df) < self.LOOKBACK_WINDOW:
             raise ValueError(f"输入数据长度不足，需要{self.LOOKBACK_WINDOW}天，实际{len(csi300_df)}天。")
 
@@ -50,15 +50,23 @@ class MValueService:
         
         for col in self.FEATURE_COLS:
             df[col] = pd.to_numeric(df[col], errors='coerce')
-        df.fillna(method='ffill', inplace=True)
-        df.fillna(method='bfill', inplace=True)
+        
+        # [修正] 使用 .ffill() 和 .bfill() 替代旧的 method='ffill' 写法
+        if df.isnull().values.any():
+            df.ffill(inplace=True)
+        if df.isnull().values.any():
+            df.bfill(inplace=True)
 
+        # 计算衍生特征
         df['log_return'] = np.log(df['close']).diff().fillna(0)
         df['volatility_20d'] = df['log_return'].rolling(self.LOOKBACK_WINDOW).std().fillna(0)
         ma20 = df['close'].rolling(20).mean()
         ma60 = df['close'].rolling(60).mean()
         df['bias_20d'] = (df['close'] / ma20 - 1).fillna(0)
         df['bias_60d'] = (df['close'] / ma60 - 1).fillna(0)
+        
+        if df.isnull().values.any():
+            raise ValueError("数据在计算衍生特征后仍然包含无法填充的NaN")
 
         feature_window = df.iloc[-self.LOOKBACK_WINDOW:][self.ALL_FEATURE_COLS]
 
@@ -79,22 +87,16 @@ class MValueService:
         try:
             model_input = self._prepare_input_data(csi300_df)
             
-            # 预测得到 [P(上涨), P(下跌)]
             pred_proba = self._model.predict(model_input, verbose=0)[0]
-            prob_up = pred_proba[0] # 我们只关心上涨的概率
+            prob_up = pred_proba[0]
 
             best_threshold = self._config.get('best_threshold', 0.5)
             logger.info(f"模型预测上涨概率: {prob_up:.2%}, 最佳决策阈值: {best_threshold:.2%}")
             
-            # [核心] M值计算公式
             if prob_up >= best_threshold:
-                # 概率在阈值之上，映射到 [0, 1]
-                # 防止分母为0
                 if (1 - best_threshold) == 0: return 1.0
                 m_value = (prob_up - best_threshold) / (1 - best_threshold)
             else:
-                # 概率在阈值之下，映射到 [-1, 0)
-                # 防止分母为0
                 if best_threshold == 0: return -1.0
                 m_value = (prob_up - best_threshold) / best_threshold
             
