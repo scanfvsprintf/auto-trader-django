@@ -1,0 +1,57 @@
+# selection_manager/service/selection_service.py
+
+# ... 其他 import ...
+import pandas as pd
+from django.db.models import F # 用于类型转换
+from common.models import IndexQuotesCsi300
+from .m_value_service import m_value_service_instance
+
+class SelectionService:
+    # ... 其他代码 ...
+
+    def _calculate_market_regime_M(self, stock_pool: list[str]) -> float:
+        """
+        计算市场状态函数 M(t)
+        """
+        
+        # =======================================================================
+        # [ML预测接口] - 未来切换到机器学习模型预测M值的入口
+        # =======================================================================
+        # try:
+        #     # 1. 获取最近60个交易日的数据
+        #     quotes_60_days_qs = IndexQuotesCsi300.objects.filter(
+        #         trade_date__lte=self.trade_date
+        #     ).order_by('-trade_date')[:60]
+            
+        #     if len(quotes_60_days_qs) < 60:
+        #         logger.warning("沪深300数据不足60天，无法使用ML模型进行预测，将回退到传统方法。")
+        #     else:
+        #         # [修复] 从QuerySet直接构建DataFrame
+        #         df_60_days_raw = pd.DataFrame.from_records(quotes_60_days_qs.values())
+                
+        #         # 反转顺序使日期从旧到新
+        #         df_60_days = df_60_days_raw.iloc[::-1].reset_index(drop=True)
+                
+        #         # 2. 调用预测服务 (m_value_service内部会处理类型转换)
+        #         ml_m_value = m_value_service_instance.predict_csi300_next_day_trend(df_60_days)
+                
+        #         # 3. 【重要】将ML预测结果存入缓存
+        #         DailyFactorValues.objects.update_or_create(
+        #             stock_code_id=MARKET_INDICATOR_CODE,
+        #             trade_date=self.trade_date,
+        #             factor_code_id='dynamic_M_VALUE',
+        #             defaults={'raw_value': PyDecimal(str(ml_m_value)), 'norm_score': PyDecimal(str(ml_m_value))}
+        #         )
+        #         logger.info(f"已使用ML模型预测M(t) = {ml_m_value:.4f}")
+        #         return ml_m_value
+        # except Exception as e:
+        #     logger.error(f"调用ML模型预测M值时发生错误: {e}", exc_info=True)
+        # =======================================================================
+
+        logger.debug("开始计算市场状态 M(t) [V3.0]...")
+        # ... 你现有的M值计算逻辑 ...
+        # 注意：如果你现有的M值计算逻辑也使用了pandas，也需要进行类似的类型转换修复。
+        # 例如，在这一句之前：
+        # df = pd.DataFrame.from_records(quotes_qs.values())
+        # 你需要加入类型转换的代码。
+        # ...

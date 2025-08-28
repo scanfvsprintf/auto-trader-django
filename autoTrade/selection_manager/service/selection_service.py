@@ -3,6 +3,9 @@
 import logging
 from datetime import date, timedelta
 from decimal import Decimal
+from django.db.models import F # 用于类型转换
+from common.models import IndexQuotesCsi300
+from .m_value_service import m_value_service_instance
 
 import numpy as np
 import pandas as pd
@@ -286,171 +289,43 @@ class SelectionService:
 
     # endregion
 
-    # region: --- 2. 核心动态逻辑实现 ---
     def _calculate_market_regime_M(self, stock_pool: list[str]) -> float:
         """
-        计算市场状态函数 M(t) - V3.0 回归方向与ADX强度版
-        M(t) = D(t) * I(t)
-        D(t): 基于收盘价回归斜率计算的市场方向
-        I(t): 基于ADX计算的市场趋势强度
+        计算市场状态函数 M(t)
         """
-        logger.debug("开始计算市场状态 M(t) [V3.0]...")
-        # --- 1. 参数声明 ---
-        # D(t) 相关参数
-        H_LOOKBACK_K = 20      # h(t,k) 的最大回溯期 k
-        A_PARAM = 200.0      # tanh 激活函数的缩放系数
-        # I(t) 相关参数
-        ADX_PERIOD = 14       # ADX 计算周期
-        ADX_THRESHOLD = 20.0  # ADX 强度阈值
-        B_PARAM = 0.075         # sigmoid 激活函数的缩放系数
-        # --- 2. 检查当日缓存 ---
-        try:
-            # cached_m = DailyFactorValues.objects.get(
-            #     stock_code_id=MARKET_INDICATOR_CODE,
-            #     trade_date=self.trade_date,
-            #     factor_code_id='dynamic_M_VALUE'
-            # )
-            # m_value = float(cached_m.raw_value)
-            # logger.debug(f"成功从缓存中读取当日 M(t) = {m_value:.4f}")
-            # return m_value
-            pass
-        except DailyFactorValues.DoesNotExist:
-            logger.debug("当日 M(t) 缓存未命中，开始计算...")
-        # --- 3. 加载计算所需数据 ---
-        # D(t)需要 H_LOOKBACK_K+1 天数据, ADX需要约 2*ADX_PERIOD 天数据
-        # 我们取一个更长的回溯期以确保数据充足
-        lookback_days = (H_LOOKBACK_K + ADX_PERIOD) * 3 # 넉넉하게 buffer
-        start_date = self.trade_date - timedelta(days=lookback_days)
         
+        # =======================================================================
+        # [ML预测接口] - 未来切换到机器学习模型预测M值的入口
+        # =======================================================================
         try:
-            quotes_qs = IndexQuotesCsi300.objects.filter(
-                trade_date__gte=start_date,
+            # 1. 获取最近60个交易日的数据
+            quotes_60_days_qs = IndexQuotesCsi300.objects.filter(
                 trade_date__lte=self.trade_date
-            ).order_by('trade_date')
-            # 确保数据足够进行最长的计算
-            if len(quotes_qs) < (ADX_PERIOD * 2):
-                raise ValueError(f"沪深300历史数据不足 {ADX_PERIOD * 2} 天，无法计算M值。")
-            df = pd.DataFrame.from_records(quotes_qs.values())
-            df['trade_date'] = pd.to_datetime(df['trade_date'])
-            df.set_index('trade_date', inplace=True)
+            ).order_by('-trade_date')[:60]
             
-            # 将所需列转换为数值类型
-            columns_to_convert = ['open', 'high', 'low', 'close']
-            for col in columns_to_convert:
-                df[col] = pd.to_numeric(df[col], errors='coerce')
-            
-            # 检查转换后是否有NaN值，以防数据质量问题
-            if df[columns_to_convert].isnull().values.any():
-                raise ValueError("沪深300行情数据中存在非数值(NaN)项。")
-        except (ValueError, IndexQuotesCsi300.DoesNotExist) as e:
-            logger.error(f"获取或处理沪深300数据失败: {e}。将启用容错机制。")
-            # 容错机制: 沿用前一个交易日的M值
-            try:
-                latest_m = DailyFactorValues.objects.filter(
+            if len(quotes_60_days_qs) < 60:
+                logger.warning("沪深300数据不足60天，无法使用ML模型进行预测，将回退到传统方法。")
+            else:
+                # [修复] 从QuerySet直接构建DataFrame
+                df_60_days_raw = pd.DataFrame.from_records(quotes_60_days_qs.values())
+                
+                # 反转顺序使日期从旧到新
+                df_60_days = df_60_days_raw.iloc[::-1].reset_index(drop=True)
+                
+                # 2. 调用预测服务 (m_value_service内部会处理类型转换)
+                ml_m_value = m_value_service_instance.predict_csi300_next_day_trend(df_60_days)
+                
+                # 3. 【重要】将ML预测结果存入缓存
+                DailyFactorValues.objects.update_or_create(
                     stock_code_id=MARKET_INDICATOR_CODE,
-                    factor_code_id='dynamic_M_VALUE'
-                ).latest('trade_date')
-                logger.warning(f"数据获取失败，沿用 {latest_m.trade_date} 的M值: {float(latest_m.raw_value):.4f}")
-                return float(latest_m.raw_value)
-            except DailyFactorValues.DoesNotExist:
-                logger.critical("数据库中无任何历史M值，无法回退，返回0。")
-                return 0.0
-        # --- 4. 计算市场趋势强度函数 I(t) ---
-        logger.debug("计算市场趋势强度 I(t)...")
-        
-        # 准备ADX计算所需的数据序列
-        high = df['high']
-        low = df['low']
-        close = df['close']
-        # a. 计算 +DM, -DM, TR
-        move_up = high.diff()
-        move_down = -low.diff()
-        
-        plus_dm = pd.Series(np.where((move_up > move_down) & (move_up > 0), move_up, 0.0), index=df.index)
-        minus_dm = pd.Series(np.where((move_down > move_up) & (move_down > 0), move_down, 0.0), index=df.index)
-        prev_close = close.shift(1)
-        tr1 = high - low
-        tr2 = abs(high - prev_close)
-        tr3 = abs(low - prev_close)
-        true_range = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
-        # b. 平滑处理 (Wilder's Smoothing)
-        alpha = 1 / ADX_PERIOD
-        atr = true_range.ewm(alpha=alpha, adjust=False, min_periods=ADX_PERIOD).mean()
-        plus_dm_smooth = plus_dm.ewm(alpha=alpha, adjust=False, min_periods=ADX_PERIOD).mean()
-        minus_dm_smooth = minus_dm.ewm(alpha=alpha, adjust=False, min_periods=ADX_PERIOD).mean()
-        # c. 计算 +DI, -DI
-        epsilon = 1e-9 # 防止除以零
-        plus_di = 100 * (plus_dm_smooth / (atr + epsilon))
-        minus_di = 100 * (minus_dm_smooth / (atr + epsilon))
-        # d. 计算 DX
-        di_sum = plus_di + minus_di
-        di_diff_abs = abs(plus_di - minus_di)
-        dx = 100 * (di_diff_abs / (di_sum + epsilon))
-        # e. 计算最终 ADX
-        adx = dx.ewm(alpha=alpha, adjust=False, min_periods=ADX_PERIOD).mean()
-        
-        # f. 计算 I(t)
-        adx_t = adx.iloc[-1]
-        if pd.isna(adx_t):
-            i_t = 0.0
-            logger.debug(f"ADX(t) 为NaN, I(t) 设为 0。")
-        else:
-            # 使用tanh构造一个在ADX_THRESHOLD处为0，并平滑增长的函数
-            raw_i = np.tanh(B_PARAM * (adx_t - ADX_THRESHOLD))
-            # 裁剪掉负值部分，使得ADX低于阈值时I(t)严格为0
-            i_t = max(0.0, raw_i)
-            logger.debug(f"ADX(t) = {adx_t:.2f}, I(t) = max(0, tanh({B_PARAM}*({adx_t:.2f}-{ADX_THRESHOLD}))) = {i_t:.4f}")
-        # --- 5. 计算市场方向函数 D(t) ---
-        logger.debug("计算市场方向 D(t)...")
-        
-        g_values = []
-        close_prices = df['close']
-        # 确保有足够的数据进行回归计算
-        if len(close_prices) < H_LOOKBACK_K + 1:
-            logger.warning(f"数据不足 {H_LOOKBACK_K + 1} 天，无法计算 D(t)，将设为 0。")
-            h_t_k = 0.0
-        else:
-            for k in range(1, H_LOOKBACK_K + 1):
-                # a. 截取 k+1 个数据点
-                y_series = close_prices.iloc[-(k + 1):]
-                
-                # b. 创建自变量 x
-                x_series = np.arange(k + 1)
-                
-                # c. 线性回归
-                slope, _, _, _, _ = linregress(x=x_series, y=y_series)
-                
-                # d. 获取 t-k 日的收盘价
-                close_t_minus_k = close_prices.iloc[-(k + 1)]
-                
-                # e. 计算 g(t,k)
-                if abs(close_t_minus_k) < epsilon:
-                    g_tk = 0.0 # 避免除以零
-                else:
-                    # 您的定义是 "绝对值的斜率除以t-k的沪深300指数值"
-                    # 这里我理解为 slope / close_t_minus_k
-                    g_tk = slope / close_t_minus_k
-                
-                g_values.append(g_tk)
-                logger.debug(f"  - g(t, k={k}): slope={slope:.2f}, close(t-{k})={close_t_minus_k:.2f}, g_tk={g_tk:.6f}")
-            # f. 计算 h(t,k)
-            h_t_k = np.mean(g_values) if g_values else 0.0
-            logger.debug(f"h(t, k={H_LOOKBACK_K}) = mean(g_values) = {h_t_k:.6f}")
-        # g. 计算 D(t)
-        d_t = np.tanh(A_PARAM * h_t_k)
-        logger.debug(f"D(t) = tanh({A_PARAM} * {h_t_k:.6f}) = {d_t:.4f}")
-        # --- 6. 合成最终 M(t) ---
-        m_t = d_t * i_t
-        logger.info(f"M(t) 计算完成: D(t)={d_t:.4f} * I(t)={i_t:.4f} = {m_t:.4f}")
-        # --- 7. 缓存最终的 M(t) 值 ---
-        DailyFactorValues.objects.update_or_create(
-            stock_code_id=MARKET_INDICATOR_CODE,
-            trade_date=self.trade_date,
-            factor_code_id='dynamic_M_VALUE',
-            defaults={'raw_value': Decimal(str(m_t)), 'norm_score': Decimal(str(m_t))}
-        )
-        logger.debug(f"M(t) = {m_t:.4f} 已存入缓存。")
-        return m_t
+                    trade_date=self.trade_date,
+                    factor_code_id='dynamic_M_VALUE',
+                    defaults={'raw_value': Decimal(str(ml_m_value)), 'norm_score': Decimal(str(ml_m_value))}
+                )
+                logger.info(f"已使用ML模型预测M(t) = {ml_m_value:.4f}")
+                return ml_m_value
+        except Exception as e:
+            logger.error(f"调用ML模型预测M值时发生错误: {e}", exc_info=True)
     def _calculate_market_regime_M_old(self, stock_pool: list[str]) -> float:
         """
         计算市场状态函数 M(t) - V2.0 沪深300基准版 ----老版本暂时废弃

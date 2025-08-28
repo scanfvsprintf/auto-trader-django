@@ -89,9 +89,11 @@
             📂 commands/
                 📄 generate_m_value_csv.py
         📂 service/
+            📄 selection_service copy.old_v4
             📄 selection_service.py
-            📄 selection_service.py.old_v1
+            📄 selection_service.py.old
             📄 selection_service.py.old_v2
+            📄 selection_service.py.old_v3
     📂 trade_manager/
         📄 __init__.py
         📄 admin.py
@@ -3440,7 +3442,7 @@ class EmailNotificationService:
 
         self.email_handler = EmailHandler()
         # 从EmailHandler的配置中直接读取收件人列表
-        self.recipients = self.email_handler.recipients if hasattr(self.email_handler, 'recipients') else ['876858298@qq.com','850696281@qq.com','285173686@qq.com']
+        self.recipients = self.email_handler.recipients if hasattr(self.email_handler, 'recipients') else ['876858298@qq.com','850696281@qq.com','285173686@qq.com','2516937525@qq.com']
 
 
     def runEmailSend(self):
@@ -4449,9 +4451,11 @@ class SelectionService:
             {'factor_code': 'dynamic_M4_RAW', 'factor_name': '动态-M4原始值(20日平均波动率)', 'direction': 'negative'},
             
             # 趋势动能 (MT) 维度因子
-            {'factor_code': 'dynamic_MA20_SLOPE', 'factor_name': '动态-20日均线斜率', 'direction': 'positive'},
-            {'factor_code': 'dynamic_MA_SCORE', 'factor_name': '动态-均线排列评分', 'direction': 'positive'},
             {'factor_code': 'dynamic_ADX_CONFIRM', 'factor_name': '动态-ADX趋势确认', 'direction': 'positive'},
+            {'factor_code': 'dynamic_v2_MA_SLOPE', 'factor_name': '动态V2-均线斜率因子', 'direction': 'positive'},
+            {'factor_code': 'dynamic_v2_MA_SCORE', 'factor_name': '动态V2-均线排列评分', 'direction': 'positive'},
+            {'factor_code': 'dynamic_v2_CPC_Factor', 'factor_name': '动态V2-K线路径一致性', 'direction': 'positive'},
+            {'factor_code': 'dynamic_v2_VPCF', 'factor_name': '动态V2-量价协同因子', 'direction': 'positive'},
             
             # 强势突破 (BO) 维度因子
             {'factor_code': 'dynamic_BREAKOUT_PWR', 'factor_name': '动态-突破强度', 'direction': 'positive'},
@@ -4510,6 +4514,11 @@ class SelectionService:
             'dynamic_k_MT1': {'value': '0.5', 'group': 'K_WEIGHTS_MT', 'desc': '趋势动能-MA20斜率权重'},
             'dynamic_k_MT2': {'value': '0.3', 'group': 'K_WEIGHTS_MT', 'desc': '趋势动能-均线排列权重'},
             'dynamic_k_MT3': {'value': '0.2', 'group': 'K_WEIGHTS_MT', 'desc': '趋势动能-ADX确认权重'},
+            'dynamic_k_MT_ADX_CONFIRM': {'value': '0.3', 'group': 'K_WEIGHTS_MT', 'desc': '趋势动能-ADX确认权重'},
+            'dynamic_k_MT_MA_SLOPE': {'value': '0.1', 'group': 'K_WEIGHTS_MT', 'desc': '趋势动能V2-均线斜率权重'},
+            'dynamic_k_MT_MA_SCORE': {'value': '0.1', 'group': 'K_WEIGHTS_MT', 'desc': '趋势动能V2-均线排列评分权重'},
+            'dynamic_k_MT_CPC_Factor': {'value': '0.25', 'group': 'K_WEIGHTS_MT', 'desc': '趋势动能V2-K线路径一致性权重'},
+            'dynamic_k_MT_VPCF': {'value': '0.25', 'group': 'K_WEIGHTS_MT', 'desc': '趋势动能V2-量价协同因子权重'},
             'dynamic_k_BO1': {'value': '0.45', 'group': 'K_WEIGHTS_BO', 'desc': '强势突破-突破强度权重'},
             'dynamic_k_BO2': {'value': '0.35', 'group': 'K_WEIGHTS_BO', 'desc': '强势突破-成交量激增权重'},
             'dynamic_k_BO3': {'value': '0.2', 'group': 'K_WEIGHTS_BO', 'desc': '强势突破-动能加速度权重'},
@@ -4534,6 +4543,10 @@ class SelectionService:
             
             # 筛选与计算参数
             'dynamic_lookback_new_stock': {'value': '60', 'group': 'FILTERS', 'desc': '次新股定义天数(自然日)'},
+            'dynamic_v2_cpc_n': {'value': '10', 'group': 'FACTOR_PARAMS', 'desc': 'CPC因子-平滑周期N'},
+            'dynamic_v2_vpcf_s': {'value': '5', 'group': 'FACTOR_PARAMS', 'desc': 'VPCF因子-短期均线周期s'},
+            'dynamic_v2_vpcf_l': {'value': '20', 'group': 'FACTOR_PARAMS', 'desc': 'VPCF因子-长期均线周期l'},
+            'dynamic_v2_vpcf_n_smooth': {'value': '5', 'group': 'FACTOR_PARAMS', 'desc': 'VPCF因子-最终平滑周期N_smooth'},
             'dynamic_min_liquidity': {'value': '100000000', 'group': 'FILTERS', 'desc': '最低日均成交额(元)'},
             'dynamic_top_n': {'value': '10', 'group': 'SELECTION', 'desc': '最终选取股票数量'},
         }
@@ -4989,15 +5002,17 @@ class SelectionService:
             'MT': 0.0,
             'BO': 0.0,
             'QD': 0.0,
-            'MR': 1.0
+            'MR': 1.0,
+            'OLD':0.0
             }
         else:
 
             weights = {
-            'MT': 0.55,
-            'BO': 0.25,
-            'QD': 0.1,
-            'MR': 0.1,
+            'MT': 0.0,
+            'BO': 0.0,
+            'QD': 0.0,
+            'MR': 0.0,
+            'OLD':1.0
         }
 
         if self.one_strategy and self.one_strategy in weights:
@@ -5005,7 +5020,7 @@ class SelectionService:
             for key in weights:
                 weights[key] = 0.0
             weights[self.one_strategy] = 1.0
-        logger.debug(f"动态权重计算完成: MT={weights['MT']:.2%}, BO={weights['BO']:.2%}, MR={weights['MR']:.2%}, QD={weights['QD']:.2%}")
+        logger.debug(f"动态权重计算完成: MT={weights['MT']:.2%}, BO={weights['BO']:.2%}, MR={weights['MR']:.2%}, QD={weights['QD']:.2%}, OLD={weights['OLD']:.2%}")
         return weights
 
     def _calculate_dimension_scores(self, norm_scores_df: pd.DataFrame) -> pd.DataFrame:
@@ -5015,9 +5030,11 @@ class SelectionService:
         scores = pd.DataFrame(index=norm_scores_df.index)
 
         scores['Score_MT'] = (
-            norm_scores_df['dynamic_MA20_SLOPE'] * p['dynamic_k_MT1'] +
-            norm_scores_df['dynamic_MA_SCORE'] * p['dynamic_k_MT2'] +
-            norm_scores_df['dynamic_ADX_CONFIRM'] * p['dynamic_k_MT3']
+            norm_scores_df['dynamic_ADX_CONFIRM'] * p['dynamic_k_MT_ADX_CONFIRM'] +
+            norm_scores_df['dynamic_v2_MA_SLOPE'] * p['dynamic_k_MT_MA_SLOPE'] +
+            norm_scores_df['dynamic_v2_MA_SCORE'] * p['dynamic_k_MT_MA_SCORE'] +
+            norm_scores_df['dynamic_v2_CPC_Factor'] * p['dynamic_k_MT_CPC_Factor'] +
+            norm_scores_df['dynamic_v2_VPCF'] * p['dynamic_k_MT_VPCF']#good
         )
         scores['Score_BO'] = (
             norm_scores_df['dynamic_BREAKOUT_PWR'] * p['dynamic_k_BO1'] +
@@ -5034,6 +5051,21 @@ class SelectionService:
             norm_scores_df['dynamic_MAX_DD'] * p['dynamic_k_QD2'] +
             norm_scores_df['dynamic_DOWNSIDE_RISK'] * p['dynamic_k_QD3']
         )
+        scores['Score_OLD'] = (
+            self.dynamic_params['w_trend']*(norm_scores_df['MA20_SLOPE'] * self.dynamic_params['k1'] +
+            norm_scores_df['MA_ALIGNMENT'] * self.dynamic_params['k2'] +
+            norm_scores_df['ADX_TREND'] * self.dynamic_params['k3'])+
+            self.dynamic_params['w_momentum']*(norm_scores_df['ROC10'] * self.dynamic_params['k4'] +
+            norm_scores_df['VOL_BREAKOUT'] * self.dynamic_params['k5'] +
+            norm_scores_df['NEW_HIGH_MOMENTUM'] * self.dynamic_params['k6'])+
+            self.dynamic_params['w_quality']*(norm_scores_df['VOLATILITY20'] * self.dynamic_params['k7'] +
+            norm_scores_df['LIQUIDITY20'] * self.dynamic_params['k8'])
+        )
+        # scores['Score_MT'] = norm_scores_df['dynamic_ADX_CONFIRM']
+        # scores['Score_BO'] = norm_scores_df['dynamic_v2_MA_SLOPE']
+        # scores['Score_MR'] = norm_scores_df['dynamic_v2_MA_SCORE']
+        # scores['Score_QD'] = norm_scores_df['dynamic_v2_CPC_Factor']
+        # scores['Score_OLD'] = norm_scores_df['dynamic_v2_VPCF']
         return scores
 
     def _calculate_final_dynamic_score(self, dimension_scores_df: pd.DataFrame, weights: dict) -> pd.Series:
@@ -5043,7 +5075,8 @@ class SelectionService:
             dimension_scores_df['Score_MT'] * weights['MT'] +
             dimension_scores_df['Score_BO'] * weights['BO'] +
             dimension_scores_df['Score_MR'] * weights['MR'] +
-            dimension_scores_df['Score_QD'] * weights['QD']
+            dimension_scores_df['Score_QD'] * weights['QD'] +
+            dimension_scores_df['Score_OLD'] * weights['OLD']
         )
         return final_score.sort_values(ascending=False)
 
@@ -5056,9 +5089,11 @@ class SelectionService:
         logger.debug("开始计算所有动态因子...")
         
         factor_calculators = {
-            'dynamic_MA20_SLOPE': self._calc_factor_ma20_slope,
-            'dynamic_MA_SCORE': self._calc_factor_ma_score,
             'dynamic_ADX_CONFIRM': self._calc_factor_adx_confirm,
+            'dynamic_v2_MA_SLOPE': self._calc_factor_v2_ma_slope,
+            'dynamic_v2_MA_SCORE': self._calc_factor_v2_ma_score,
+            'dynamic_v2_CPC_Factor': self._calc_factor_v2_cpc_factor,
+            'dynamic_v2_VPCF': self._calc_factor_v2_vpcf,
             'dynamic_BREAKOUT_PWR': self._calc_factor_breakout_pwr,
             'dynamic_VOLUME_SURGE': self._calc_factor_volume_surge,
             'dynamic_MOM_ACCEL': self._calc_factor_mom_accel,
@@ -5068,6 +5103,23 @@ class SelectionService:
             'dynamic_LOW_VOL': self._calc_factor_low_vol,
             'dynamic_MAX_DD': self._calc_factor_max_dd,
             'dynamic_DOWNSIDE_RISK': self._calc_factor_downside_risk,
+            #old
+            'MA20_SLOPE': self._calc_factor_x1_ma20_slope,
+            'MA_ALIGNMENT': self._calc_factor_x2_ma_alignment,
+            'ADX_TREND': self._calc_factor_x3_adx_trend,
+            'ROC10': self._calc_factor_x4_roc,
+            'VOL_BREAKOUT': self._calc_factor_x5_vol_breakout,
+            'NEW_HIGH_MOMENTUM': self._calc_factor_x6_new_high_momentum,
+            'VOLATILITY20': self._calc_factor_x7_volatility,
+            'LIQUIDITY20': self._calc_factor_x8_liquidity,
+            # 'MA20_SLOPE': self._calc_factor_volume_surge,
+            # 'MA_ALIGNMENT': self._calc_factor_volume_surge,
+            # 'ADX_TREND': self._calc_factor_volume_surge,
+            # 'ROC10': self._calc_factor_volume_surge,
+            # 'VOL_BREAKOUT': self._calc_factor_volume_surge,
+            # 'NEW_HIGH_MOMENTUM': self._calc_factor_volume_surge,
+            # 'VOLATILITY20': self._calc_factor_volume_surge,
+            # 'LIQUIDITY20': self._calc_factor_volume_surge,
         }
         
         all_factors = {}
@@ -5108,45 +5160,108 @@ class SelectionService:
         return raw_factors_df
 
     # --- MT 因子 ---
-    def _calc_factor_ma20_slope(self) -> pd.Series:
+    def _calc_factor_v2_ma_slope(self) -> pd.Series:
         """
-        计算20日均线的20日线性回归斜率。
-        使用numpy.linalg.lstsq进行向量化计算，避免了低效的rolling.apply()。
+        计算MA20在过去20个交易日中每一天的日度变化率的指数移动平均。
         """
-        ma20 = self.panel_hfq_close.rolling(20).mean()
-        
-        # 我们只需要最后20个MA20值来计算当前斜率
-        last_20_ma20 = ma20.tail(20)
-        
-        # 如果数据不足20天，则无法计算
-        if len(last_20_ma20) < 20:
-            # 返回一个全为NaN的Series，保持与原输出结构一致
+        epsilon = 1e-9
+        try:
+            # 1. 计算MA20
+            ma20 = self.panel_hfq_close.rolling(window=20, min_periods=20).mean()
+            
+            # 2. 计算MA20的日度变化率
+            daily_roc = ma20.pct_change(1, fill_method=None)
+            
+            # 3. 计算变化率的20日指数移动平均
+            # 使用 .ewm() 计算，alpha = 2 / (span + 1)
+            factor_panel = daily_roc.ewm(span=20, adjust=False, min_periods=20).mean()
+            
+            # 4. 返回最后一天的值
+            return factor_panel.iloc[-1]
+        except Exception as e:
+            logger.error(f"计算 dynamic_v2_MA_SLOPE 时出错: {e}")
             return pd.Series(np.nan, index=self.panel_hfq_close.columns)
-        # 准备最小二乘法求解
-        # x是时间自变量 [0, 1, 2, ..., 19]
-        x = np.arange(20)
-        # 我们需要一个常数项，所以构建一个 (20, 2) 的矩阵A
-        A = np.vstack([x, np.ones(20)]).T
-        
-        # y是因变量，即每个股票的最后20个MA20值
-        y = last_20_ma20.values
-        
-        # np.linalg.lstsq 会为y的每一列（每个股票）解出 Ax = y 中的 x
-        # 返回结果的第一个元素是解的矩阵，其中第一行是斜率(m)，第二行是截距(c)
-        slopes, _ = np.linalg.lstsq(A, y, rcond=None)[0]
-        
-        # 将结果转换回pandas Series
-        return pd.Series(slopes, index=last_20_ma20.columns)
-
-    def _calc_factor_ma_score(self) -> pd.Series:
-        close, ma5, ma10, ma20 = (
-            self.panel_hfq_close.iloc[-1],
-            self.panel_hfq_close.rolling(5).mean().iloc[-1],
-            self.panel_hfq_close.rolling(10).mean().iloc[-1],
-            self.panel_hfq_close.rolling(20).mean().iloc[-1]
-        )
-        return (close > ma5).astype(int) + (ma5 > ma10).astype(int) + (ma10 > ma20).astype(int)
-
+    def _calc_factor_v2_ma_score(self) -> pd.Series:
+        """
+        计算三个归一化的均线离差的加权和。
+        """
+        epsilon = 1e-9
+        try:
+            close = self.panel_hfq_close
+            ma5 = close.rolling(window=5, min_periods=5).mean()
+            ma10 = close.rolling(window=10, min_periods=10).mean()
+            ma20 = close.rolling(window=20, min_periods=20).mean()
+            
+            # 1. 计算三个归一化的均线离差
+            spread1 = (close - ma5) / (ma5 + epsilon)
+            spread2 = (ma5 - ma10) / (ma10 + epsilon)
+            spread3 = (ma10 - ma20) / (ma20 + epsilon)
+            
+            # 2. 等权重加权求和
+            # 权重可以参数化，但根据文档，这里使用等权重
+            factor_panel = 0.333 * spread1 + 0.333 * spread2 + 0.333 * spread3
+            
+            # 3. 返回最后一天的值
+            return factor_panel.iloc[-1]
+        except Exception as e:
+            logger.error(f"计算 dynamic_v2_MA_SCORE 时出错: {e}")
+            return pd.Series(np.nan, index=self.panel_hfq_close.columns)
+    def _calc_factor_v2_cpc_factor(self) -> pd.Series:
+        """
+        计算K线路径一致性 (CPC_Factor)。
+        """
+        epsilon = 1e-9
+        try:
+            # 1. 统一价格到后复权空间
+            adjustment_factor = self.panel_hfq_close / (self.panel_close + epsilon)
+            hfq_high = self.panel_high * adjustment_factor
+            hfq_low = self.panel_low * adjustment_factor
+            hfq_close = self.panel_hfq_close
+            # 2. 计算每日收盘强度 (DCP_t)
+            price_range = hfq_high - hfq_low
+            # 使用 where 避免除以零
+            dcp_panel = np.where(
+                price_range > epsilon,
+                (2 * hfq_close - hfq_high - hfq_low) / (price_range + epsilon),
+                0.0
+            )
+            # 将numpy数组转回DataFrame以使用ewm
+            dcp_panel_df = pd.DataFrame(dcp_panel, index=hfq_close.index, columns=hfq_close.columns)
+            # 3. 计算最终因子 (EWMA)
+            n_period = int(self.dynamic_params.get('dynamic_v2_cpc_n', 10))
+            factor_panel = dcp_panel_df.ewm(span=n_period, adjust=False, min_periods=n_period).mean()
+            
+            return factor_panel.iloc[-1]
+        except Exception as e:
+            logger.error(f"计算 dynamic_v2_CPC_Factor 时出错: {e}")
+            return pd.Series(np.nan, index=self.panel_hfq_close.columns)
+    
+    def _calc_factor_v2_vpcf(self) -> pd.Series:
+        """
+        计算量价协同因子 (VPCF)。
+        """
+        epsilon = 1e-9
+        try:
+            # 1. 获取参数
+            s = int(self.dynamic_params.get('dynamic_v2_vpcf_s', 10))
+            l = int(self.dynamic_params.get('dynamic_v2_vpcf_l', 30))
+            n_smooth = int(self.dynamic_params.get('dynamic_v2_vpcf_n_smooth', 10))
+            # 2. 计算平滑日度价格动量
+            ma_close_s = self.panel_hfq_close.rolling(window=s, min_periods=s).mean()
+            price_momentum = ma_close_s.pct_change(1, fill_method=None) # (MA_t / MA_{t-1}) - 1
+            # 3. 计算相对成交量水平
+            ma_vol_s = self.panel_volume.rolling(window=s, min_periods=s).mean()
+            ma_vol_l = self.panel_volume.rolling(window=l, min_periods=l).mean()
+            volume_level = (ma_vol_s / (ma_vol_l + epsilon)) - 1
+            # 4. 计算日度协同分
+            daily_score = price_momentum * volume_level
+            # 5. 计算最终因子 (EWMA)
+            factor_panel = daily_score.ewm(span=n_smooth, adjust=False, min_periods=n_smooth).mean()
+            
+            return factor_panel.iloc[-1]
+        except Exception as e:
+            logger.error(f"计算 dynamic_v2_VPCF 时出错: {e}")
+            return pd.Series(np.nan, index=self.panel_hfq_close.columns)
     # def _calc_factor_adx_confirm(self) -> pd.Series:
     #     adx_df = self.panel_hfq_close.apply(lambda s: ta.adx(self.panel_high[s.name], self.panel_low[s.name], s, length=14).iloc[-1])
     #     adx_df = adx_df.T
@@ -5367,6 +5482,130 @@ class SelectionService:
         downside_risk = downside_returns.rolling(60, min_periods=2).std() 
         return downside_risk.iloc[-1]
 
+    # --- OLD 因子 ---
+    def _calc_factor_x1_ma20_slope(self) -> pd.Series:
+        ma_period = self.dynamic_params['lookback_ma20']
+        panel_close_float = self.panel_hfq_close.astype(float)
+        ma20 = panel_close_float.apply(
+            lambda col: ta.sma(close=col, length=ma_period)
+        )
+        
+        # 对每只股票，取最后ma_period个MA值进行线性回归
+        def get_slope(series):
+            y = series.dropna()
+            if len(y) < 2:
+                return np.nan
+            y_values = y.values
+            x_values = np.arange(len(y_values))
+            # 增加一个额外的健壮性检查，防止y_values中所有值都相同导致回归失败
+            if np.all(y_values == y_values[0]):
+                return 0.0 # 如果所有值都一样，斜率为0
+            slope, _, _, _, _ = linregress(x_values, y_values)
+            return slope
+
+        # 只取最后ma_period行数据进行计算以提高效率
+        slopes = ma20.iloc[-ma_period:].apply(get_slope, axis=0)
+        return slopes
+
+    def _calc_factor_x2_ma_alignment(self) -> pd.Series:
+        ma5 = self.panel_hfq_close.apply(
+            lambda col: ta.sma(close=col, length=self.dynamic_params['lookback_ma5'])
+        )
+        ma10 = self.panel_hfq_close.apply(
+            lambda col: ta.sma(close=col, length=self.dynamic_params['lookback_ma10'])
+        )
+        ma20 = self.panel_hfq_close.apply(
+            lambda col: ta.sma(close=col, length=self.dynamic_params['lookback_ma20'])
+        )
+        
+        last_close = self.panel_hfq_close.iloc[-1]
+        last_ma5 = ma5.iloc[-1]
+        last_ma10 = ma10.iloc[-1]
+        last_ma20 = ma20.iloc[-1]
+        
+        score = (
+            (last_close > last_ma5).astype(int) +
+            (last_ma5 > last_ma10).astype(int) +
+            (last_ma10 > last_ma20).astype(int)
+        )
+        return score
+
+    def _calc_factor_x3_adx_trend(self) -> pd.Series:
+        # 强制转换数据类型为 float
+        high = self.panel_high.astype(float)
+        low = self.panel_low.astype(float)
+        close = self.panel_close.astype(float)
+        
+        adx_period = self.dynamic_params['lookback_adx']
+        threshold = self.dynamic_params['param_adx_threshold']
+ 
+        # 定义一个函数，用于对单只股票（一个Series）计算ADX
+        def get_adx_trend(stock_code):
+            # 从面板中提取单只股票的数据
+            stock_high = high[stock_code].dropna()
+            stock_low = low[stock_code].dropna()
+            stock_close = close[stock_code].dropna()
+ 
+            # 确保数据对齐
+            common_index = stock_high.index.intersection(stock_low.index).intersection(stock_close.index)
+            if len(common_index) < adx_period * 2: # ADX需要更长的数据来初始化
+                return np.nan
+ 
+            stock_high = stock_high.loc[common_index]
+            stock_low = stock_low.loc[common_index]
+            stock_close = stock_close.loc[common_index]
+ 
+            # 使用 pandas_ta 计算单只股票的ADX
+            adx_result = ta.adx(high=stock_high, low=stock_low, close=stock_close, length=adx_period)
+ 
+            # 检查结果是否有效
+            if adx_result is None or adx_result.empty:
+                return np.nan
+ 
+            last_row = adx_result.iloc[-1]
+            last_adx = last_row.get(f'ADX_{adx_period}')
+            last_dmp = last_row.get(f'DMP_{adx_period}')
+            last_dmn = last_row.get(f'DMN_{adx_period}')
+ 
+            if pd.isna(last_adx) or pd.isna(last_dmp) or pd.isna(last_dmn):
+                return np.nan
+ 
+            if last_adx > threshold and last_dmp > last_dmn:
+                return last_adx
+            else:
+                return 0.0
+ 
+        # 对面板中的每一只股票应用该函数
+        results = {stock_code: get_adx_trend(stock_code) for stock_code in self.panel_close.columns}
+        
+        return pd.Series(results)
+
+    def _calc_factor_x4_roc(self) -> pd.Series:
+        roc_panel = self.panel_hfq_close.apply(
+        lambda col: ta.roc(close=col, length=self.dynamic_params['lookback_roc'])
+        )
+        return roc_panel.iloc[-1]
+
+    def _calc_factor_x5_vol_breakout(self) -> pd.Series:
+        vol5 = self.panel_volume.rolling(window=self.dynamic_params['lookback_ma_fast']).mean()
+        vol60 = self.panel_volume.rolling(window=self.dynamic_params['lookback_ma_slow']).mean()
+        ratio = vol5.iloc[-1] / vol60.iloc[-1]
+        return ratio.replace([np.inf, -np.inf], np.nan) # 处理分母为0的情况
+
+    def _calc_factor_x6_new_high_momentum(self) -> pd.Series:
+        high60 = self.panel_hfq_close.rolling(window=self.dynamic_params['lookback_new_high']).max()
+        ratio = self.panel_hfq_close.iloc[-1] / high60.iloc[-1]
+        return ratio
+
+    def _calc_factor_x7_volatility(self) -> pd.Series:
+        returns = self.panel_hfq_close.pct_change(fill_method=None)
+        volatility = returns.rolling(window=self.dynamic_params['lookback_volatility']).std()
+        return volatility.iloc[-1]
+
+    def _calc_factor_x8_liquidity(self) -> pd.Series:
+        liquidity = self.panel_turnover.rolling(window=self.dynamic_params['lookback_liquidity']).mean()
+        return liquidity.iloc[-1]
+
     # endregion
     
     # region: --- 4. 辅助方法 (基本与旧版兼容) ---
@@ -5377,10 +5616,16 @@ class SelectionService:
 
     def _load_dynamic_parameters_and_defs(self):
         logger.debug("加载动态策略参数和因子定义...")
-        params_qs = StrategyParameters.objects.filter(param_name__startswith='dynamic_')
+        #params_qs = StrategyParameters.objects.filter(param_name__startswith='dynamic_')
+        params_qs = StrategyParameters.objects.all()
         self.dynamic_params = {p.param_name: float(p.param_value) for p in params_qs}
-        
-        defs_qs = FactorDefinitions.objects.filter(is_active=True, factor_code__startswith='dynamic_')
+        for p in params_qs:
+            if p.param_name.startswith('lookback_') or p.param_name in ['param_top_n', 'param_adx_threshold']:
+                self.dynamic_params[p.param_name] = int(p.param_value)
+            else:
+                self.dynamic_params[p.param_name] = float(p.param_value)
+        #defs_qs = FactorDefinitions.objects.filter(is_active=True, factor_code__startswith='dynamic_')
+        defs_qs = FactorDefinitions.objects.all()
         self.dynamic_factor_defs = {f.factor_code: {'direction': f.direction} for f in defs_qs}
         logger.debug(f"加载了 {len(self.dynamic_params)} 个动态参数和 {len(self.dynamic_factor_defs)} 个启用的动态因子定义。")
 
@@ -5565,6 +5810,7 @@ class SelectionService:
                 'BO': self.dynamic_weights['BO'] * top_dimension_scores.loc[stock_code, 'Score_BO'],
                 'MR': self.dynamic_weights['MR'] * top_dimension_scores.loc[stock_code, 'Score_MR'],
                 'QD': self.dynamic_weights['QD'] * top_dimension_scores.loc[stock_code, 'Score_QD'],
+                'OLD': self.dynamic_weights['OLD'] * top_dimension_scores.loc[stock_code, 'Score_OLD'],
             }
             
             # 步骤2: 提取正向贡献值 (PDCV) 并计算策略DNA权重 (SSW)
@@ -5574,7 +5820,7 @@ class SelectionService:
             
             if total_pdcv <= 1e-9:
                 logger.warning(f"股票 {stock_code} 信号混乱 (Total_PDCV <= 0)，采用保守的QD策略作为其开盘区间。")
-                ssw = {'MT': 0, 'BO': 0, 'MR': 0, 'QD': 1.0}
+                ssw = {'MT': 0, 'BO': 0, 'MR': 0, 'QD': 1.0, 'OLD': 0}
             else:
                 ssw = {k: v / total_pdcv for k, v in pdcv.items()}
             strategy_dna_str = "|".join([f"{k}:{v:.2f}" for k, v in ssw.items()])
@@ -5584,14 +5830,18 @@ class SelectionService:
                 ssw['MT'] * p['dynamic_miopmaop_k_gap_base_mt'] +
                 ssw['BO'] * p['dynamic_miopmaop_k_gap_base_bo'] +
                 ssw['MR'] * p['dynamic_miopmaop_k_gap_base_mr'] +
-                ssw['QD'] * p['dynamic_miopmaop_k_gap_base_qd']
+                ssw['QD'] * p['dynamic_miopmaop_k_gap_base_qd'] +
+                ssw['OLD'] * p['k_gap']
             )
             k_drop_dynamic = (
                 ssw['MT'] * p['dynamic_miopmaop_k_drop_base_mt'] +
                 ssw['BO'] * p['dynamic_miopmaop_k_drop_base_bo'] +
                 ssw['MR'] * p['dynamic_miopmaop_k_drop_base_mr'] +
-                ssw['QD'] * p['dynamic_miopmaop_k_drop_base_qd']
+                ssw['QD'] * p['dynamic_miopmaop_k_drop_base_qd'] +
+                ssw['OLD'] * p['k_drop']
             )
+            k_gap_dynamic=p['k_gap']
+            k_drop_dynamic=p['k_drop']
             # --- 核心动态逻辑结束 ---
  
             # 获取该股票的不复权收盘价和正确的ATR值
@@ -5617,7 +5867,7 @@ class SelectionService:
             
             # 更新日志，现在ATR值会是正常的
             logger.debug(f"预案: {stock_code}, Rank: {len(plans)}, ATR:{atr:.2f}, "
-                        f"SSW(MT/BO/MR/QD):({ssw['MT']:.2f}/{ssw['BO']:.2f}/{ssw['MR']:.2f}/{ssw['QD']:.2f}), "
+                        f"SSW(MT/BO/MR/QD/OLD):({ssw['MT']:.2f}/{ssw['BO']:.2f}/{ssw['MR']:.2f}/{ssw['QD']:.2f}/{ssw['OLD']:.2f}), "
                         f"k_gap_dyn:{k_gap_dynamic:.2f}, k_drop_dyn:{k_drop_dynamic:.2f}, MIOP:{miop:.2f}, MAOP:{maop:.2f}")
  
         if not plans:
@@ -5643,7 +5893,11 @@ class SelectionService:
                 cursor.execute(f'ALTER TABLE "{plan_table}" DISABLE TRIGGER ALL;')
                 # 2. 准备并写入每日因子值
                 # 优化：先删除当日旧数据，再用纯粹的 bulk_create，比 ignore_conflicts 更快
-                DailyFactorValues.objects.filter(trade_date=self.trade_date).delete()
+                DailyFactorValues.objects.filter(
+                    trade_date=self.trade_date
+                ).exclude(
+                    stock_code_id=MARKET_INDICATOR_CODE
+                ).delete()
                 
                 factor_values_to_create = []
                 for stock_code, row in raw_factors_df.iterrows():
@@ -5652,7 +5906,7 @@ class SelectionService:
                         factor_values_to_create.append(
                             DailyFactorValues(
                                 stock_code_id=stock_code, trade_date=self.trade_date,
-                                factor_code_id=factor_code, raw_value=Decimal(str(raw_value)),
+                                factor_code_id=factor_code, raw_value=min(Decimal(str(raw_value)),Decimal(999999)),
                                 norm_score=Decimal(str(norm_score))
                             )
                         )
@@ -5677,6 +5931,8 @@ class SelectionService:
                     )
                 DailyTradingPlan.objects.bulk_create(plans_to_create, batch_size=1000)
                 logger.debug(f"已高速写入 {len(plans_to_create)} 条交易预案。")
+            except Exception as e:
+                logger.critical(f"数据库写入事务发生根本性错误，即将回滚。根本原因: {e}", exc_info=True)
             finally:
                 # 4. 无论成功与否，都必须重新启用触发器！
                 logger.debug(f"重新启用表 {factor_table} 和 {plan_table} 的触发器...")
@@ -6026,7 +6282,7 @@ class BacktestReporter:
         self.current_date = current_date
         self.initial_capital = initial_capital
         self.email_handler = EmailHandler()
-        self.recipients = ['876858298@qq.com','850696281@qq.com']#,'285173686@qq.com','850696281@qq.com'
+        self.recipients = ['876858298@qq.com']#,'285173686@qq.com','850696281@qq.com'
     def _execute_query(self, query: str, params: list = None) -> list[dict]:
         """在指定 schema 中执行原生 SQL 查询并返回结果"""
         with connections['default'].cursor() as cursor:
@@ -6919,8 +7175,9 @@ class DecisionOrderService:
             S_cap=Decimal('0.0')
         else:
             S_cap=M_t
+            #Decimal('1.0')
         
-        #S_cap=Decimal('1.0')
+        S_cap=Decimal('1.0')
         # iv. 计算动态调整后的名义本金
         adjusted_unit_principal = baseline_unit_principal * S_cap
         
@@ -6975,8 +7232,8 @@ class DecisionOrderService:
             # 新版动态风险参数
             'risk_adj_tp_pct_min': '0.15',
             'risk_adj_tp_pct_max': '0.15',
-            'risk_adj_sl_atr_min': '1',
-            'risk_adj_sl_atr_max': '1',
+            'risk_adj_sl_atr_min': '2',
+            'risk_adj_sl_atr_max': '2',
             'risk_adj_max_loss_pct': '0.1',
             # 全新动态仓位参数
             'ORIGINAL_MAX_POSITIONS': '5',
@@ -7272,8 +7529,8 @@ class DecisionOrderService:
             # 新版 M(t) 驱动的动态风险参数
             'risk_adj_tp_pct_min': {'value': '0.15', 'group': 'RISK_ADJUSTED', 'desc': 'M(t)驱动-最小止盈目标百分比 (熊市)'},
             'risk_adj_tp_pct_max': {'value': '0.15', 'group': 'RISK_ADJUSTED', 'desc': 'M(t)驱动-最大止盈目标百分比 (牛市)'},
-            'risk_adj_sl_atr_min': {'value': '1', 'group': 'RISK_ADJUSTED', 'desc': 'M(t)驱动-最小ATR止损乘数 (熊市)'},
-            'risk_adj_sl_atr_max': {'value': '1', 'group': 'RISK_ADJUSTED', 'desc': 'M(t)驱动-最大ATR止损乘数 (牛市)'},
+            'risk_adj_sl_atr_min': {'value': '2', 'group': 'RISK_ADJUSTED', 'desc': 'M(t)驱动-最小ATR止损乘数 (熊市)'},
+            'risk_adj_sl_atr_max': {'value': '2', 'group': 'RISK_ADJUSTED', 'desc': 'M(t)驱动-最大ATR止损乘数 (牛市)'},
             'risk_adj_max_loss_pct': {'value': '0.1', 'group': 'RISK_ADJUSTED', 'desc': 'M(t)驱动-绝对最大亏损百分比'},
             # --- 全新动态仓位管理参数 ---
             'ORIGINAL_MAX_POSITIONS': {'value': '5', 'group': 'DYNAMIC_POS_MGMT', 'desc': '【动态仓位】策略基准最大持仓数'},
@@ -7695,8 +7952,9 @@ from .m_distribution_reporter import MDistributionReporter
 from trade_manager.service.simulate_trade import SimulateTradeService
 from trade_manager.service.simulate_trade_handler import SimulateTradeHandler
 from .position_monitor_logic import PositionMonitorLogic
+from common.models import Position
 logger = logging.getLogger(__name__)
-STRATEGIES = ['MT', 'BO', 'QD', 'MR']
+STRATEGIES = ['MT', 'BO', 'QD', 'MR','OLD']
 class MDistributionBacktestService:
     """
     M值胜率分布回测服务 (V2 - 修正版)。
@@ -7715,76 +7973,69 @@ class MDistributionBacktestService:
         self.backtest_run_id = f"m_dist_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
         self.max_holding_days = 90
         self.single_strategy_mode = single_strategy_mode
-    def _preload_data_for_backtest(self, trading_days: list[date]) -> dict:
-        """
-        [新增] 为整个回测期间预加载所有需要的行情数据并构建主面板。
-        """
-        if not trading_days:
-            return {}
-        lookback_period = 250
-        first_day = trading_days[0]
-        last_day = trading_days[-1]
-        preload_start_date = first_day - timedelta(days=lookback_period + 100)
-        logger.info(f"开始预加载数据，时间窗口: {preload_start_date} to {last_day}")
-        quotes_qs = DailyQuotes.objects.filter(
-            trade_date__gte=preload_start_date,
-            trade_date__lte=last_day
-        ).values('trade_date', 'stock_code_id', 'open', 'high', 'low', 'close', 'volume', 'turnover', 'hfq_close')
-        if not quotes_qs:
-            raise ValueError("在预加载时间窗口内未找到任何行情数据。")
-        df = pd.DataFrame.from_records(quotes_qs)
-        df['trade_date'] = pd.to_datetime(df['trade_date'])
-        
-        logger.info("正在构建主数据面板(Master Panels)...")
-        master_panels = {}
-        for col in ['open', 'high', 'low', 'close', 'volume', 'turnover', 'hfq_close']:
-            panel = df.pivot(index='trade_date', columns='stock_code_id', values=col).astype(float)
-            master_panels[col] = panel
-        
-        logger.info("数据预加载和主面板构建完成。")
-        return master_panels
+        self.params = {}
     def _get_next_trading_day(self, from_date: date) -> date | None: return (DailyQuotes.objects .filter(trade_date__gte=from_date) .order_by('trade_date') .values_list('trade_date', flat=True) .first())
-    
+
     def _simulate_intraday_monitoring(self, position_dict: dict, daily_quote: dict) -> tuple[str, Decimal, Decimal, Decimal]:
         """
-        对单个持仓在一天内进行高保真监控模拟。
-        这是一个纯逻辑函数，不直接操作数据库。
-        返回: (状态, 退出价格, 新止损, 新止盈)
+        [重写] 对单个持仓在一天内进行高保真监控模拟。
+        此函数现在完全复用 PositionMonitorLogic 的逻辑。
         """
         open_p, high_p, low_p = daily_quote['open'], daily_quote['high'], daily_quote['low']
         
+        # 初始化临时的、内存中的持仓状态
         temp_sl = position_dict['current_stop_loss']
         temp_tp = position_dict['current_take_profit']
-        entry_price = position_dict['entry_price']
-        # 1. 开盘价检查
-        if open_p <= temp_sl:
-            return 'SOLD', open_p, temp_sl, temp_tp
-        # 加载参数 (这里简化处理，实际可从 DecisionOrderService 加载)
-        trailing_tp_increment_pct = Decimal('0.02')
-        trailing_sl_buffer_pct = Decimal('0.015')
-        # 2. 日内循环监控
+        
+        # 1. 开盘价检查 (黑天鹅事件)
+        # 创建一个临时的、不落表的Position对象以适配接口
+        temp_position_obj = Position(
+            entry_price=position_dict['entry_price'],
+            current_stop_loss=temp_sl,
+            current_take_profit=temp_tp
+        )
+        decision_open = PositionMonitorLogic.check_and_decide(temp_position_obj, open_p, self.params)
+        
+        if decision_open['action'] == 'SELL':
+            # 开盘价直接触发卖出，以开盘价成交
+            exit_price = min(open_p, decision_open['exit_price']) # 取更不利的价格
+            logger.debug(f"    -> 监控: 开盘价 {open_p:.2f} 触发卖出，成交价 {exit_price:.2f}")
+            return 'SOLD', exit_price, temp_sl, temp_tp
+        elif decision_open['action'] == 'UPDATE':
+            # 开盘价触发了风控线更新
+            temp_sl = decision_open['updates'].get('current_stop_loss', temp_sl)
+            temp_tp = decision_open['updates'].get('current_take_profit', temp_tp)
+            logger.debug(f"    -> 监控: 开盘价更新风控线. SL: {temp_sl:.2f}, TP: {temp_tp:.2f}")
+        # 2. 日内循环试探 (最低价 -> 最高价)
         while True:
             action_taken_in_loop = False
             
-            if low_p <= temp_sl:
-                return 'SOLD', temp_sl, temp_sl, temp_tp
-            if high_p >= temp_tp:
-                new_tp = temp_tp * (1 + trailing_tp_increment_pct)
-                new_sl = temp_tp * (1 - trailing_sl_buffer_pct)
-                if new_sl > temp_sl:
+            # 2.1 试探最低价是否触发卖出
+            temp_position_obj.current_stop_loss = temp_sl
+            temp_position_obj.current_take_profit = temp_tp
+            decision_low = PositionMonitorLogic.check_and_decide(temp_position_obj, low_p, self.params)
+            
+            if decision_low['action'] == 'SELL':
+                # 最低价触发卖出，以止损价成交
+                logger.debug(f"    -> 监控: 最低价 {low_p:.2f} 触发卖出，成交价 {decision_low['exit_price']:.2f}")
+                return 'SOLD', decision_low['exit_price'], temp_sl, temp_tp
+            # 2.2 试探最高价是否触发更新
+            decision_high = PositionMonitorLogic.check_and_decide(temp_position_obj, high_p, self.params)
+            
+            if decision_high['action'] == 'UPDATE':
+                new_sl = decision_high['updates'].get('current_stop_loss', temp_sl)
+                new_tp = decision_high['updates'].get('current_take_profit', temp_tp)
+                
+                # 只有当风控线实际发生变化时，才认为有动作发生
+                if new_sl != temp_sl or new_tp != temp_tp:
+                    logger.debug(f"    -> 监控: 最高价 {high_p:.2f} 触发风控线更新. SL: {new_sl:.2f}, TP: {new_tp:.2f}")
                     temp_sl, temp_tp = new_sl, new_tp
                     action_taken_in_loop = True
-            if not action_taken_in_loop and temp_sl < entry_price:
-                base_price = max(entry_price, temp_sl)
-                cost_lock_price = min((base_price + temp_tp) / 2, base_price * Decimal('1.012'))
-                if high_p > cost_lock_price:
-                    new_sl = (base_price + cost_lock_price) / 2
-                    if new_sl > temp_sl:
-                        temp_sl = new_sl
-                        action_taken_in_loop = True
+            # 如果本轮循环没有更新任何风控线，则说明价格波动已稳定在当前风控区间内，可以跳出循环
             if not action_taken_in_loop:
                 break
         
+        # 3. 如果未触发卖出，则返回持有状态和最终更新的风控线
         return 'HOLD', Decimal('0.0'), temp_sl, temp_tp
     
     def _setup_backtest_schema(self):
@@ -7891,28 +8142,95 @@ class MDistributionBacktestService:
                         cursor.execute(update_sequence_sql)
         
         logger.info("基础数据复制完成，并已完成索引优化。")
-
+    def _load_parameters(self):
+        """
+        [新增] 在回测开始前加载所有需要的策略参数。
+        参考 simulate_trade.py 的实现。
+        """
+        logger.info("加载回测所需策略参数...")
+        # 从 StrategyParameters 表中一次性加载所有参数
+        all_params = {p.param_name: p.param_value for p in StrategyParameters.objects.all()}
+        
+        # 定义 PositionMonitorLogic 中可能用到的参数及其默认值
+        required_params = {
+            'trailing_tp_increment_pct': '0.02',
+            'trailing_sl_buffer_pct': '0.015',
+            # 这里可以添加其他未来可能用到的参数
+        }
+        for key, default_value in required_params.items():
+            # 优先使用数据库的值，否则使用默认值
+            self.params[key] = all_params.get(key, Decimal(default_value))
+        
+        logger.info(f"策略参数加载完成: {self.params}")
     def run(self):
         try:
             with use_backtest_schema(self.backtest_run_id):
                 self._setup_backtest_schema()
-                
+                self._load_parameters()
                 trading_days = list(DailyQuotes.objects.filter(
                     trade_date__gte=self.start_date,
                     trade_date__lte=self.end_date
                 ).values_list('trade_date', flat=True).distinct().order_by('trade_date'))
-                master_panels = self._preload_data_for_backtest(trading_days)
+                # --- [修正版] 低内存滚动窗口数据加载逻辑 ---
+                logger.info("--- [滚动窗口] 开始准备数据 ---")
+                lookback_window_size = 250
+                extra_buffer_days = 20
+                
+                preload_start_date = trading_days[0] - timedelta(days=lookback_window_size + extra_buffer_days)
+                
+                logger.info(f"一次性查询数据库，时间窗口: {preload_start_date} to {self.end_date}")
+                
+                quotes_iterator = DailyQuotes.objects.filter(
+                    trade_date__gte=preload_start_date,
+                    trade_date__lte=self.end_date
+                ).order_by('trade_date', 'stock_code_id').values(
+                    'trade_date', 'stock_code_id', 'open', 'high', 'low', 'close', 'volume', 'turnover', 'hfq_close'
+                ).iterator(chunk_size=20000)
+                quotes_by_date = {}
+                for row in quotes_iterator:
+                    trade_date = row['trade_date']
+                    if trade_date not in quotes_by_date:
+                        quotes_by_date[trade_date] = []
+                    quotes_by_date[trade_date].append(row)
+                
+                logger.info("初始化第一个滚动窗口面板...")
+                all_loaded_dates = sorted(quotes_by_date.keys())
+                first_backtest_day = trading_days[0]
+                initial_window_dates = [d for d in all_loaded_dates if d <= first_backtest_day]
+                initial_rows = [row for d in initial_window_dates for row in quotes_by_date.get(d, [])]
+                
+                if not initial_rows:
+                    raise ValueError("初始化滚动窗口失败，没有获取到任何数据。")
+                df_window = pd.DataFrame(initial_rows)
+                df_window['trade_date'] = pd.to_datetime(df_window['trade_date'])
+                
+                rolling_panels = {}
+                for col in ['open', 'high', 'low', 'close', 'volume', 'turnover', 'hfq_close']:
+                    panel = df_window.pivot(index='trade_date', columns='stock_code_id', values=col).astype(float)
+                    rolling_panels[col] = panel
+                
+                logger.info(f"滚动窗口初始化完成。")
                 logger.info(f"--- 2. 开始日度回测循环 ({len(trading_days)}天) ---")
                 last_sent_month = None
                 for i, t_minus_1 in enumerate(trading_days):
                     logger.info(f"\n{'='*20} 模拟预案日: {t_minus_1} ({i+1}/{len(trading_days)}) {'='*20}")
-                    current_day_dt = pd.to_datetime(t_minus_1)
-                    daily_panels = {
-                        key: panel.loc[:current_day_dt] for key, panel in master_panels.items()
-                    }
+                    if i > 0:
+                        new_day_data = quotes_by_date.get(t_minus_1)
+                        if new_day_data:
+                            logger.debug(f"滚动窗口: 移除 {rolling_panels['close'].index[0].date()}, 添加 {t_minus_1}")
+                            for key in rolling_panels:
+                                rolling_panels[key] = rolling_panels[key].iloc[1:]
+                            
+                            df_new_day = pd.DataFrame(new_day_data)
+                            df_new_day['trade_date'] = pd.to_datetime(df_new_day['trade_date'])
+                            for col in ['open', 'high', 'low', 'close', 'volume', 'turnover', 'hfq_close']:
+                                new_row = df_new_day.pivot(index='trade_date', columns='stock_code_id', values=col).astype(float)
+                                rolling_panels[col] = pd.concat([rolling_panels[col], new_row])
+                        else:
+                            logger.warning(f"日期 {t_minus_1} 在预加载数据中不存在，窗口未滚动。")
                     # 1. 运行标准的M动态策略
                     logger.info(f"  Running M-Dynamic Strategy for {t_minus_1}...")
-                    selection_service_dynamic = SelectionService(trade_date=t_minus_1, mode='backtest', one_strategy=None,preloaded_panels=daily_panels)
+                    selection_service_dynamic = SelectionService(trade_date=t_minus_1, mode='backtest', one_strategy=None,preloaded_panels=rolling_panels)
                     selection_service_dynamic.run_selection()
                     plan_date_for_t = t_minus_1 + timedelta(days=1)
                     plans_dynamic = DailyTradingPlan.objects.filter(plan_date=plan_date_for_t)
@@ -7925,7 +8243,7 @@ class MDistributionBacktestService:
                     if self.single_strategy_mode:
                         for strategy_name in STRATEGIES:
                             logger.info(f"  Running Single Strategy '{strategy_name}' for {t_minus_1}...")
-                            selection_service_single = SelectionService(trade_date=t_minus_1, mode='backtest', one_strategy=strategy_name,preloaded_panels=daily_panels)
+                            selection_service_single = SelectionService(trade_date=t_minus_1, mode='backtest', one_strategy=strategy_name,preloaded_panels=rolling_panels)
                             selection_service_single.run_selection()
                             
                             # 注意：run_selection会覆盖旧预案，所以需要重新查询
@@ -8461,7 +8779,12 @@ class PositionMonitorLogic:
 
         # 阶段二：追踪止盈
         if current_price >= position.current_take_profit:
-            
+            if 1+1>0:
+                return {
+                    'action': 'SELL',
+                    'reason': TradeLog.ReasonChoices.TAKE_PROFIT,
+                    'exit_price': position.current_take_profit
+                }
                 
             change=(position.current_take_profit-max(position.current_stop_loss,position.entry_price))/Decimal(2)
             if position.current_stop_loss>position.entry_price*Decimal(1.3):
@@ -8489,7 +8812,7 @@ class PositionMonitorLogic:
 
         # 阶段三：成本锁定
         middle=(position.current_take_profit+position.entry_price)/Decimal(2)
-        if current_price>middle and position.current_stop_loss<position.entry_price:
+        if current_price>middle and position.current_stop_loss<position.entry_price and False:
             new_sl=position.entry_price*Decimal(1.01)
             return {
                         'action': 'UPDATE',
@@ -9109,39 +9432,6 @@ class SimulateTradeService:
         self.last_buy_trade_id = None
         self.backtest_run_id: str = None # 新增：回测唯一ID
         self.params: dict = {}
-    def _preload_data_for_backtest(self, trading_days: list[date]) -> dict:
-        """
-        [新增] 为整个回测期间预加载所有需要的行情数据并构建主面板。
-        """
-        if not trading_days:
-            return {}
-        lookback_period = 250  # 因子计算所需的最大回溯期
-        
-        # 确定数据查询的完整时间窗口
-        # 需要从第一个交易日再往前推250个工作日
-        # 为了简化，我们直接往前推更多自然日来保证覆盖
-        first_day = trading_days[0]
-        last_day = trading_days[-1]
-        preload_start_date = first_day - timedelta(days=lookback_period + 20)
-        logger.info(f"开始预加载数据，时间窗口: {preload_start_date} to {last_day}")
-        # 一次性查询所有数据
-        quotes_qs = DailyQuotes.objects.filter(
-            trade_date__gte=preload_start_date,
-            trade_date__lte=last_day
-        ).values('trade_date', 'stock_code_id', 'open', 'high', 'low', 'close', 'volume', 'turnover', 'hfq_close')
-        if not quotes_qs:
-            raise ValueError("在预加载时间窗口内未找到任何行情数据。")
-        df = pd.DataFrame.from_records(quotes_qs)
-        df['trade_date'] = pd.to_datetime(df['trade_date'])
-        
-        logger.info("正在构建主数据面板(Master Panels)...")
-        master_panels = {}
-        for col in ['open', 'high', 'low', 'close', 'volume', 'turnover', 'hfq_close']:
-            panel = df.pivot(index='trade_date', columns='stock_code_id', values=col).astype(float)
-            master_panels[col] = panel
-        
-        logger.info("数据预加载和主面板构建完成。")
-        return master_panels
     def _persist_risk_prices_if_changed(self, position, new_sl, new_tp, label='盘中'):
         if new_sl != position.current_stop_loss or new_tp != position.current_take_profit:
             position.current_stop_loss = new_sl
@@ -9395,7 +9685,56 @@ class SimulateTradeService:
                 if not trading_days:
                     logger.error("在指定日期范围内未找到任何交易日，回测终止。")
                     return {}
-                master_panels = self._preload_data_for_backtest(trading_days)
+                #master_panels = self._preload_data_for_backtest(trading_days)
+                logger.info("--- [滚动窗口] 开始准备数据 ---")
+                lookback_window_size = 250  # 因子计算所需的最大回溯期
+                # 为了保证有足够的交易日，我们回溯更多的自然日
+                extra_buffer_days = 20 
+                
+                # 1. 直接计算预加载的起始日期，不再扫描全表
+                preload_start_date = trading_days[0] - timedelta(days=lookback_window_size + extra_buffer_days)
+                
+                logger.info(f"一次性查询数据库，时间窗口: {preload_start_date} to {self.end_date}")
+                
+                quotes_iterator = DailyQuotes.objects.filter(
+                    trade_date__gte=preload_start_date,
+                    trade_date__lte=self.end_date
+                ).order_by('trade_date', 'stock_code_id').values(
+                    'trade_date', 'stock_code_id', 'open', 'high', 'low', 'close', 'volume', 'turnover', 'hfq_close'
+                ).iterator(chunk_size=20000)
+                logger.info("将迭代器数据按日期分组到字典中...")
+                quotes_by_date = {}
+                for row in quotes_iterator:
+                    trade_date = row['trade_date']
+                    if trade_date not in quotes_by_date:
+                        quotes_by_date[trade_date] = []
+                    quotes_by_date[trade_date].append(row)
+                
+                # 2. 初始化第一个滚动窗口
+                logger.info("初始化第一个滚动窗口面板...")
+                # 获取所有已加载的日期，并排序
+                all_loaded_dates = sorted(quotes_by_date.keys())
+                
+                # 找到第一个回测日
+                first_backtest_day = trading_days[0]
+                
+                # 从已加载的日期中，筛选出用于初始化的部分
+                initial_window_dates = [d for d in all_loaded_dates if d <= first_backtest_day]
+                initial_rows = []
+                for d in initial_window_dates:
+                    initial_rows.extend(quotes_by_date.get(d, []))
+                
+                if not initial_rows:
+                    raise ValueError("初始化滚动窗口失败，没有获取到任何数据。")
+                df_window = pd.DataFrame(initial_rows)
+                df_window['trade_date'] = pd.to_datetime(df_window['trade_date'])
+                
+                rolling_panels = {}
+                for col in ['open', 'high', 'low', 'close', 'volume', 'turnover', 'hfq_close']:
+                    panel = df_window.pivot(index='trade_date', columns='stock_code_id', values=col).astype(float)
+                    rolling_panels[col] = panel
+                
+                logger.info(f"滚动窗口初始化完成，包含 {len(initial_window_dates)} 天数据。")
                 logger.info(f"--- 2. 开始日度回测循环 ({len(trading_days)}天) ---")
                 
                 last_sent_month = None # 用于邮件触发
@@ -9403,7 +9742,25 @@ class SimulateTradeService:
                 for i, current_day in enumerate(trading_days):
                     self.current_date = current_day
                     logger.info(f"\n{'='*20} 模拟日: {self.current_date} ({i+1}/{len(trading_days)}) {'='*20}")
-
+                    if i > 0:
+                        # 检查新的一天是否有数据，有才滚动
+                        new_day_data = quotes_by_date.get(current_day)
+                        if new_day_data:
+                            logger.debug(f"滚动窗口: 移除 {rolling_panels['close'].index[0].date()}, 添加 {current_day}")
+                            # 移除最老的一天
+                            for key in rolling_panels:
+                                rolling_panels[key] = rolling_panels[key].iloc[1:]
+                            
+                            # 添加新的一天
+                            df_new_day = pd.DataFrame(new_day_data)
+                            df_new_day['trade_date'] = pd.to_datetime(df_new_day['trade_date'])
+                            
+                            for col in ['open', 'high', 'low', 'close', 'volume', 'turnover', 'hfq_close']:
+                                new_row = df_new_day.pivot(index='trade_date', columns='stock_code_id', values=col).astype(float)
+                                # 使用 pd.concat 合并，比 append 更推荐
+                                rolling_panels[col] = pd.concat([rolling_panels[col], new_row])
+                        else:
+                            logger.warning(f"日期 {current_day} 在预加载数据中不存在，窗口未滚动。")
 
                     logger.info("-> [T日 盘前校准] ...")
                     before_fix_service = BeforeFixService(execution_date=self.current_date)
@@ -9454,10 +9811,7 @@ class SimulateTradeService:
 
                     logger.info(f"-> [T日 盘后选股] 基于 {self.current_date} 的数据为下一交易日做准备...")
                     current_day_dt = pd.to_datetime(current_day)
-                    daily_panels = {
-                        key: panel.loc[:current_day_dt] for key, panel in master_panels.items()
-                    }
-                    selection_service = SelectionService(trade_date=self.current_date, mode='backtest',preloaded_panels=daily_panels)
+                    selection_service = SelectionService(trade_date=self.current_date, mode='backtest',preloaded_panels=rolling_panels)
                     selection_service.run_selection()
                     
                     self._record_daily_log()
