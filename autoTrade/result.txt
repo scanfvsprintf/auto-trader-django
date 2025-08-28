@@ -88,8 +88,14 @@
         📂 management/
             📂 commands/
                 📄 generate_m_value_csv.py
+                📄 prepare_csi300_features.py
+                📄 train_csi300_model.py
+        📂 ml_models/
         📂 service/
+            📄 m_value_service.py
+            📄 ml.example
             📄 selection_service copy.old_v4
+            📄 selection_service copy.py.old_v5
             📄 selection_service.py
             📄 selection_service.py.old
             📄 selection_service.py.old_v2
@@ -4320,12 +4326,274 @@ class Command(BaseCommand):
 
 ####文件结束####
 
+####selection_manager\management\commands\prepare_csi300_features.py####
+# selection_manager/management/commands/prepare_csi300_features.py
+
+import logging
+import pickle
+from decimal import Decimal
+import numpy as np
+import pandas as pd
+import pandas_ta as ta
+from django.core.management.base import BaseCommand
+from django.conf import settings
+from common.models import IndexQuotesCsi300
+logger = logging.getLogger(__name__)
+
+class Command(BaseCommand):
+    help = '[V4] 构建一个精简、鲁棒的特征体系，并进行平滑处理。'
+
+    MODELS_DIR = settings.BASE_DIR / 'selection_manager' / 'ml_models'
+    FEATURES_FILE = MODELS_DIR / 'csi300_features_v4.pkl'
+
+    def handle(self, *args, **options):
+        self.stdout.write(self.style.SUCCESS("===== [V4] 开始准备沪深300指数的机器学习特征 ====="))
+        self.MODELS_DIR.mkdir(parents=True, exist_ok=True)
+
+        # 1. 加载并转换数据
+        self.stdout.write("步骤 1/3: 加载并转换数据...")
+        quotes = IndexQuotesCsi300.objects.all().order_by('trade_date').values()
+        df = pd.DataFrame.from_records(quotes)
+        df.set_index('trade_date', inplace=True)
+        for col in df.columns:
+            if isinstance(df[col].dropna().iloc[0], Decimal):
+                df[col] = pd.to_numeric(df[col], errors='coerce')
+        
+        # 2. [核心改造 V4] 构建精简、平滑、交叉的特征
+        self.stdout.write("步骤 2/3: 构建V4版特征体系...")
+
+        # a. 基础收益率与波动率
+        df['return_1d'] = df['close'].pct_change()
+        df['volatility_20d'] = df['return_1d'].rolling(20).std()
+
+        # b. 核心特征 - 选择有代表性的，并进行平滑降噪
+        # 动量类: 5日和20日收益率，并对其进行3日平滑
+        df['feature_mom_5d'] = df['close'].pct_change(5).rolling(3).mean()
+        df['feature_mom_20d'] = df['close'].pct_change(20).rolling(3).mean()
+        
+        # 偏离度类: 选择中期和长期偏离度
+        ma20 = df['close'].rolling(20).mean()
+        ma60 = df['close'].rolling(60).mean()
+        df['feature_bias_20d'] = (df['close'] / ma20) - 1
+        df['feature_bias_60d'] = (df['close'] / ma60) - 1
+
+        # 波动率类: 20日波动率 和 波动率的5日均值
+        df['feature_vol_20d'] = df['volatility_20d']
+        df['feature_vol_ma_5d'] = df['volatility_20d'].rolling(5).mean()
+
+        # 超买超卖类: RSI 和 价格在布林带的位置
+        df['feature_rsi_14'] = df.ta.rsi(length=14)
+        bbands = df.ta.bbands(length=20)
+        df['feature_bb_percent'] = bbands['BBP_20_2.0']
+
+        # c. 交叉特征 (让模型看到组合状态)
+        df['feature_cross_vol_bias'] = df['feature_vol_20d'] * df['feature_bias_20d']
+        df['feature_cross_mom_rsi'] = df['feature_mom_5d'] * (df['feature_rsi_14'] - 50) # 动量与RSI偏离中轴结合
+
+        # 3. 整理特征，定义目标，对齐数据
+        self.stdout.write("步骤 3/3: 整理数据并保存...")
+        
+        df['target'] = df['close'].pct_change().shift(-1)
+        
+        feature_cols = [col for col in df.columns if col.startswith('feature_')]
+        
+        final_df = df[feature_cols + ['target']].copy()
+        final_df.dropna(inplace=True)
+        
+        X = final_df[feature_cols]
+        y = final_df['target']
+
+        self.stdout.write(f"成功构建 {len(X)} 个聚合特征样本。特征数量: {len(X.columns)}")
+        self.stdout.write("特征列预览:\n" + "\n".join(X.columns))
+
+        feature_data = {'X': X, 'y': y}
+        with open(self.FEATURES_FILE, 'wb') as f:
+            pickle.dump(feature_data, f)
+        self.stdout.write(self.style.SUCCESS(f"===== [V4] 特征准备成功！文件保存在: {self.FEATURES_FILE} ====="))
+
+####文件结束####
+
+####selection_manager\management\commands\train_csi300_model.py####
+# selection_manager/management/commands/train_csi300_model.py
+
+# ... (imports 不变) ...
+import logging
+import pickle
+import joblib
+import pandas as pd
+import lightgbm as lgb
+from sklearn.model_selection import TimeSeriesSplit
+from sklearn.metrics import accuracy_score, roc_auc_score
+from django.core.management.base import BaseCommand
+from django.conf import settings
+class Command(BaseCommand):
+    help = '[V4] 使用V4版特征训练分类模型。'
+    
+    MODELS_DIR = settings.BASE_DIR / 'selection_manager' / 'ml_models'
+    FEATURES_FILE = MODELS_DIR / 'csi300_features_v4.pkl' # <-- 读取V4特征
+    MODEL_FILE = MODELS_DIR / 'csi300_lgbm_classifier_v4.joblib' # <-- 保存为V4模型
+
+    def handle(self, *args, **options):
+        # ... (handle 方法内部逻辑与 V3 版本完全一致) ...
+        # (此处省略，以保持简洁，你只需修改上面的文件名即可)
+        self.stdout.write(self.style.SUCCESS("===== [V4] 开始训练分类模型 ====="))
+
+        # 1. 加载特征数据
+        self.stdout.write(f"步骤 1/4: 从 {self.FEATURES_FILE} 加载V4特征数据...")
+        try:
+            with open(self.FEATURES_FILE, 'rb') as f:
+                feature_data = pickle.load(f)
+            X = feature_data['X']
+            y_reg = feature_data['y']
+        except Exception as e:
+            self.stderr.write(self.style.ERROR(f"加载V4特征文件失败，请先运行V4版的 prepare 命令: {e}"))
+            return
+
+        y = (y_reg > 0).astype(int)
+        self.stdout.write(f"成功加载 {len(X)} 条样本。")
+
+        # 2. 划分数据集
+        self.stdout.write("步骤 2/4: 使用时间序列交叉验证分割数据...")
+        tss = TimeSeriesSplit(n_splits=5)
+        for train_index, test_index in tss.split(X):
+            X_train, X_test = X.iloc[train_index], X.iloc[test_index]
+            y_train, y_test = y.iloc[train_index], y.iloc[test_index]
+
+        # 3. 训练模型
+        self.stdout.write("步骤 3/4: 使用 LGBMClassifier 训练...")
+        model = lgb.LGBMClassifier(
+            objective='binary', metric='auc', n_estimators=500, learning_rate=0.02,
+            num_leaves=15, max_depth=5, seed=42, n_jobs=-1, colsample_bytree=0.7,
+            subsample=0.7, reg_alpha=0.1, reg_lambda=0.1, min_child_samples=20
+        )
+        model.fit(
+            X_train, y_train,
+            eval_set=[(X_test, y_test)],
+            callbacks=[lgb.early_stopping(50, verbose=False)]
+        )
+        
+        # 4. 评估并保存模型
+        self.stdout.write("步骤 4/4: 评估、分析并保存模型...")
+        y_pred_proba = model.predict_proba(X_test)[:, 1]
+        y_pred_class = (y_pred_proba > 0.5).astype(int)
+        
+        accuracy = accuracy_score(y_test, y_pred_class)
+        roc_auc = roc_auc_score(y_test, y_pred_proba)
+        
+        self.stdout.write(self.style.SUCCESS(f"模型评估完成："))
+        self.stdout.write(f"  - 方向预测准确率 (Accuracy): {accuracy:.2%}")
+        self.stdout.write(f"  - AUC (Area Under Curve): {roc_auc:.4f}")
+
+        # [新增] 展示特征重要性
+        self.stdout.write(self.style.SUCCESS("\n--- 特征重要性 (Top 10) ---"))
+        feature_importances = pd.DataFrame(
+            {'feature': X.columns, 'importance': model.feature_importances_}
+        ).sort_values('importance', ascending=False)
+        self.stdout.write(feature_importances.head(10).to_string(index=False))
+
+        # 保存带特征名的模型
+        model.feature_names_ = X.columns.tolist()
+        joblib.dump(model, self.MODEL_FILE)
+        self.stdout.write(self.style.SUCCESS(f"\n模型已成功保存至: {self.MODEL_FILE}"))
+        self.stdout.write(self.style.SUCCESS("===== [V4] 训练流程结束！ ====="))
+
+####文件结束####
+
+####selection_manager\service\m_value_service.py####
+# selection_manager/service/m_value_service.py
+
+
+import logging
+import joblib
+import pandas as pd
+import pandas_ta as ta
+from django.conf import settings
+from decimal import Decimal
+logger = logging.getLogger(__name__)
+
+class MValueService:
+    # --- [修改] 更新模型文件名 ---
+    MODEL_FILE = settings.BASE_DIR / 'selection_manager' / 'ml_models' / 'csi300_lgbm_classifier_v4.joblib'
+    # ...
+
+    def _extract_features_from_data(self, csi300_df: pd.DataFrame) -> pd.DataFrame:
+        """
+        [V4] 提取与V4训练时完全一致的精简特征。
+        """
+        df = csi300_df.copy()
+        
+        # ... (类型转换逻辑不变) ...
+        for col in df.columns:
+            if isinstance(df[col].dropna().iloc[0], Decimal):
+                df[col] = pd.to_numeric(df[col], errors='coerce')
+
+        # [核心改造 V4] (与 V4 prepare 命令完全一致)
+        df['return_1d'] = df['close'].pct_change()
+        df['volatility_20d'] = df['return_1d'].rolling(20).std()
+
+        df['feature_mom_5d'] = df['close'].pct_change(5).rolling(3).mean()
+        df['feature_mom_20d'] = df['close'].pct_change(20).rolling(3).mean()
+        
+        ma20 = df['close'].rolling(20).mean()
+        ma60 = df['close'].rolling(60).mean()
+        df['feature_bias_20d'] = (df['close'] / ma20) - 1
+        df['feature_bias_60d'] = (df['close'] / ma60) - 1
+
+        df['feature_vol_20d'] = df['volatility_20d']
+        df['feature_vol_ma_5d'] = df['volatility_20d'].rolling(5).mean()
+
+        df['feature_rsi_14'] = df.ta.rsi(length=14)
+        bbands = df.ta.bbands(length=20)
+        df['feature_bb_percent'] = bbands['BBP_20_2.0']
+
+        df['feature_cross_vol_bias'] = df['feature_vol_20d'] * df['feature_bias_20d']
+        df['feature_cross_mom_rsi'] = df['feature_mom_5d'] * (df['feature_rsi_14'] - 50)
+        
+        feature_cols = [col for col in df.columns if col.startswith('feature_')]
+        
+        final_features = df[feature_cols].iloc[-1:].copy()
+        final_features.fillna(method='ffill', inplace=True)
+        final_features.fillna(0, inplace=True)
+        
+        return final_features
+    def predict_csi300_next_day_trend(self, csi300_df: pd.DataFrame) -> float:
+        """
+        [V3] 输入行情数据，预测下一日的涨跌可能性。
+        """
+        # ... 懒加载逻辑不变 ...
+        if not self._model_loaded: self._load_model()
+        if self._model is None: return 0.0
+
+        try:
+            # 提取最后一天的特征行
+            feature_df = self._extract_features_from_data(csi300_df)
+            
+            # 确保特征顺序和训练时一致
+            feature_df = feature_df[self._model.feature_names_]
+
+            pred_proba_up = self._model.predict_proba(feature_df)[0, 1]
+            logger.info(f"模型原始预测值 (上涨概率): {pred_proba_up:.4%}")
+
+            scaled_value = 2 * (pred_proba_up - 0.5)
+            logger.info(f"缩放后的M值: {scaled_value:.4f}")
+            return scaled_value
+        except Exception as e:
+            logger.error(f"预测过程中发生错误: {e}", exc_info=True)
+            return 0.0
+
+m_value_service_instance = MValueService()
+
+####文件结束####
+
 ####selection_manager\service\selection_service.py####
 # selection_manager/service/selection_service.py
 
 import logging
 from datetime import date, timedelta
 from decimal import Decimal
+from django.db.models import F # 用于类型转换
+from common.models import IndexQuotesCsi300
+from .m_value_service import m_value_service_instance
 
 import numpy as np
 import pandas as pd
@@ -4609,171 +4877,43 @@ class SelectionService:
 
     # endregion
 
-    # region: --- 2. 核心动态逻辑实现 ---
     def _calculate_market_regime_M(self, stock_pool: list[str]) -> float:
         """
-        计算市场状态函数 M(t) - V3.0 回归方向与ADX强度版
-        M(t) = D(t) * I(t)
-        D(t): 基于收盘价回归斜率计算的市场方向
-        I(t): 基于ADX计算的市场趋势强度
+        计算市场状态函数 M(t)
         """
-        logger.debug("开始计算市场状态 M(t) [V3.0]...")
-        # --- 1. 参数声明 ---
-        # D(t) 相关参数
-        H_LOOKBACK_K = 20      # h(t,k) 的最大回溯期 k
-        A_PARAM = 200.0      # tanh 激活函数的缩放系数
-        # I(t) 相关参数
-        ADX_PERIOD = 14       # ADX 计算周期
-        ADX_THRESHOLD = 20.0  # ADX 强度阈值
-        B_PARAM = 0.075         # sigmoid 激活函数的缩放系数
-        # --- 2. 检查当日缓存 ---
-        try:
-            # cached_m = DailyFactorValues.objects.get(
-            #     stock_code_id=MARKET_INDICATOR_CODE,
-            #     trade_date=self.trade_date,
-            #     factor_code_id='dynamic_M_VALUE'
-            # )
-            # m_value = float(cached_m.raw_value)
-            # logger.debug(f"成功从缓存中读取当日 M(t) = {m_value:.4f}")
-            # return m_value
-            pass
-        except DailyFactorValues.DoesNotExist:
-            logger.debug("当日 M(t) 缓存未命中，开始计算...")
-        # --- 3. 加载计算所需数据 ---
-        # D(t)需要 H_LOOKBACK_K+1 天数据, ADX需要约 2*ADX_PERIOD 天数据
-        # 我们取一个更长的回溯期以确保数据充足
-        lookback_days = (H_LOOKBACK_K + ADX_PERIOD) * 3 # 넉넉하게 buffer
-        start_date = self.trade_date - timedelta(days=lookback_days)
         
+        # =======================================================================
+        # [ML预测接口] - 未来切换到机器学习模型预测M值的入口
+        # =======================================================================
         try:
-            quotes_qs = IndexQuotesCsi300.objects.filter(
-                trade_date__gte=start_date,
+            # 1. 获取最近60个交易日的数据
+            quotes_60_days_qs = IndexQuotesCsi300.objects.filter(
                 trade_date__lte=self.trade_date
-            ).order_by('trade_date')
-            # 确保数据足够进行最长的计算
-            if len(quotes_qs) < (ADX_PERIOD * 2):
-                raise ValueError(f"沪深300历史数据不足 {ADX_PERIOD * 2} 天，无法计算M值。")
-            df = pd.DataFrame.from_records(quotes_qs.values())
-            df['trade_date'] = pd.to_datetime(df['trade_date'])
-            df.set_index('trade_date', inplace=True)
+            ).order_by('-trade_date')[:60]
             
-            # 将所需列转换为数值类型
-            columns_to_convert = ['open', 'high', 'low', 'close']
-            for col in columns_to_convert:
-                df[col] = pd.to_numeric(df[col], errors='coerce')
-            
-            # 检查转换后是否有NaN值，以防数据质量问题
-            if df[columns_to_convert].isnull().values.any():
-                raise ValueError("沪深300行情数据中存在非数值(NaN)项。")
-        except (ValueError, IndexQuotesCsi300.DoesNotExist) as e:
-            logger.error(f"获取或处理沪深300数据失败: {e}。将启用容错机制。")
-            # 容错机制: 沿用前一个交易日的M值
-            try:
-                latest_m = DailyFactorValues.objects.filter(
+            if len(quotes_60_days_qs) < 60:
+                logger.warning("沪深300数据不足60天，无法使用ML模型进行预测，将回退到传统方法。")
+            else:
+                # [修复] 从QuerySet直接构建DataFrame
+                df_60_days_raw = pd.DataFrame.from_records(quotes_60_days_qs.values())
+                
+                # 反转顺序使日期从旧到新
+                df_60_days = df_60_days_raw.iloc[::-1].reset_index(drop=True)
+                
+                # 2. 调用预测服务 (m_value_service内部会处理类型转换)
+                ml_m_value = m_value_service_instance.predict_csi300_next_day_trend(df_60_days)
+                
+                # 3. 【重要】将ML预测结果存入缓存
+                DailyFactorValues.objects.update_or_create(
                     stock_code_id=MARKET_INDICATOR_CODE,
-                    factor_code_id='dynamic_M_VALUE'
-                ).latest('trade_date')
-                logger.warning(f"数据获取失败，沿用 {latest_m.trade_date} 的M值: {float(latest_m.raw_value):.4f}")
-                return float(latest_m.raw_value)
-            except DailyFactorValues.DoesNotExist:
-                logger.critical("数据库中无任何历史M值，无法回退，返回0。")
-                return 0.0
-        # --- 4. 计算市场趋势强度函数 I(t) ---
-        logger.debug("计算市场趋势强度 I(t)...")
-        
-        # 准备ADX计算所需的数据序列
-        high = df['high']
-        low = df['low']
-        close = df['close']
-        # a. 计算 +DM, -DM, TR
-        move_up = high.diff()
-        move_down = -low.diff()
-        
-        plus_dm = pd.Series(np.where((move_up > move_down) & (move_up > 0), move_up, 0.0), index=df.index)
-        minus_dm = pd.Series(np.where((move_down > move_up) & (move_down > 0), move_down, 0.0), index=df.index)
-        prev_close = close.shift(1)
-        tr1 = high - low
-        tr2 = abs(high - prev_close)
-        tr3 = abs(low - prev_close)
-        true_range = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
-        # b. 平滑处理 (Wilder's Smoothing)
-        alpha = 1 / ADX_PERIOD
-        atr = true_range.ewm(alpha=alpha, adjust=False, min_periods=ADX_PERIOD).mean()
-        plus_dm_smooth = plus_dm.ewm(alpha=alpha, adjust=False, min_periods=ADX_PERIOD).mean()
-        minus_dm_smooth = minus_dm.ewm(alpha=alpha, adjust=False, min_periods=ADX_PERIOD).mean()
-        # c. 计算 +DI, -DI
-        epsilon = 1e-9 # 防止除以零
-        plus_di = 100 * (plus_dm_smooth / (atr + epsilon))
-        minus_di = 100 * (minus_dm_smooth / (atr + epsilon))
-        # d. 计算 DX
-        di_sum = plus_di + minus_di
-        di_diff_abs = abs(plus_di - minus_di)
-        dx = 100 * (di_diff_abs / (di_sum + epsilon))
-        # e. 计算最终 ADX
-        adx = dx.ewm(alpha=alpha, adjust=False, min_periods=ADX_PERIOD).mean()
-        
-        # f. 计算 I(t)
-        adx_t = adx.iloc[-1]
-        if pd.isna(adx_t):
-            i_t = 0.0
-            logger.debug(f"ADX(t) 为NaN, I(t) 设为 0。")
-        else:
-            # 使用tanh构造一个在ADX_THRESHOLD处为0，并平滑增长的函数
-            raw_i = np.tanh(B_PARAM * (adx_t - ADX_THRESHOLD))
-            # 裁剪掉负值部分，使得ADX低于阈值时I(t)严格为0
-            i_t = max(0.0, raw_i)
-            logger.debug(f"ADX(t) = {adx_t:.2f}, I(t) = max(0, tanh({B_PARAM}*({adx_t:.2f}-{ADX_THRESHOLD}))) = {i_t:.4f}")
-        # --- 5. 计算市场方向函数 D(t) ---
-        logger.debug("计算市场方向 D(t)...")
-        
-        g_values = []
-        close_prices = df['close']
-        # 确保有足够的数据进行回归计算
-        if len(close_prices) < H_LOOKBACK_K + 1:
-            logger.warning(f"数据不足 {H_LOOKBACK_K + 1} 天，无法计算 D(t)，将设为 0。")
-            h_t_k = 0.0
-        else:
-            for k in range(1, H_LOOKBACK_K + 1):
-                # a. 截取 k+1 个数据点
-                y_series = close_prices.iloc[-(k + 1):]
-                
-                # b. 创建自变量 x
-                x_series = np.arange(k + 1)
-                
-                # c. 线性回归
-                slope, _, _, _, _ = linregress(x=x_series, y=y_series)
-                
-                # d. 获取 t-k 日的收盘价
-                close_t_minus_k = close_prices.iloc[-(k + 1)]
-                
-                # e. 计算 g(t,k)
-                if abs(close_t_minus_k) < epsilon:
-                    g_tk = 0.0 # 避免除以零
-                else:
-                    # 您的定义是 "绝对值的斜率除以t-k的沪深300指数值"
-                    # 这里我理解为 slope / close_t_minus_k
-                    g_tk = slope / close_t_minus_k
-                
-                g_values.append(g_tk)
-                logger.debug(f"  - g(t, k={k}): slope={slope:.2f}, close(t-{k})={close_t_minus_k:.2f}, g_tk={g_tk:.6f}")
-            # f. 计算 h(t,k)
-            h_t_k = np.mean(g_values) if g_values else 0.0
-            logger.debug(f"h(t, k={H_LOOKBACK_K}) = mean(g_values) = {h_t_k:.6f}")
-        # g. 计算 D(t)
-        d_t = np.tanh(A_PARAM * h_t_k)
-        logger.debug(f"D(t) = tanh({A_PARAM} * {h_t_k:.6f}) = {d_t:.4f}")
-        # --- 6. 合成最终 M(t) ---
-        m_t = d_t * i_t
-        logger.info(f"M(t) 计算完成: D(t)={d_t:.4f} * I(t)={i_t:.4f} = {m_t:.4f}")
-        # --- 7. 缓存最终的 M(t) 值 ---
-        DailyFactorValues.objects.update_or_create(
-            stock_code_id=MARKET_INDICATOR_CODE,
-            trade_date=self.trade_date,
-            factor_code_id='dynamic_M_VALUE',
-            defaults={'raw_value': Decimal(str(m_t)), 'norm_score': Decimal(str(m_t))}
-        )
-        logger.debug(f"M(t) = {m_t:.4f} 已存入缓存。")
-        return m_t
+                    trade_date=self.trade_date,
+                    factor_code_id='dynamic_M_VALUE',
+                    defaults={'raw_value': Decimal(str(ml_m_value)), 'norm_score': Decimal(str(ml_m_value))}
+                )
+                logger.info(f"已使用ML模型预测M(t) = {ml_m_value:.4f}")
+                return ml_m_value
+        except Exception as e:
+            logger.error(f"调用ML模型预测M值时发生错误: {e}", exc_info=True)
     def _calculate_market_regime_M_old(self, stock_pool: list[str]) -> float:
         """
         计算市场状态函数 M(t) - V2.0 沪深300基准版 ----老版本暂时废弃

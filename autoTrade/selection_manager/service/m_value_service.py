@@ -1,102 +1,109 @@
 # selection_manager/service/m_value_service.py
 
 import logging
-import joblib
-import pandas as pd
 import numpy as np
-import pandas_ta as ta
-from pathlib import Path
+import pandas as pd
+import json
 from django.conf import settings
-from decimal import Decimal
+import tensorflow as tf
 
 logger = logging.getLogger(__name__)
 
 class MValueService:
-    """
-    使用机器学习模型预测沪深300指数下一日涨跌可能性的服务。
-    这是一个采用懒加载单例模式的实现，确保模型只在第一次预测时加载。
-    """
-    _instance = None
-    _model = None
-    _model_loaded = False # [修复] 添加一个标志位
-
-    # --- 配置常量 ---
-    WINDOW_SIZE = 60
-    PREDICTION_THRESHOLD = 0.03
     MODELS_DIR = settings.BASE_DIR / 'selection_manager' / 'ml_models'
-    MODEL_FILE = MODELS_DIR / 'csi300_lgbm_predictor.joblib'
+    MODEL_FILE = MODELS_DIR / 'csi300_cnn_final_model.h5'
+    CONFIG_FILE = MODELS_DIR / 'csi300_model_config.json'
     
-    def __new__(cls):
-        # [修复] 简化 __new__，不再加载模型
-        if cls._instance is None:
-            cls._instance = super(MValueService, cls).__new__(cls)
-        return cls._instance
-
-    def _load_model(self):
-        # [修复] 新增一个专门用于加载模型的方法
-        if not self._model_loaded:
-            try:
-                logger.info(f"正在加载机器学习模型: {self.MODEL_FILE}")
-                self._model = joblib.load(self.MODEL_FILE)
-                self._model_loaded = True
-                logger.info("模型加载成功。")
-            except FileNotFoundError:
-                logger.error(f"模型文件 {self.MODEL_FILE} 未找到！请先运行 'train_csi300_model' 命令。")
-                self._model = None
-            except Exception as e:
-                logger.error(f"加载模型时发生未知错误: {e}")
-                self._model = None
+    LOOKBACK_WINDOW = 60
+    FEATURE_COLS = ['open', 'high', 'low', 'close', 'volume', 'amount']
+    DERIVED_FEATURE_COLS = ['log_return', 'volatility_20d', 'bias_20d', 'bias_60d']
+    ALL_FEATURE_COLS = FEATURE_COLS + DERIVED_FEATURE_COLS
+    N_FEATURES = len(ALL_FEATURE_COLS)
     
-    def _extract_features_from_data(self, csi300_60_days_df: pd.DataFrame) -> np.ndarray:
-        # ... (此方法与上次修复后的一致，不再重复) ...
-        if len(csi300_60_days_df) != self.WINDOW_SIZE:
-            raise ValueError(f"输入的数据必须刚好是 {self.WINDOW_SIZE} 天。")
-        df = csi300_60_days_df.copy()
-        for col in df.columns:
-            first_valid_element = df[col].dropna().iloc[0] if not df[col].dropna().empty else None
-            if isinstance(first_valid_element, Decimal):
-                df[col] = pd.to_numeric(df[col], errors='coerce')
-        df.ta.rsi(length=14, append=True)
-        df.ta.macd(append=True)
-        df.ta.bbands(close=df['close'], length=20, append=True)
-        df.ta.atr(high=df['high'], low=df['low'], close=df['close'], append=True)
-        df.ta.stoch(high=df['high'], low=df['low'], close=df['close'], append=True)
-        df.ta.willr(high=df['high'], low=df['low'], close=df['close'], append=True)
-        all_cols = set(df.columns)
-        price_cols = {'open', 'high', 'low', 'close', 'volume', 'amount', 'amplitude', 'pct_change', 'change_amount', 'turnover_rate'}
-        feature_cols = list(all_cols - price_cols)
-        feature_df = df[feature_cols]
-        feature_df.fillna(method='ffill', inplace=True)
-        feature_df.fillna(method='bfill', inplace=True)
-        feature_df.fillna(0, inplace=True)
-        return feature_df.values.flatten()
+    def __init__(self):
+        self._model = None
+        self._config = None
+        self._dependencies_loaded = False
 
+    def _load_dependencies(self):
+        """懒加载模型和配置文件"""
+        if not self.MODEL_FILE.exists() or not self.CONFIG_FILE.exists():
+            logger.error("模型或配置文件不存在。请先运行Final训练命令。")
+            return
+        try:
+            self._model = tf.keras.models.load_model(self.MODEL_FILE)
+            with open(self.CONFIG_FILE, 'r') as f:
+                self._config = json.load(f)
+            logger.info(f"成功加载M值预测模型 [Final] 及配置。")
+            logger.info(f"使用的最佳阈值为: {self._config.get('best_threshold')}")
+        except Exception as e:
+            logger.error(f"加载 [Final] 模型依赖时发生错误: {e}", exc_info=True)
+            self._model, self._config = None, None
+        self._dependencies_loaded = True
 
-    def predict_csi300_next_day_trend(self, csi300_60_days_df: pd.DataFrame) -> float:
+    def _prepare_input_data(self, csi300_df: pd.DataFrame) -> np.ndarray:
+        """数据准备逻辑保持不变"""
+        if len(csi300_df) < self.LOOKBACK_WINDOW:
+            raise ValueError(f"输入数据长度不足，需要{self.LOOKBACK_WINDOW}天，实际{len(csi300_df)}天。")
+
+        df = csi300_df.copy()
+        
+        for col in self.FEATURE_COLS:
+            df[col] = pd.to_numeric(df[col], errors='coerce')
+        df.fillna(method='ffill', inplace=True)
+        df.fillna(method='bfill', inplace=True)
+
+        df['log_return'] = np.log(df['close']).diff().fillna(0)
+        df['volatility_20d'] = df['log_return'].rolling(self.LOOKBACK_WINDOW).std().fillna(0)
+        ma20 = df['close'].rolling(20).mean()
+        ma60 = df['close'].rolling(60).mean()
+        df['bias_20d'] = (df['close'] / ma20 - 1).fillna(0)
+        df['bias_60d'] = (df['close'] / ma60 - 1).fillna(0)
+
+        feature_window = df.iloc[-self.LOOKBACK_WINDOW:][self.ALL_FEATURE_COLS]
+
+        mean = feature_window.mean()
+        std = feature_window.std()
+        std[std == 0] = 1e-9
+        normalized_window = (feature_window - mean) / std
+
+        return normalized_window.values.reshape(1, self.LOOKBACK_WINDOW, self.N_FEATURES)
+    
+    def predict_csi300_next_day_trend(self, csi300_df: pd.DataFrame) -> float:
         """
-        输入一个包含60天沪深300高开低收数据的DataFrame，预测下一日的涨跌可能性。
+        [Final] 使用单个模型和最佳阈值来计算M值。
         """
-        # [修复] 在预测时才检查并加载模型
-        if not self._model_loaded:
-            self._load_model()
-
-        if self._model is None:
-            logger.error("模型未加载或加载失败，无法进行预测。返回中性值0。")
-            return 0.0
+        if not self._dependencies_loaded: self._load_dependencies()
+        if self._model is None or self._config is None: return 0.0
 
         try:
-            feature_vector = self._extract_features_from_data(csi300_60_days_df)
-            raw_prediction = self._model.predict(feature_vector.reshape(1, -1))[0]
-            logger.info(f"模型原始预测值 (预期涨跌幅): {raw_prediction:.4%}")
+            model_input = self._prepare_input_data(csi300_df)
             
-            clipped_prediction = np.clip(raw_prediction, -self.PREDICTION_THRESHOLD, self.PREDICTION_THRESHOLD)
-            scaled_value = clipped_prediction / self.PREDICTION_THRESHOLD
+            # 预测得到 [P(上涨), P(下跌)]
+            pred_proba = self._model.predict(model_input, verbose=0)[0]
+            prob_up = pred_proba[0] # 我们只关心上涨的概率
+
+            best_threshold = self._config.get('best_threshold', 0.5)
+            logger.info(f"模型预测上涨概率: {prob_up:.2%}, 最佳决策阈值: {best_threshold:.2%}")
             
-            logger.info(f"缩放后的M值: {scaled_value:.4f}")
-            return scaled_value
+            # [核心] M值计算公式
+            if prob_up >= best_threshold:
+                # 概率在阈值之上，映射到 [0, 1]
+                # 防止分母为0
+                if (1 - best_threshold) == 0: return 1.0
+                m_value = (prob_up - best_threshold) / (1 - best_threshold)
+            else:
+                # 概率在阈值之下，映射到 [-1, 0)
+                # 防止分母为0
+                if best_threshold == 0: return -1.0
+                m_value = (prob_up - best_threshold) / best_threshold
+            
+            logger.info(f"最终M值: {m_value:.4f}")
+            return float(m_value)
+            
         except Exception as e:
-            logger.error(f"预测过程中发生错误: {e}", exc_info=True)
+            logger.error(f"[Final] 预测M值过程中发生错误: {e}", exc_info=True)
             return 0.0
 
-# [修复] 仍然创建全局实例，但此时它不会加载模型
+# 创建全局单例
 m_value_service_instance = MValueService()
