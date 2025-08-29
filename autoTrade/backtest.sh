@@ -1,1 +1,1 @@
-nohup python3.10 manage.py run_backtest --start 2022-01-01 --end 2025-08-15 --capital 100000 >logs/backTest.log &
+nohup python3.10 manage.py run_backtest --start 2022-01-01 --end 2025-08-15 --capital 200000 >logs/backTest.log &
