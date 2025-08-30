@@ -1,0 +1,43 @@
+{
+    "feature_names": [
+        "log_return",
+        "ma_slope_10",
+        "ma_slope_20",
+        "ma_slope_60",
+        "ma_score",
+        "adx_14",
+        "adx_20",
+        "di_spread_14",
+        "di_spread_20",
+        "roc_10",
+        "roc_20",
+        "roc_60",
+        "rsi_14",
+        "rsi_20",
+        "rsi_30",
+        "breakout_power_20",
+        "breakout_power_60",
+        "mom_accel_10",
+        "mom_accel_20",
+        "atr_norm_14",
+        "atr_norm_20",
+        "hist_vol_20",
+        "hist_vol_60",
+        "max_dd_20",
+        "max_dd_60",
+        "max_dd_120",
+        "boll_width_20",
+        "boll_pos_20",
+        "volume_surge_5_20",
+        "volume_surge_10_60",
+        "amount_ma_20",
+        "amount_ma_60",
+        "vpc_corr_20",
+        "vpc_corr_60"
+    ],
+    "label_map": {
+        "0": "\u9707\u8361",
+        "1": "\u725b\u5e02",
+        "2": "\u718a\u5e02"
+    }
+}

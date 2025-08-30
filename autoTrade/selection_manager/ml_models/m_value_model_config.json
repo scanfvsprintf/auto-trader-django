@@ -1,0 +1,85 @@
+{
+    "feature_names": [
+        "dynamic_ADX_CONFIRM",
+        "dynamic_v2_MA_SLOPE",
+        "dynamic_v2_MA_SCORE",
+        "dynamic_v2_CPC_Factor",
+        "dynamic_v2_VPCF",
+        "dynamic_BREAKOUT_PWR",
+        "dynamic_VOLUME_SURGE",
+        "dynamic_MOM_ACCEL",
+        "dynamic_RSI_OS",
+        "dynamic_NEG_DEV",
+        "dynamic_BOLL_LB",
+        "dynamic_LOW_VOL",
+        "dynamic_MAX_DD",
+        "dynamic_DOWNSIDE_RISK"
+    ],
+    "feature_importance": [
+        {
+            "feature": "dynamic_MAX_DD",
+            "importance": 9240
+        },
+        {
+            "feature": "dynamic_DOWNSIDE_RISK",
+            "importance": 6549
+        },
+        {
+            "feature": "dynamic_LOW_VOL",
+            "importance": 3727
+        },
+        {
+            "feature": "dynamic_v2_MA_SLOPE",
+            "importance": 3605
+        },
+        {
+            "feature": "dynamic_NEG_DEV",
+            "importance": 3378
+        },
+        {
+            "feature": "dynamic_BREAKOUT_PWR",
+            "importance": 2408
+        },
+        {
+            "feature": "dynamic_v2_VPCF",
+            "importance": 2014
+        },
+        {
+            "feature": "dynamic_v2_CPC_Factor",
+            "importance": 1761
+        },
+        {
+            "feature": "dynamic_v2_MA_SCORE",
+            "importance": 1722
+        },
+        {
+            "feature": "dynamic_RSI_OS",
+            "importance": 1719
+        },
+        {
+            "feature": "dynamic_BOLL_LB",
+            "importance": 1637
+        },
+        {
+            "feature": "dynamic_MOM_ACCEL",
+            "importance": 1616
+        },
+        {
+            "feature": "dynamic_VOLUME_SURGE",
+            "importance": 1464
+        },
+        {
+            "feature": "dynamic_ADX_CONFIRM",
+            "importance": 1160
+        }
+    ],
+    "best_params": {
+        "num_leaves": 8,
+        "max_depth": 68,
+        "learning_rate": 0.03998015868367919,
+        "subsample": 0.8284138182323534,
+        "colsample_bytree": 0.7779221403916752,
+        "reg_alpha": 0.005564749186622045,
+        "reg_lambda": 0.028885833752418037
+    }
+}

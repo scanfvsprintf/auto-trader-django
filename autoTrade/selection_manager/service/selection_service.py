@@ -1458,7 +1458,7 @@ class SelectionService:
                         factor_values_to_create.append(
                             DailyFactorValues(
                                 stock_code_id=stock_code, trade_date=self.trade_date,
-                                factor_code_id=factor_code, raw_value=min(Decimal(str(raw_value)),Decimal(999999)),
+                                factor_code_id=factor_code, raw_value=min(Decimal(str(raw_value)),Decimal(999999999)),
                                 norm_score=Decimal(str(norm_score))
                             )
                         )
