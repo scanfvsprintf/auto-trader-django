@@ -173,6 +173,7 @@ class Command(BaseCommand):
         stock_groups = quotes_df.groupby('stock_code_id')
         
         for stock_code, group_df in tqdm(stock_groups, desc="计算因子特征"):
+            group_df = group_df.rename(columns={'turnover': 'amount'})
             group_df = group_df.set_index('trade_date').sort_index()
             
             # 确保数据连续，填充缺失的交易日

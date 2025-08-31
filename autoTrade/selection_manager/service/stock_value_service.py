@@ -109,6 +109,7 @@ class StockValueService:
         为单只股票计算特征并进行预测。
         """
         # 准备数据
+        stock_df = stock_df.rename(columns={'turnover': 'amount'})
         stock_df = stock_df.set_index('trade_date').sort_index()
         
         # 确保数据连续
