@@ -80,7 +80,9 @@ class StockValueService:
             return pd.Series(dtype=float)
 
         all_quotes_df = pd.DataFrame.from_records(quotes_qs)
-        
+        numeric_cols = ['open', 'high', 'low', 'close', 'volume', 'turnover']
+        for col in numeric_cols:
+            all_quotes_df[col] = pd.to_numeric(all_quotes_df[col], errors='coerce')
         # 2. 并行计算特征和预测
         scores = {}
         # 使用tqdm包装ThreadPoolExecutor以显示进度条

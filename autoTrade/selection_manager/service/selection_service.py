@@ -187,7 +187,10 @@ class SelectionService:
             stock_code_id__in=top_stock_codes,
             trade_date__lte=self.trade_date
         ).order_by('-trade_date').values('stock_code_id', 'close', 'high', 'low')
-        
+        quotes_df = pd.DataFrame.from_records(quotes_qs)
+        numeric_cols = ['close', 'high', 'low']
+        for col in numeric_cols:
+            quotes_df[col] = pd.to_numeric(quotes_df[col], errors='coerce')
         # 构建一个字典，方便快速查找
         latest_quotes = {}
         for q in quotes_qs:

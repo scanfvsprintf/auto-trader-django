@@ -110,6 +110,9 @@ class Command(BaseCommand):
             'trade_date', 'stock_code_id', 'open', 'high', 'low', 'close', 'volume', 'turnover', 'hfq_close'
         )
         quotes_df = pd.DataFrame.from_records(quotes_qs)
+        numeric_cols = ['open', 'high', 'low', 'close', 'volume', 'turnover', 'hfq_close']
+        for col in numeric_cols:
+            quotes_df[col] = pd.to_numeric(quotes_df[col], errors='coerce')
         
         # 加载M值
         m_values_qs = DailyFactorValues.objects.filter(
@@ -125,7 +128,7 @@ class Command(BaseCommand):
     def _generate_labels(self, quotes_df: pd.DataFrame) -> pd.DataFrame:
         """根据配置生成标签"""
         df = quotes_df.set_index(['trade_date', 'stock_code_id'])['hfq_close'].unstack()
-        
+        df.replace(0, np.nan, inplace=True)
         if LABEL_CONFIG['mode'] == 'return':
             # 计算未来N日收益率
             future_price = df.shift(-LABEL_CONFIG['lookforward_days'])
