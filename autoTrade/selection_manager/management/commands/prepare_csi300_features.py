@@ -1,7 +1,8 @@
-# selection_manager/management/commands/prepare_m_value_features.py
+# selection_manager/management/commands/prepare_csi300_features.py
 
 import logging
 import pickle
+import json
 from pathlib import Path
 
 import numpy as np
@@ -45,7 +46,13 @@ FEATURE_CONFIG = {
 
     # 新因子
     'dynamic_MACD_SIGNAL': False,
+
     'dynamic_BREAKOUT_DURATION': False,
+
+    # --- 老M值体系因子 ---
+    'dynamic_Old_D': True,
+    'dynamic_Old_I': True,
+    'dynamic_Old_M': True,
 }
 
 # ==============================================================================
@@ -89,7 +96,11 @@ class FactorCalculator:
             'dynamic_MAX_DD': self._calc_max_dd,
             'dynamic_DOWNSIDE_RISK': self._calc_downside_risk,
             'dynamic_MACD_SIGNAL':self._calc_macd_signal,
-            'dynamic_BREAKOUT_DURATION':self._calc_breakout_duration
+            'dynamic_BREAKOUT_DURATION':self._calc_breakout_duration,
+             # --- 新增老M值体系因子 ---
+            'dynamic_Old_D': self._calc_old_d,
+            'dynamic_Old_I': self._calc_old_i,
+            'dynamic_Old_M': self._calc_old_m,
         }
 
         for factor_name, is_enabled in config.items():
@@ -203,6 +214,74 @@ class FactorCalculator:
         # 计算连续为True的天数
         breakout_streaks = is_breakout.groupby((is_breakout != is_breakout.shift()).cumsum()).cumsum()
         return breakout_streaks.rename('dynamic_BREAKOUT_DURATION')
+    
+
+    def _calc_old_d(self, lookback_k=20, a_param=200.0):
+        """
+        计算老M值体系中的方向函数 D(t)。
+        D(t) = tanh(a * h(t,K))
+        h(t,K) 是过去K天不同周期线性回归斜率的均值。
+        """
+        from scipy.stats import linregress # 仅在此方法中需要
+        close_prices = self.df['close']
+        g_values_list = []
+        
+        # 为了向量化计算，我们创建一个包含所有需要回归的窗口的DataFrame
+        # 对于每个交易日t，我们需要计算从t-k到t的回归，k从1到lookback_k
+        for k in range(1, lookback_k + 1):
+            # 截取 k+1 个数据点
+            windows = close_prices.rolling(window=k + 1)
+            
+            # 使用apply函数对每个窗口进行线性回归
+            # apply函数会比较慢，但对于这种复杂的窗口计算是必要的
+            # 注意：linregress需要numpy数组
+            slopes = windows.apply(lambda x: linregress(np.arange(len(x)), x).slope, raw=True)
+            
+            # 获取 t-k 日的收盘价
+            close_t_minus_k = close_prices.shift(k)
+            
+            # 计算 g(t,k)
+            g_tk = slopes / close_t_minus_k.replace(0, 1e-9)
+            g_values_list.append(g_tk)
+        # 将所有g(t,k)的值合并成一个DataFrame
+        g_df = pd.concat(g_values_list, axis=1)
+        
+        # 计算 h(t,K)，即对每一行（每个交易日）的g值求均值
+        h_t_k = g_df.mean(axis=1)
+        
+        # 计算 D(t)
+        d_t = np.tanh(a_param * h_t_k)
+        
+        return d_t.rename('dynamic_Old_D')
+    def _calc_old_i(self, adx_period=14, adx_threshold=20.0, b_param=0.075):
+        """
+        计算老M值体系中的强度函数 I(t)。
+        I(t) = max(0, tanh(b * (ADX(t) - threshold)))
+        """
+        # pandas_ta库可以非常高效地计算ADX
+        adx_df = self.df.ta.adx(length=adx_period, high=self.df['high'], low=self.df['low'], close=self.df['close'])
+        adx_series = adx_df[f'ADX_{adx_period}']
+        
+        # 计算 I(t)
+        raw_i = np.tanh(b_param * (adx_series - adx_threshold))
+        i_t = raw_i.clip(lower=0) # 使用clip实现max(0, raw_i)
+        
+        return i_t.rename('dynamic_Old_I')
+    def _calc_old_m(self):
+        """
+        计算老M值 OldM(t) = D(t) * I(t)。
+        这个因子依赖于 _calc_old_d 和 _calc_old_i 的计算结果。
+        为了效率，我们直接在这里调用它们，而不是重复计算。
+        """
+        # 为了避免重复计算，我们检查这些列是否已存在于一个临时的DataFrame中
+        # 但在当前架构下，最简单的做法是重新计算一次，或者修改run方法
+        # 这里我们选择直接计算，因为因子计算是独立的
+        d_t = self._calc_old_d()
+        i_t = self._calc_old_i()
+        
+        m_t = d_t * i_t
+        
+        return m_t.rename('dynamic_Old_M')
 
 
 
@@ -211,7 +290,7 @@ class FactorCalculator:
 #  主命令 (Main Command)
 # ==============================================================================
 class Command(BaseCommand):
-    help = '[M-Value Refactor] 基于精选因子和新标签体系，为沪深300指数生成机器学习数据集。'
+    help = '[M-Value Refactor] 基于精选因子和连续夏普比率标签，为沪深300指数生成机器学习数据集。'
 
     # --- 路径和配置 ---
     MODELS_DIR = settings.BASE_DIR / 'selection_manager' / 'ml_models'
@@ -219,52 +298,46 @@ class Command(BaseCommand):
     MODEL_CONFIG_FILE = MODELS_DIR / 'm_value_model_config.json'
 
     # --- 新标签体系配置 ---
-    LABEL_LOOKFORWARD = 60  # 向前看60个交易日
-    PROFIT_TAKE_PCT = 0.15  # 15% 涨幅定义为牛市
-    STOP_LOSS_PCT = -0.08   # 8% 跌幅定义为熊市
+    LABEL_LOOKFORWARD = 3      # 向前看60个交易日计算夏普比率
+    RISK_FREE_RATE_ANNUAL = 0.02 # 无风险年利率，设为4%
+    TANH_SCALING_FACTOR = 1    # tanh的缩放因子a，使得夏普=1时接近饱和
 
-    def _get_market_state_labels(self, df: pd.DataFrame) -> pd.Series:
+    def _get_continuous_m_labels(self, df: pd.DataFrame) -> pd.Series:
         """
-        根据“牛熊震荡”定义，为时间序列打标签。
-        标签: 0=牛市, 1=震荡, 2=熊市
+        根据未来60日年化夏普比率，计算连续的M值标签。
+        标签公式: M = tanh(a * SharpeRatio)
         """
-        self.stdout.write("步骤 2/4: 应用新的“牛熊震荡”标签体系...")
-        highs = df['high']
-        lows = df['low']
-        closes = df['close']
+        self.stdout.write("步骤 2/4: 应用新的连续M值标签体系 (基于夏普比率)...")
         
-        labels = pd.Series(np.nan, index=df.index)
-
-        for i in tqdm(range(len(df) - self.LABEL_LOOKFORWARD), desc="Applying Market State Labels"):
-            base_price = closes.iloc[i]
-            
-            # 获取未来 N 天的价格路径
-            future_highs = highs.iloc[i + 1 : i + 1 + self.LABEL_LOOKFORWARD]
-            future_lows = lows.iloc[i + 1 : i + 1 + self.LABEL_LOOKFORWARD]
-
-            # 计算未来每一天的最高涨幅和最低跌幅
-            cum_max_returns = (future_highs / base_price) - 1
-            cum_min_returns = (future_lows / base_price) - 1
-
-            # 查找第一次触及上轨和下轨的时间点
-            hit_upper_idx = (cum_max_returns >= self.PROFIT_TAKE_PCT).idxmax() if (cum_max_returns >= self.PROFIT_TAKE_PCT).any() else None
-            hit_lower_idx = (cum_min_returns <= self.STOP_LOSS_PCT).idxmax() if (cum_min_returns <= self.STOP_LOSS_PCT).any() else None
-
-            # 判断最终标签
-            if hit_upper_idx and hit_lower_idx:
-                # 如果都触及，看哪个先发生
-                if hit_upper_idx <= hit_lower_idx:
-                    labels.iloc[i] = 0  # 牛市
-                else:
-                    labels.iloc[i] = 2  # 熊市
-            elif hit_upper_idx:
-                labels.iloc[i] = 0  # 牛市
-            elif hit_lower_idx:
-                labels.iloc[i] = 2  # 熊市
-            else:
-                labels.iloc[i] = 1  # 震荡市
+        # 计算每日收益率
+        returns = df['close'].pct_change()
         
-        return labels
+        # 将年化无风险利率转换为日无风险利率
+        # (1 + r_annual) = (1 + r_daily)^252  => r_daily = (1 + r_annual)^(1/252) - 1
+        # 一年大约有252个交易日
+        daily_risk_free_rate = (1 + self.RISK_FREE_RATE_ANNUAL)**(1/252) - 1
+        
+        # 计算超额收益率
+        excess_returns = returns - daily_risk_free_rate
+        
+        # 使用高效的向量化方法计算未来60天的滚动指标
+        # 为了计算未来60天，我们将数据向前移动60天，然后计算过去60天的滚动值
+        # 这等价于在当前点计算未来60天的数据
+        future_mean = excess_returns.shift(-self.LABEL_LOOKFORWARD).rolling(window=self.LABEL_LOOKFORWARD).mean()
+        future_std = excess_returns.shift(-self.LABEL_LOOKFORWARD).rolling(window=self.LABEL_LOOKFORWARD).std()
+        
+        # 计算年化夏普比率
+        # 年化因子 = sqrt(252)
+        # 避免除以零
+        annualized_sharpe_ratio = (future_mean / future_std.replace(0, np.nan)) * np.sqrt(252)
+        
+        # 应用tanh函数生成最终的M值标签
+        m_labels = np.tanh(self.TANH_SCALING_FACTOR * annualized_sharpe_ratio)
+        m_labels_raw = np.tanh(self.TANH_SCALING_FACTOR * annualized_sharpe_ratio)
+        m_labels_smoothed = m_labels_raw.rolling(window=5, min_periods=1).mean()
+        self.stdout.write(f"标签计算完成。缩放因子a={self.TANH_SCALING_FACTOR}, 无风险利率(年)={self.RISK_FREE_RATE_ANNUAL}")
+        
+        return m_labels_smoothed
 
     def handle(self, *args, **options):
         self.stdout.write(self.style.SUCCESS("===== [M-Value Refactor] 开始准备机器学习数据集 ====="))
@@ -282,8 +355,8 @@ class Command(BaseCommand):
             df[col] = pd.to_numeric(df[col], errors='coerce')
         df.dropna(subset=numeric_cols, inplace=True)
 
-        # 2. 生成标签
-        labels = self._get_market_state_labels(df)
+        # 2. 生成标签 (已重构为连续M值)
+        labels = self._get_continuous_m_labels(df)
         df['label'] = labels
 
         # 3. 计算特征
@@ -297,16 +370,16 @@ class Command(BaseCommand):
         # 合并特征和标签
         final_df = pd.concat([features_df, df['label']], axis=1)
         
-        # 剔除所有包含NaN的行（通常是序列开头和结尾）
+        # 剔除所有包含NaN的行（通常是序列开头和结尾，以及标签计算的未来窗口）
         final_df.dropna(inplace=True)
         
         # 分离 X 和 y
         X = final_df[enabled_features]
-        y = final_df['label'].astype(int)
+        y = final_df['label'].astype(float) # 标签现在是浮点数
         
         self.stdout.write(f"数据集准备完成。总样本数: {len(X)}")
-        self.stdout.write("标签分布情况:")
-        self.stdout.write(str(y.value_counts()))
+        self.stdout.write("标签（M值）统计信息:")
+        self.stdout.write(str(y.describe()))
         
         # 保存数据集和配置
         dataset = {
@@ -314,7 +387,7 @@ class Command(BaseCommand):
             'y': y,
             'index': X.index,
             'feature_names': enabled_features,
-            'label_map': {0: 'Bull', 1: 'Consolidation', 2: 'Bear'}
+            # 'label_map' 不再需要，因为这是回归任务
         }
         with open(self.DATASET_FILE, 'wb') as f:
             pickle.dump(dataset, f)
@@ -324,8 +397,6 @@ class Command(BaseCommand):
         # 保存模型配置，主要是特征列表，供预测时使用
         model_config = {'feature_names': enabled_features}
         with open(self.MODEL_CONFIG_FILE, 'w') as f:
-            import json
             json.dump(model_config, f, indent=4)
         self.stdout.write(self.style.SUCCESS(f"模型配置文件已成功保存至: {self.MODEL_CONFIG_FILE}"))
         self.stdout.write(self.style.SUCCESS("===== [M-Value Refactor] 数据准备流程结束 ====="))
-

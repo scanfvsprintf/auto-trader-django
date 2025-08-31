@@ -69,7 +69,7 @@ class Command(BaseCommand):
                                             # 改大: 允许树模型学习到更复杂的规则，可能提升训练集表现，但极易导致过拟合。
                                             # 改小: 限制树的复杂度，防止过拟合，但过小会使模型过于简单，导致欠拟合。
                                             # 后果: 它的值应小于 2^max_depth。原代码中的 '5' 过于保守，可能导致模型欠拟合。'31' 是一个常用的、稳健的默认值。
-            'max_depth': 14,                 # 树的最大深度: 限制树可以生长的最大层数。
+            'max_depth': 80,                 # 树的最大深度: 限制树可以生长的最大层数。
                                             # 改大: 允许树生长得更深，捕捉更具体的特征交互，但也增加了过拟合的风险。
                                             # 改小: 限制树的深度，是防止过拟合的有效手段。
                                             # 后果: 在LightGBM中，通常优先用 'num_leaves' 控制复杂度。设置 'max_depth' 可作为辅助手段，防止树长得过深。'-1'表示不限制。
@@ -94,7 +94,7 @@ class Command(BaseCommand):
         self.stdout.write("步骤 3/4: 使用固定的时间序列分割进行训练和验证...")
       
         # 将数据的后20%作为验证集，前80%作为训练集
-        split_point = int(len(X) * 0.8)
+        split_point = int(len(X) * 0.7)
         X_train, X_val = X.iloc[:split_point], X.iloc[split_point:]
         y_train, y_val = y.iloc[:split_point], y.iloc[split_point:]
         self.stdout.write(f"训练集大小: {len(X_train)}, 验证集大小: {len(X_val)}")

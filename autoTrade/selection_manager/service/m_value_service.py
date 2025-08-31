@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 
 # ==============================================================================
 #  独立的因子计算器 (Decoupled Factor Calculator)
-#  [重要] 此类代码与 prepare_m_value_features.py 中的完全一致，以实现解耦。
+#  [重要] 此类代码与 prepare_csi300_features.py 中的完全一致，以实现解耦。
 #  如果因子逻辑更新，需要同步修改这两个地方。
 # ==============================================================================
 class FactorCalculator:
@@ -34,6 +34,7 @@ class FactorCalculator:
         """
         all_factors_df = pd.DataFrame(index=self.df.index)
         
+        # [同步] 确保此处的计算方法列表与 prepare_csi300_features.py 完全一致
         calculator_methods = {
             'dynamic_ADX_CONFIRM': self._calc_adx_confirm,
             'dynamic_v2_MA_SLOPE': self._calc_v2_ma_slope,
@@ -49,6 +50,12 @@ class FactorCalculator:
             'dynamic_LOW_VOL': self._calc_low_vol,
             'dynamic_MAX_DD': self._calc_max_dd,
             'dynamic_DOWNSIDE_RISK': self._calc_downside_risk,
+            'dynamic_MACD_SIGNAL': self._calc_macd_signal,
+            'dynamic_BREAKOUT_DURATION': self._calc_breakout_duration,
+            # --- 新增老M值体系因子 ---
+            'dynamic_Old_D': self._calc_old_d,
+            'dynamic_Old_I': self._calc_old_i,
+            'dynamic_Old_M': self._calc_old_m,
         }
 
         for factor_name in feature_names:
@@ -140,6 +147,88 @@ class FactorCalculator:
         downside_returns[downside_returns > 0] = 0
         return downside_returns.rolling(window=period).std().rename('dynamic_DOWNSIDE_RISK')
 
+    # [同步] 补全与 prepare_csi300_features.py 一致的因子
+    def _calc_macd_signal(self, fast=12, slow=26, signal=9):
+        macd_df = self.df.ta.macd(fast=fast, slow=slow, signal=signal)
+        macd_line = macd_df[f'MACD_{fast}_{slow}_{signal}']
+        signal_line = macd_df[f'MACDs_{fast}_{slow}_{signal}']
+        factor = (macd_line - signal_line).where(macd_line > 0, 0)
+        return factor.rename('dynamic_MACD_SIGNAL')
+    
+    def _calc_breakout_duration(self, lookback=20):
+        high_lookback = self.df['close'].rolling(window=lookback).max().shift(1)
+        is_breakout = self.df['close'] > high_lookback
+        breakout_streaks = is_breakout.groupby((is_breakout != is_breakout.shift()).cumsum()).cumsum()
+        return breakout_streaks.rename('dynamic_BREAKOUT_DURATION')
+    
+
+    def _calc_old_d(self, lookback_k=20, a_param=200.0):
+        """
+        计算老M值体系中的方向函数 D(t)。
+        D(t) = tanh(a * h(t,K))
+        h(t,K) 是过去K天不同周期线性回归斜率的均值。
+        """
+        from scipy.stats import linregress # 仅在此方法中需要
+        close_prices = self.df['close']
+        g_values_list = []
+        
+        # 为了向量化计算，我们创建一个包含所有需要回归的窗口的DataFrame
+        # 对于每个交易日t，我们需要计算从t-k到t的回归，k从1到lookback_k
+        for k in range(1, lookback_k + 1):
+            # 截取 k+1 个数据点
+            windows = close_prices.rolling(window=k + 1)
+            
+            # 使用apply函数对每个窗口进行线性回归
+            # apply函数会比较慢，但对于这种复杂的窗口计算是必要的
+            # 注意：linregress需要numpy数组
+            slopes = windows.apply(lambda x: linregress(np.arange(len(x)), x).slope, raw=True)
+            
+            # 获取 t-k 日的收盘价
+            close_t_minus_k = close_prices.shift(k)
+            
+            # 计算 g(t,k)
+            g_tk = slopes / close_t_minus_k.replace(0, 1e-9)
+            g_values_list.append(g_tk)
+        # 将所有g(t,k)的值合并成一个DataFrame
+        g_df = pd.concat(g_values_list, axis=1)
+        
+        # 计算 h(t,K)，即对每一行（每个交易日）的g值求均值
+        h_t_k = g_df.mean(axis=1)
+        
+        # 计算 D(t)
+        d_t = np.tanh(a_param * h_t_k)
+        
+        return d_t.rename('dynamic_Old_D')
+    def _calc_old_i(self, adx_period=14, adx_threshold=20.0, b_param=0.075):
+        """
+        计算老M值体系中的强度函数 I(t)。
+        I(t) = max(0, tanh(b * (ADX(t) - threshold)))
+        """
+        # pandas_ta库可以非常高效地计算ADX
+        adx_df = self.df.ta.adx(length=adx_period, high=self.df['high'], low=self.df['low'], close=self.df['close'])
+        adx_series = adx_df[f'ADX_{adx_period}']
+        
+        # 计算 I(t)
+        raw_i = np.tanh(b_param * (adx_series - adx_threshold))
+        i_t = raw_i.clip(lower=0) # 使用clip实现max(0, raw_i)
+        
+        return i_t.rename('dynamic_Old_I')
+    def _calc_old_m(self):
+        """
+        计算老M值 OldM(t) = D(t) * I(t)。
+        这个因子依赖于 _calc_old_d 和 _calc_old_i 的计算结果。
+        为了效率，我们直接在这里调用它们，而不是重复计算。
+        """
+        # 为了避免重复计算，我们检查这些列是否已存在于一个临时的DataFrame中
+        # 但在当前架构下，最简单的做法是重新计算一次，或者修改run方法
+        # 这里我们选择直接计算，因为因子计算是独立的
+        d_t = self._calc_old_d()
+        i_t = self._calc_old_i()
+        
+        m_t = d_t * i_t
+        
+        return m_t.rename('dynamic_Old_M')
+
 # ==============================================================================
 #  重构后的 M 值预测服务 (Refactored M-Value Prediction Service)
 # ==============================================================================
@@ -160,13 +249,13 @@ class MValueMLService:
     def _load_dependencies(self):
         """懒加载模型和配置文件"""
         if not self.MODEL_FILE.exists() or not self.CONFIG_FILE.exists():
-            logger.error("M值模型或配置文件不存在。请先运行 'prepare_m_value_features' 和 'train_m_value_model' 命令。")
+            logger.error("M值模型或配置文件不存在。请先运行 'prepare_csi300_features' 和 'train_csi300_model_test' 命令。")
             return
         try:
             self._model = joblib.load(self.MODEL_FILE)
             with open(self.CONFIG_FILE, 'r') as f:
                 self._config = json.load(f)
-            logger.info("成功加载M值预测模型 (LightGBM) 及配置。")
+            logger.info("成功加载M值预测模型 (LightGBM Regressor) 及配置。")
         except Exception as e:
             logger.error(f"加载M值模型依赖时发生错误: {e}", exc_info=True)
             self._model, self._config = None, None
@@ -204,8 +293,8 @@ class MValueMLService:
 
     def predict_csi300_next_day_trend(self, csi300_df: pd.DataFrame) -> float:
         """
-        使用重构后的ML模型计算M值。
-        M值 = P(牛市) - P(熊市)
+        使用重构后的ML回归模型直接预测M值。
+        M值由模型直接输出，其范围在[-1, 1]之间。
         """
         if not self._dependencies_loaded:
             self._load_dependencies()
@@ -219,21 +308,15 @@ class MValueMLService:
             feature_vector = self._prepare_input_data(csi300_df)
             
             # 2. 模型预测
-            # LightGBM需要 (n_samples, n_features) 的输入
+            # 回归模型直接输出预测值
             model_input = feature_vector.values.reshape(1, -1)
-            pred_proba = self._model.predict_proba(model_input)[0]
+            m_value = self._model.predict(model_input)[0]
             
-            # 假设类别顺序为 0:Bull, 1:Consolidation, 2:Bear
-            prob_bull = pred_proba[0]
-            prob_consolidation = pred_proba[1]
-            prob_bear = pred_proba[2]
-
-            # 3. 计算M值
-            m_value = prob_bull - prob_bear
+            # 3. 裁剪M值确保在[-1, 1]范围内，以防模型预测略微超限
+            m_value = np.clip(m_value, -1.0, 1.0)
             
             logger.info(
-                f"M值预测: P(牛)={prob_bull:.2%}, P(震荡)={prob_consolidation:.2%}, P(熊)={prob_bear:.2%}. "
-                f"最终 M-Value = {m_value:.4f}"
+                f"M值预测: 模型直接输出 M-Value = {m_value:.4f}"
             )
             return float(m_value)
         
