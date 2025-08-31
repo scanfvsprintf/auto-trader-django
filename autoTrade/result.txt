@@ -74,9 +74,6 @@
             📄 email_handler.py
             📄 email_service.py
             📄 stock_service.py
-    📂 logs/
-        📄 .__django.lock
-        📄 django.log
     📂 selection_manager/
         📄 __init__.py
         📄 admin.py
@@ -85,12 +82,6 @@
         📄 tests.py
         📄 urls.py
         📄 views.py
-        📂 management/
-            📂 commands/
-                📄 generate_m_value_csv.py
-                📄 prepare_csi300_features.py
-                📄 train_csi300_model.py
-        📂 ml_models/
         📂 service/
             📄 m_value_service.py
             📄 ml.example
@@ -100,6 +91,21 @@
             📄 selection_service.py.old
             📄 selection_service.py.old_v2
             📄 selection_service.py.old_v3
+        📂 management/
+            📂 commands/
+                📄 generate_m_value_csv.py
+                📄 prepare_csi300_features.py
+                📄 train_csi300_model_test.py
+        📂 ml_models/
+            📄 csi300_cnn_final_model.h5
+            📄 csi300_features_gen2.pkl
+            📄 csi300_features_lgbm.pkl
+            📄 csi300_lgbm_config.json
+            📄 csi300_lgbm_model.joblib
+            📄 csi300_model_config.json
+            📄 m_value_dataset.pkl
+            📄 m_value_lgbm_model.joblib
+            📄 m_value_model_config.json
     📂 trade_manager/
         📄 __init__.py
         📄 admin.py
@@ -129,6 +135,9 @@
             📄 simulate_trade_handler.py
             📄 simulate_trade_old.py
             📄 trade_handler.py
+    📂 logs/
+        📄 .__django.lock
+        📄 django.log
 
 ========================
 
@@ -4228,360 +4237,337 @@ def run_selection(request):
 
 ####文件结束####
 
-####selection_manager\management\commands\generate_m_value_csv.py####
-# selection_manager/management/commands/generate_m_value_csv.py
-
-import logging
-import os
-from decimal import Decimal
-
-import pandas as pd
-from django.conf import settings
-from django.core.management.base import BaseCommand
-from tqdm import tqdm
-
-from common.models import IndexQuotesCsi300
-from selection_manager.service.selection_service import SelectionService
-
-# 获取logger实例
-logger = logging.getLogger(__name__)
-
-class Command(BaseCommand):
-    """
-    一个Django管理命令，用于计算沪深300指数从2010-08-19至2025-08-18的
-    完整历史M值，并生成一个CSV文件供分析脚本使用。
-    
-    运行方式:
-    python manage.py generate_m_value_csv
-    """
-    help = '计算沪深300历史M值并生成 m_value_csi300.csv 文件'
-
-    def handle(self, *args, **options):
-        self.stdout.write(self.style.SUCCESS('===== 开始计算沪深300历史M值 ====='))
-
-        try:
-            # 1. 一次性从数据库加载所有需要的沪深300行情数据
-            self.stdout.write("正在从数据库加载沪深300历史行情数据...")
-            quotes_qs = IndexQuotesCsi300.objects.all().order_by('trade_date').values('trade_date', 'close')
-            if not quotes_qs:
-                self.stdout.write(self.style.ERROR("错误：数据库表 tb_index_quotes_csi300 中没有数据。请先回填数据。"))
-                return
-            
-            all_quotes_df = pd.DataFrame.from_records(quotes_qs)
-            all_dates = all_quotes_df['trade_date'].tolist()
-            self.stdout.write(f"数据加载完成，共 {len(all_dates)} 个交易日。")
-
-            # 2. 初始化SelectionService并加载一次参数
-            # 使用第一个日期进行初始化，后续在循环中更新日期
-            service = SelectionService(trade_date=all_dates[0], mode='backtest')
-            service._load_dynamic_parameters_and_defs()
-            self.stdout.write("策略服务和参数初始化完成。")
-
-            # 3. 循环计算每一天的M值
-            results = []
-            self.stdout.write("开始逐日计算M值...")
-            LOOKBACK_BUFFER = 80
-            if len(all_dates) <= LOOKBACK_BUFFER:
-                self.stdout.write(self.style.ERROR(f"错误：总交易日数 ({len(all_dates)}) 不足以满足 {LOOKBACK_BUFFER} 天的回溯期。"))
-                return
-            # 使用tqdm创建进度条
-            for current_date in tqdm(all_dates[LOOKBACK_BUFFER:], desc="计算M值进度"):
-                # 更新服务的交易日期
-                service.trade_date = current_date
-                
-                # 调用核心方法计算M值，按要求传入空stock_pool
-                m_value = service._calculate_market_regime_M(stock_pool=[])
-                
-                # 从已加载的DataFrame中获取收盘价
-                close_price = all_quotes_df.loc[all_quotes_df['trade_date'] == current_date, 'close'].iloc[0]
-                
-                results.append({
-                    '日期': current_date,
-                    'm值': m_value,
-                    '沪深300收盘指数': float(close_price) # 转换为float以便pandas处理
-                })
-
-            if not results:
-                self.stdout.write(self.style.WARNING("计算完成，但没有生成任何结果。"))
-                return
-
-            # 4. 将结果转换为DataFrame并保存为CSV
-            self.stdout.write("所有M值计算完成，正在生成CSV文件...")
-            results_df = pd.DataFrame(results)
-            
-            # 定义输出路径为项目根目录
-            output_path = os.path.join(settings.BASE_DIR, 'm_value_csi300.csv')
-            
-            # 保存文件，使用 utf-8-sig 编码以确保Excel能正确打开
-            results_df.to_csv(output_path, index=False, encoding='utf-8-sig', float_format='%.4f')
-
-            self.stdout.write(self.style.SUCCESS(f"\n===== 任务成功完成！ ====="))
-            self.stdout.write(f"文件已保存至: {output_path}")
-            self.stdout.write(f"现在你可以运行 [M值关系分析.py] 脚本了。")
-
-        except Exception as e:
-            self.stdout.write(self.style.ERROR(f"任务执行过程中发生严重错误: {e}"))
-            logger.error("生成M值CSV文件失败", exc_info=True)
-
-
-####文件结束####
-
-####selection_manager\management\commands\prepare_csi300_features.py####
-# selection_manager/management/commands/prepare_csi300_features.py
-
-import logging
-import pickle
-from decimal import Decimal
-import numpy as np
-import pandas as pd
-import pandas_ta as ta
-from django.core.management.base import BaseCommand
-from django.conf import settings
-from common.models import IndexQuotesCsi300
-logger = logging.getLogger(__name__)
-
-class Command(BaseCommand):
-    help = '[V4] 构建一个精简、鲁棒的特征体系，并进行平滑处理。'
-
-    MODELS_DIR = settings.BASE_DIR / 'selection_manager' / 'ml_models'
-    FEATURES_FILE = MODELS_DIR / 'csi300_features_v4.pkl'
-
-    def handle(self, *args, **options):
-        self.stdout.write(self.style.SUCCESS("===== [V4] 开始准备沪深300指数的机器学习特征 ====="))
-        self.MODELS_DIR.mkdir(parents=True, exist_ok=True)
-
-        # 1. 加载并转换数据
-        self.stdout.write("步骤 1/3: 加载并转换数据...")
-        quotes = IndexQuotesCsi300.objects.all().order_by('trade_date').values()
-        df = pd.DataFrame.from_records(quotes)
-        df.set_index('trade_date', inplace=True)
-        for col in df.columns:
-            if isinstance(df[col].dropna().iloc[0], Decimal):
-                df[col] = pd.to_numeric(df[col], errors='coerce')
-        
-        # 2. [核心改造 V4] 构建精简、平滑、交叉的特征
-        self.stdout.write("步骤 2/3: 构建V4版特征体系...")
-
-        # a. 基础收益率与波动率
-        df['return_1d'] = df['close'].pct_change()
-        df['volatility_20d'] = df['return_1d'].rolling(20).std()
-
-        # b. 核心特征 - 选择有代表性的，并进行平滑降噪
-        # 动量类: 5日和20日收益率，并对其进行3日平滑
-        df['feature_mom_5d'] = df['close'].pct_change(5).rolling(3).mean()
-        df['feature_mom_20d'] = df['close'].pct_change(20).rolling(3).mean()
-        
-        # 偏离度类: 选择中期和长期偏离度
-        ma20 = df['close'].rolling(20).mean()
-        ma60 = df['close'].rolling(60).mean()
-        df['feature_bias_20d'] = (df['close'] / ma20) - 1
-        df['feature_bias_60d'] = (df['close'] / ma60) - 1
-
-        # 波动率类: 20日波动率 和 波动率的5日均值
-        df['feature_vol_20d'] = df['volatility_20d']
-        df['feature_vol_ma_5d'] = df['volatility_20d'].rolling(5).mean()
-
-        # 超买超卖类: RSI 和 价格在布林带的位置
-        df['feature_rsi_14'] = df.ta.rsi(length=14)
-        bbands = df.ta.bbands(length=20)
-        df['feature_bb_percent'] = bbands['BBP_20_2.0']
-
-        # c. 交叉特征 (让模型看到组合状态)
-        df['feature_cross_vol_bias'] = df['feature_vol_20d'] * df['feature_bias_20d']
-        df['feature_cross_mom_rsi'] = df['feature_mom_5d'] * (df['feature_rsi_14'] - 50) # 动量与RSI偏离中轴结合
-
-        # 3. 整理特征，定义目标，对齐数据
-        self.stdout.write("步骤 3/3: 整理数据并保存...")
-        
-        df['target'] = df['close'].pct_change().shift(-1)
-        
-        feature_cols = [col for col in df.columns if col.startswith('feature_')]
-        
-        final_df = df[feature_cols + ['target']].copy()
-        final_df.dropna(inplace=True)
-        
-        X = final_df[feature_cols]
-        y = final_df['target']
-
-        self.stdout.write(f"成功构建 {len(X)} 个聚合特征样本。特征数量: {len(X.columns)}")
-        self.stdout.write("特征列预览:\n" + "\n".join(X.columns))
-
-        feature_data = {'X': X, 'y': y}
-        with open(self.FEATURES_FILE, 'wb') as f:
-            pickle.dump(feature_data, f)
-        self.stdout.write(self.style.SUCCESS(f"===== [V4] 特征准备成功！文件保存在: {self.FEATURES_FILE} ====="))
-
-####文件结束####
-
-####selection_manager\management\commands\train_csi300_model.py####
-# selection_manager/management/commands/train_csi300_model.py
-
-# ... (imports 不变) ...
-import logging
-import pickle
-import joblib
-import pandas as pd
-import lightgbm as lgb
-from sklearn.model_selection import TimeSeriesSplit
-from sklearn.metrics import accuracy_score, roc_auc_score
-from django.core.management.base import BaseCommand
-from django.conf import settings
-class Command(BaseCommand):
-    help = '[V4] 使用V4版特征训练分类模型。'
-    
-    MODELS_DIR = settings.BASE_DIR / 'selection_manager' / 'ml_models'
-    FEATURES_FILE = MODELS_DIR / 'csi300_features_v4.pkl' # <-- 读取V4特征
-    MODEL_FILE = MODELS_DIR / 'csi300_lgbm_classifier_v4.joblib' # <-- 保存为V4模型
-
-    def handle(self, *args, **options):
-        # ... (handle 方法内部逻辑与 V3 版本完全一致) ...
-        # (此处省略，以保持简洁，你只需修改上面的文件名即可)
-        self.stdout.write(self.style.SUCCESS("===== [V4] 开始训练分类模型 ====="))
-
-        # 1. 加载特征数据
-        self.stdout.write(f"步骤 1/4: 从 {self.FEATURES_FILE} 加载V4特征数据...")
-        try:
-            with open(self.FEATURES_FILE, 'rb') as f:
-                feature_data = pickle.load(f)
-            X = feature_data['X']
-            y_reg = feature_data['y']
-        except Exception as e:
-            self.stderr.write(self.style.ERROR(f"加载V4特征文件失败，请先运行V4版的 prepare 命令: {e}"))
-            return
-
-        y = (y_reg > 0).astype(int)
-        self.stdout.write(f"成功加载 {len(X)} 条样本。")
-
-        # 2. 划分数据集
-        self.stdout.write("步骤 2/4: 使用时间序列交叉验证分割数据...")
-        tss = TimeSeriesSplit(n_splits=5)
-        for train_index, test_index in tss.split(X):
-            X_train, X_test = X.iloc[train_index], X.iloc[test_index]
-            y_train, y_test = y.iloc[train_index], y.iloc[test_index]
-
-        # 3. 训练模型
-        self.stdout.write("步骤 3/4: 使用 LGBMClassifier 训练...")
-        model = lgb.LGBMClassifier(
-            objective='binary', metric='auc', n_estimators=500, learning_rate=0.02,
-            num_leaves=15, max_depth=5, seed=42, n_jobs=-1, colsample_bytree=0.7,
-            subsample=0.7, reg_alpha=0.1, reg_lambda=0.1, min_child_samples=20
-        )
-        model.fit(
-            X_train, y_train,
-            eval_set=[(X_test, y_test)],
-            callbacks=[lgb.early_stopping(50, verbose=False)]
-        )
-        
-        # 4. 评估并保存模型
-        self.stdout.write("步骤 4/4: 评估、分析并保存模型...")
-        y_pred_proba = model.predict_proba(X_test)[:, 1]
-        y_pred_class = (y_pred_proba > 0.5).astype(int)
-        
-        accuracy = accuracy_score(y_test, y_pred_class)
-        roc_auc = roc_auc_score(y_test, y_pred_proba)
-        
-        self.stdout.write(self.style.SUCCESS(f"模型评估完成："))
-        self.stdout.write(f"  - 方向预测准确率 (Accuracy): {accuracy:.2%}")
-        self.stdout.write(f"  - AUC (Area Under Curve): {roc_auc:.4f}")
-
-        # [新增] 展示特征重要性
-        self.stdout.write(self.style.SUCCESS("\n--- 特征重要性 (Top 10) ---"))
-        feature_importances = pd.DataFrame(
-            {'feature': X.columns, 'importance': model.feature_importances_}
-        ).sort_values('importance', ascending=False)
-        self.stdout.write(feature_importances.head(10).to_string(index=False))
-
-        # 保存带特征名的模型
-        model.feature_names_ = X.columns.tolist()
-        joblib.dump(model, self.MODEL_FILE)
-        self.stdout.write(self.style.SUCCESS(f"\n模型已成功保存至: {self.MODEL_FILE}"))
-        self.stdout.write(self.style.SUCCESS("===== [V4] 训练流程结束！ ====="))
-
-####文件结束####
-
 ####selection_manager\service\m_value_service.py####
 # selection_manager/service/m_value_service.py
 
-
 import logging
-import joblib
+import json
+from pathlib import Path
+
+import numpy as np
 import pandas as pd
 import pandas_ta as ta
+import joblib
 from django.conf import settings
-from decimal import Decimal
+
 logger = logging.getLogger(__name__)
 
-class MValueService:
-    # --- [修改] 更新模型文件名 ---
-    MODEL_FILE = settings.BASE_DIR / 'selection_manager' / 'ml_models' / 'csi300_lgbm_classifier_v4.joblib'
-    # ...
+# ==============================================================================
+#  独立的因子计算器 (Decoupled Factor Calculator)
+#  [重要] 此类代码与 prepare_csi300_features.py 中的完全一致，以实现解耦。
+#  如果因子逻辑更新，需要同步修改这两个地方。
+# ==============================================================================
+class FactorCalculator:
+    """
+    一个独立的、解耦的因子计算器。
+    它只接收一个标准的OHLCVA DataFrame，并计算所有预定义的因子。
+    """
+    def __init__(self, df: pd.DataFrame):
+        if not all(col in df.columns for col in ['open', 'high', 'low', 'close', 'volume', 'amount']):
+            raise ValueError("输入DataFrame必须包含 'open', 'high', 'low', 'close', 'volume', 'amount' 列")
+        self.df = df.copy()
+        ta.Imports["verbose"] = False
 
-    def _extract_features_from_data(self, csi300_df: pd.DataFrame) -> pd.DataFrame:
+    def run(self, feature_names: list) -> pd.DataFrame:
         """
-        [V4] 提取与V4训练时完全一致的精简特征。
+        根据给定的特征名称列表，运行所有需要的因子计算。
         """
+        all_factors_df = pd.DataFrame(index=self.df.index)
+        
+        # [同步] 确保此处的计算方法列表与 prepare_csi300_features.py 完全一致
+        calculator_methods = {
+            'dynamic_ADX_CONFIRM': self._calc_adx_confirm,
+            'dynamic_v2_MA_SLOPE': self._calc_v2_ma_slope,
+            'dynamic_v2_MA_SCORE': self._calc_v2_ma_score,
+            'dynamic_v2_CPC_Factor': self._calc_v2_cpc_factor,
+            'dynamic_v2_VPCF': self._calc_v2_vpcf,
+            'dynamic_BREAKOUT_PWR': self._calc_breakout_pwr,
+            'dynamic_VOLUME_SURGE': self._calc_volume_surge,
+            'dynamic_MOM_ACCEL': self._calc_mom_accel,
+            'dynamic_RSI_OS': self._calc_rsi_os,
+            'dynamic_NEG_DEV': self._calc_neg_dev,
+            'dynamic_BOLL_LB': self._calc_boll_lb,
+            'dynamic_LOW_VOL': self._calc_low_vol,
+            'dynamic_MAX_DD': self._calc_max_dd,
+            'dynamic_DOWNSIDE_RISK': self._calc_downside_risk,
+            'dynamic_MACD_SIGNAL': self._calc_macd_signal,
+            'dynamic_BREAKOUT_DURATION': self._calc_breakout_duration,
+            # --- 新增老M值体系因子 ---
+            'dynamic_Old_D': self._calc_old_d,
+            'dynamic_Old_I': self._calc_old_i,
+            'dynamic_Old_M': self._calc_old_m,
+        }
+
+        for factor_name in feature_names:
+            if factor_name in calculator_methods:
+                factor_series = calculator_methods[factor_name]()
+                all_factors_df[factor_name] = factor_series
+            else:
+                raise ValueError(f"预测时发现未知特征 '{factor_name}'，模型和数据准备脚本可能不一致。")
+        
+        return all_factors_df
+
+    # --- 因子计算方法 (与prepare文件完全相同) ---
+    def _calc_adx_confirm(self, length=14, adx_threshold=25):
+        adx_df = self.df.ta.adx(length=length, high=self.df['high'], low=self.df['low'], close=self.df['close'])
+        adx_col, dmp_col, dmn_col = f'ADX_{length}', f'DMP_{length}', f'DMN_{length}'
+        condition = (adx_df[adx_col] > adx_threshold) & (adx_df[dmp_col] > adx_df[dmn_col])
+        return adx_df[adx_col].where(condition, 0.0).rename('dynamic_ADX_CONFIRM')
+
+    def _calc_v2_ma_slope(self, ma_period=20, ema_period=20):
+        ma = self.df['close'].rolling(window=ma_period).mean()
+        ma_roc = ma.pct_change(1)
+        return ma_roc.ewm(span=ema_period, adjust=False).mean().rename('dynamic_v2_MA_SLOPE')
+
+    def _calc_v2_ma_score(self, p1=5, p2=10, p3=20):
+        close = self.df['close']
+        ma5 = close.rolling(window=p1).mean()
+        ma10 = close.rolling(window=p2).mean()
+        ma20 = close.rolling(window=p3).mean()
+        spread1 = (close - ma5) / ma5.replace(0, 1e-9)
+        spread2 = (ma5 - ma10) / ma10.replace(0, 1e-9)
+        spread3 = (ma10 - ma20) / ma20.replace(0, 1e-9)
+        return ((spread1 + spread2 + spread3) / 3.0).rename('dynamic_v2_MA_SCORE')
+
+    def _calc_v2_cpc_factor(self, ema_period=10):
+        high, low, close = self.df['high'], self.df['low'], self.df['close']
+        price_range = high - low
+        dcp = (2 * close - high - low) / price_range.replace(0, 1e-9)
+        return dcp.ewm(span=ema_period, adjust=False).mean().rename('dynamic_v2_CPC_Factor')
+
+    def _calc_v2_vpcf(self, s=5, l=20, n_smooth=5):
+        ma_close_s = self.df['close'].rolling(window=s).mean()
+        price_momentum = ma_close_s.pct_change(1)
+        ma_amount_s = self.df['amount'].rolling(window=s).mean()
+        ma_amount_l = self.df['amount'].rolling(window=l).mean()
+        volume_level = (ma_amount_s / ma_amount_l.replace(0, 1e-9)) - 1
+        daily_score = price_momentum * volume_level
+        return daily_score.ewm(span=n_smooth, adjust=False).mean().rename('dynamic_v2_VPCF')
+
+    def _calc_breakout_pwr(self, lookback=60, atr_period=14):
+        high_lookback = self.df['high'].rolling(window=lookback).max().shift(1)
+        atr = self.df.ta.atr(length=atr_period, high=self.df['high'], low=self.df['low'], close=self.df['close'])
+        return ((self.df['close'] - high_lookback) / atr.replace(0, 1e-9)).rename('dynamic_BREAKOUT_PWR')
+
+    def _calc_volume_surge(self, lookback=20):
+        avg_amount = self.df['amount'].rolling(window=lookback).mean().shift(1)
+        return (self.df['amount'] / avg_amount.replace(0, 1e-9)).rename('dynamic_VOLUME_SURGE')
+
+    def _calc_mom_accel(self, roc_period=5, shift_period=11):
+        roc = self.df['close'].pct_change(roc_period)
+        roc_shifted = roc.shift(shift_period)
+        return ((roc / roc_shifted.replace(0, np.nan)) - 1).rename('dynamic_MOM_ACCEL')
+
+    def _calc_rsi_os(self, length=14):
+        return self.df.ta.rsi(close=self.df['close'], length=length).rename('dynamic_RSI_OS')
+
+    def _calc_neg_dev(self, period=60):
+        ma = self.df['close'].rolling(window=period).mean()
+        return ((self.df['close'] - ma) / ma.replace(0, 1e-9)).rename('dynamic_NEG_DEV')
+
+    def _calc_boll_lb(self, length=20, std=2.0):
+        boll = self.df.ta.bbands(close=self.df['close'], length=length, std=std)
+        lower_band = boll[f'BBL_{length}_{std}']
+        upper_band = boll[f'BBU_{length}_{std}']
+        band_width = upper_band - lower_band
+        return ((self.df['close'] - lower_band) / band_width.replace(0, 1e-9)).rename('dynamic_BOLL_LB')
+
+    def _calc_low_vol(self, period=20):
+        returns = self.df['close'].pct_change()
+        return returns.rolling(window=period).std().rename('dynamic_LOW_VOL')
+
+    def _calc_max_dd(self, period=60):
+        rolling_max = self.df['close'].rolling(window=period, min_periods=1).max()
+        daily_dd = self.df['close'] / rolling_max - 1.0
+        return daily_dd.rolling(window=period, min_periods=1).min().rename('dynamic_MAX_DD')
+
+    def _calc_downside_risk(self, period=60):
+        returns = self.df['close'].pct_change()
+        downside_returns = returns.copy()
+        downside_returns[downside_returns > 0] = 0
+        return downside_returns.rolling(window=period).std().rename('dynamic_DOWNSIDE_RISK')
+
+    # [同步] 补全与 prepare_csi300_features.py 一致的因子
+    def _calc_macd_signal(self, fast=12, slow=26, signal=9):
+        macd_df = self.df.ta.macd(fast=fast, slow=slow, signal=signal)
+        macd_line = macd_df[f'MACD_{fast}_{slow}_{signal}']
+        signal_line = macd_df[f'MACDs_{fast}_{slow}_{signal}']
+        factor = (macd_line - signal_line).where(macd_line > 0, 0)
+        return factor.rename('dynamic_MACD_SIGNAL')
+    
+    def _calc_breakout_duration(self, lookback=20):
+        high_lookback = self.df['close'].rolling(window=lookback).max().shift(1)
+        is_breakout = self.df['close'] > high_lookback
+        breakout_streaks = is_breakout.groupby((is_breakout != is_breakout.shift()).cumsum()).cumsum()
+        return breakout_streaks.rename('dynamic_BREAKOUT_DURATION')
+    
+
+    def _calc_old_d(self, lookback_k=20, a_param=200.0):
+        """
+        计算老M值体系中的方向函数 D(t)。
+        D(t) = tanh(a * h(t,K))
+        h(t,K) 是过去K天不同周期线性回归斜率的均值。
+        """
+        from scipy.stats import linregress # 仅在此方法中需要
+        close_prices = self.df['close']
+        g_values_list = []
+        
+        # 为了向量化计算，我们创建一个包含所有需要回归的窗口的DataFrame
+        # 对于每个交易日t，我们需要计算从t-k到t的回归，k从1到lookback_k
+        for k in range(1, lookback_k + 1):
+            # 截取 k+1 个数据点
+            windows = close_prices.rolling(window=k + 1)
+            
+            # 使用apply函数对每个窗口进行线性回归
+            # apply函数会比较慢，但对于这种复杂的窗口计算是必要的
+            # 注意：linregress需要numpy数组
+            slopes = windows.apply(lambda x: linregress(np.arange(len(x)), x).slope, raw=True)
+            
+            # 获取 t-k 日的收盘价
+            close_t_minus_k = close_prices.shift(k)
+            
+            # 计算 g(t,k)
+            g_tk = slopes / close_t_minus_k.replace(0, 1e-9)
+            g_values_list.append(g_tk)
+        # 将所有g(t,k)的值合并成一个DataFrame
+        g_df = pd.concat(g_values_list, axis=1)
+        
+        # 计算 h(t,K)，即对每一行（每个交易日）的g值求均值
+        h_t_k = g_df.mean(axis=1)
+        
+        # 计算 D(t)
+        d_t = np.tanh(a_param * h_t_k)
+        
+        return d_t.rename('dynamic_Old_D')
+    def _calc_old_i(self, adx_period=14, adx_threshold=20.0, b_param=0.075):
+        """
+        计算老M值体系中的强度函数 I(t)。
+        I(t) = max(0, tanh(b * (ADX(t) - threshold)))
+        """
+        # pandas_ta库可以非常高效地计算ADX
+        adx_df = self.df.ta.adx(length=adx_period, high=self.df['high'], low=self.df['low'], close=self.df['close'])
+        adx_series = adx_df[f'ADX_{adx_period}']
+        
+        # 计算 I(t)
+        raw_i = np.tanh(b_param * (adx_series - adx_threshold))
+        i_t = raw_i.clip(lower=0) # 使用clip实现max(0, raw_i)
+        
+        return i_t.rename('dynamic_Old_I')
+    def _calc_old_m(self):
+        """
+        计算老M值 OldM(t) = D(t) * I(t)。
+        这个因子依赖于 _calc_old_d 和 _calc_old_i 的计算结果。
+        为了效率，我们直接在这里调用它们，而不是重复计算。
+        """
+        # 为了避免重复计算，我们检查这些列是否已存在于一个临时的DataFrame中
+        # 但在当前架构下，最简单的做法是重新计算一次，或者修改run方法
+        # 这里我们选择直接计算，因为因子计算是独立的
+        d_t = self._calc_old_d()
+        i_t = self._calc_old_i()
+        
+        m_t = d_t * i_t
+        
+        return m_t.rename('dynamic_Old_M')
+
+# ==============================================================================
+#  重构后的 M 值预测服务 (Refactored M-Value Prediction Service)
+# ==============================================================================
+class MValueMLService:
+    MODELS_DIR = settings.BASE_DIR / 'selection_manager' / 'ml_models'
+    MODEL_FILE = MODELS_DIR / 'm_value_lgbm_model.joblib'
+    CONFIG_FILE = MODELS_DIR / 'm_value_model_config.json'
+    
+    # 因子计算所需的最长回溯期，应大于所有因子中最大的lookback period
+    # 例如，neg_dev(60), max_dd(60)等，给足100天buffer
+    REQUIRED_LOOKBACK = 100
+
+    def __init__(self):
+        self._model = None
+        self._config = None
+        self._dependencies_loaded = False
+
+    def _load_dependencies(self):
+        """懒加载模型和配置文件"""
+        if not self.MODEL_FILE.exists() or not self.CONFIG_FILE.exists():
+            logger.error("M值模型或配置文件不存在。请先运行 'prepare_csi300_features' 和 'train_csi300_model_test' 命令。")
+            return
+        try:
+            self._model = joblib.load(self.MODEL_FILE)
+            with open(self.CONFIG_FILE, 'r') as f:
+                self._config = json.load(f)
+            logger.info("成功加载M值预测模型 (LightGBM Regressor) 及配置。")
+        except Exception as e:
+            logger.error(f"加载M值模型依赖时发生错误: {e}", exc_info=True)
+            self._model, self._config = None, None
+        self._dependencies_loaded = True
+
+    def _prepare_input_data(self, csi300_df: pd.DataFrame) -> pd.DataFrame:
+        """
+        为单次预测准备特征向量。
+        """
+        if len(csi300_df) < self.REQUIRED_LOOKBACK:
+            raise ValueError(f"输入数据长度不足，需要至少 {self.REQUIRED_LOOKBACK} 天，实际 {len(csi300_df)} 天。")
+
         df = csi300_df.copy()
         
-        # ... (类型转换逻辑不变) ...
-        for col in df.columns:
-            if isinstance(df[col].dropna().iloc[0], Decimal):
-                df[col] = pd.to_numeric(df[col], errors='coerce')
+        # 数据清洗
+        numeric_cols = ['open', 'high', 'low', 'close', 'volume', 'amount']
+        for col in numeric_cols:
+            df[col] = pd.to_numeric(df[col], errors='coerce')
+        #df.ffill(inplace=True).bfill(inplace=True)
+        df.ffill(inplace=True)
+        df.bfill(inplace=True)
 
-        # [核心改造 V4] (与 V4 prepare 命令完全一致)
-        df['return_1d'] = df['close'].pct_change()
-        df['volatility_20d'] = df['return_1d'].rolling(20).std()
-
-        df['feature_mom_5d'] = df['close'].pct_change(5).rolling(3).mean()
-        df['feature_mom_20d'] = df['close'].pct_change(20).rolling(3).mean()
+        # 计算所有需要的特征
+        feature_names = self._config['feature_names']
+        calculator = FactorCalculator(df)
+        features_df = calculator.run(feature_names)
         
-        ma20 = df['close'].rolling(20).mean()
-        ma60 = df['close'].rolling(60).mean()
-        df['feature_bias_20d'] = (df['close'] / ma20) - 1
-        df['feature_bias_60d'] = (df['close'] / ma60) - 1
+        # 检查计算后的特征是否有NaN，并返回最后一行的特征向量
+        latest_features = features_df.iloc[-1]
+        if latest_features.isnull().any():
+            # 尝试向前填充，以防万一
+            latest_features = features_df.ffill().iloc[-1]
+            if latest_features.isnull().any():
+                 raise ValueError(f"计算出的最新特征向量包含NaN值，无法进行预测。NaNs in: {latest_features[latest_features.isnull()].index.tolist()}")
 
-        df['feature_vol_20d'] = df['volatility_20d']
-        df['feature_vol_ma_5d'] = df['volatility_20d'].rolling(5).mean()
+        return latest_features[feature_names] # 确保特征顺序与训练时一致
 
-        df['feature_rsi_14'] = df.ta.rsi(length=14)
-        bbands = df.ta.bbands(length=20)
-        df['feature_bb_percent'] = bbands['BBP_20_2.0']
-
-        df['feature_cross_vol_bias'] = df['feature_vol_20d'] * df['feature_bias_20d']
-        df['feature_cross_mom_rsi'] = df['feature_mom_5d'] * (df['feature_rsi_14'] - 50)
-        
-        feature_cols = [col for col in df.columns if col.startswith('feature_')]
-        
-        final_features = df[feature_cols].iloc[-1:].copy()
-        final_features.fillna(method='ffill', inplace=True)
-        final_features.fillna(0, inplace=True)
-        
-        return final_features
     def predict_csi300_next_day_trend(self, csi300_df: pd.DataFrame) -> float:
         """
-        [V3] 输入行情数据，预测下一日的涨跌可能性。
+        使用重构后的ML回归模型直接预测M值。
+        M值由模型直接输出，其范围在[-1, 1]之间。
         """
-        # ... 懒加载逻辑不变 ...
-        if not self._model_loaded: self._load_model()
-        if self._model is None: return 0.0
-
-        try:
-            # 提取最后一天的特征行
-            feature_df = self._extract_features_from_data(csi300_df)
-            
-            # 确保特征顺序和训练时一致
-            feature_df = feature_df[self._model.feature_names_]
-
-            pred_proba_up = self._model.predict_proba(feature_df)[0, 1]
-            logger.info(f"模型原始预测值 (上涨概率): {pred_proba_up:.4%}")
-
-            scaled_value = 2 * (pred_proba_up - 0.5)
-            logger.info(f"缩放后的M值: {scaled_value:.4f}")
-            return scaled_value
-        except Exception as e:
-            logger.error(f"预测过程中发生错误: {e}", exc_info=True)
+        if not self._dependencies_loaded:
+            self._load_dependencies()
+        
+        if self._model is None or self._config is None:
+            logger.warning("M值模型未加载，返回中性值 0.0")
             return 0.0
 
-m_value_service_instance = MValueService()
+        try:
+            # 1. 准备输入特征向量
+            feature_vector = self._prepare_input_data(csi300_df)
+            
+            # 2. 模型预测
+            # 回归模型直接输出预测值
+            model_input = feature_vector.to_frame().T 
+            m_value = self._model.predict(model_input)[0]
+            
+            # 3. 裁剪M值确保在[-1, 1]范围内，以防模型预测略微超限
+            m_value = np.clip(m_value, -1.0, 1.0)
+            
+            logger.info(
+                f"M值预测: 模型直接输出 M-Value = {m_value:.4f}"
+            )
+            return float(m_value)
+        
+        except Exception as e:
+            logger.error(f"预测M值过程中发生严重错误: {e}", exc_info=True)
+            return 0.0
+
+# 创建全局单例，供下游服务导入
+m_value_service_instance = MValueMLService()
 
 ####文件结束####
 
@@ -4889,9 +4875,9 @@ class SelectionService:
             # 1. 获取最近60个交易日的数据
             quotes_60_days_qs = IndexQuotesCsi300.objects.filter(
                 trade_date__lte=self.trade_date
-            ).order_by('-trade_date')[:60]
+            ).order_by('-trade_date')[:100]
             
-            if len(quotes_60_days_qs) < 60:
+            if len(quotes_60_days_qs) < 100:
                 logger.warning("沪深300数据不足60天，无法使用ML模型进行预测，将回退到传统方法。")
             else:
                 # [修复] 从QuerySet直接构建DataFrame
@@ -5142,8 +5128,8 @@ class SelectionService:
             'MT': 0.0,
             'BO': 0.0,
             'QD': 0.0,
-            'MR': 1.0,
-            'OLD':0.0
+            'MR': 0.0,
+            'OLD':1.0
             }
         else:
 
@@ -5246,7 +5232,7 @@ class SelectionService:
             #old
             'MA20_SLOPE': self._calc_factor_x1_ma20_slope,
             'MA_ALIGNMENT': self._calc_factor_x2_ma_alignment,
-            'ADX_TREND': self._calc_factor_x3_adx_trend,
+            'ADX_TREND': self._calc_factor_adx_confirm,
             'ROC10': self._calc_factor_x4_roc,
             'VOL_BREAKOUT': self._calc_factor_x5_vol_breakout,
             'NEW_HIGH_MOMENTUM': self._calc_factor_x6_new_high_momentum,
@@ -5460,7 +5446,7 @@ class SelectionService:
         minus_di_final = minus_di.iloc[-1]
         
         # 条件判断现在是在Series上进行，完全向量化
-        condition = (adx_final > 20) & (plus_di_final > minus_di_final)
+        condition = (adx_final > 25) & (plus_di_final > minus_di_final)
         
         # .where() 也是一个高效的向量化操作
         # 返回的Series结构与原函数完全一致
@@ -6046,7 +6032,7 @@ class SelectionService:
                         factor_values_to_create.append(
                             DailyFactorValues(
                                 stock_code_id=stock_code, trade_date=self.trade_date,
-                                factor_code_id=factor_code, raw_value=min(Decimal(str(raw_value)),Decimal(999999)),
+                                factor_code_id=factor_code, raw_value=min(Decimal(str(raw_value)),Decimal(999999999)),
                                 norm_score=Decimal(str(norm_score))
                             )
                         )
@@ -6117,6 +6103,705 @@ class SelectionService:
         logger.debug("所有结果已成功保存到数据库。")
 
     # endregion
+
+####文件结束####
+
+####selection_manager\management\commands\generate_m_value_csv.py####
+# selection_manager/management/commands/generate_m_value_csv.py
+
+import logging
+import os
+from decimal import Decimal
+
+import pandas as pd
+from django.conf import settings
+from django.core.management.base import BaseCommand
+from tqdm import tqdm
+
+from common.models import IndexQuotesCsi300
+from selection_manager.service.selection_service import SelectionService
+
+# 获取logger实例
+logger = logging.getLogger(__name__)
+
+class Command(BaseCommand):
+    """
+    一个Django管理命令，用于计算沪深300指数从2010-08-19至2025-08-18的
+    完整历史M值，并生成一个CSV文件供分析脚本使用。
+    
+    运行方式:
+    python manage.py generate_m_value_csv
+    """
+    help = '计算沪深300历史M值并生成 m_value_csi300.csv 文件'
+
+    def handle(self, *args, **options):
+        self.stdout.write(self.style.SUCCESS('===== 开始计算沪深300历史M值 ====='))
+
+        try:
+            # 1. 一次性从数据库加载所有需要的沪深300行情数据
+            self.stdout.write("正在从数据库加载沪深300历史行情数据...")
+            quotes_qs = IndexQuotesCsi300.objects.all().order_by('trade_date').values('trade_date', 'close')
+            if not quotes_qs:
+                self.stdout.write(self.style.ERROR("错误：数据库表 tb_index_quotes_csi300 中没有数据。请先回填数据。"))
+                return
+            
+            all_quotes_df = pd.DataFrame.from_records(quotes_qs)
+            all_dates = all_quotes_df['trade_date'].tolist()
+            self.stdout.write(f"数据加载完成，共 {len(all_dates)} 个交易日。")
+
+            # 2. 初始化SelectionService并加载一次参数
+            # 使用第一个日期进行初始化，后续在循环中更新日期
+            service = SelectionService(trade_date=all_dates[0], mode='backtest')
+            service._load_dynamic_parameters_and_defs()
+            self.stdout.write("策略服务和参数初始化完成。")
+
+            # 3. 循环计算每一天的M值
+            results = []
+            self.stdout.write("开始逐日计算M值...")
+            LOOKBACK_BUFFER = 100
+            if len(all_dates) <= LOOKBACK_BUFFER:
+                self.stdout.write(self.style.ERROR(f"错误：总交易日数 ({len(all_dates)}) 不足以满足 {LOOKBACK_BUFFER} 天的回溯期。"))
+                return
+            # 使用tqdm创建进度条
+            for current_date in tqdm(all_dates[LOOKBACK_BUFFER:], desc="计算M值进度"):
+                # 更新服务的交易日期
+                service.trade_date = current_date
+                
+                # 调用核心方法计算M值，按要求传入空stock_pool
+                m_value = service._calculate_market_regime_M(stock_pool=[])
+                
+                # 从已加载的DataFrame中获取收盘价
+                close_price = all_quotes_df.loc[all_quotes_df['trade_date'] == current_date, 'close'].iloc[0]
+                
+                results.append({
+                    '日期': current_date,
+                    'm值': m_value,
+                    '沪深300收盘指数': float(close_price) # 转换为float以便pandas处理
+                })
+
+            if not results:
+                self.stdout.write(self.style.WARNING("计算完成，但没有生成任何结果。"))
+                return
+
+            # 4. 将结果转换为DataFrame并保存为CSV
+            self.stdout.write("所有M值计算完成，正在生成CSV文件...")
+            results_df = pd.DataFrame(results)
+            
+            # 定义输出路径为项目根目录
+            output_path = os.path.join(settings.BASE_DIR, 'm_value_csi300.csv')
+            
+            # 保存文件，使用 utf-8-sig 编码以确保Excel能正确打开
+            results_df.to_csv(output_path, index=False, encoding='utf-8-sig', float_format='%.4f')
+
+            self.stdout.write(self.style.SUCCESS(f"\n===== 任务成功完成！ ====="))
+            self.stdout.write(f"文件已保存至: {output_path}")
+            self.stdout.write(f"现在你可以运行 [M值关系分析.py] 脚本了。")
+
+        except Exception as e:
+            self.stdout.write(self.style.ERROR(f"任务执行过程中发生严重错误: {e}"))
+            logger.error("生成M值CSV文件失败", exc_info=True)
+
+
+####文件结束####
+
+####selection_manager\management\commands\prepare_csi300_features.py####
+# selection_manager/management/commands/prepare_csi300_features.py
+
+import logging
+import pickle
+import json
+from pathlib import Path
+
+import numpy as np
+import pandas as pd
+import pandas_ta as ta
+from django.core.management.base import BaseCommand
+from django.conf import settings
+from tqdm import tqdm
+
+from common.models import IndexQuotesCsi300
+
+logger = logging.getLogger(__name__)
+
+# ==============================================================================
+#  特征配置中心 (Pluggable Feature Configuration)
+# ==============================================================================
+# 通过修改此字典的True/False值，可以控制哪些特征被用于训练。
+# 这是实现“可插拔”设计的核心。
+FEATURE_CONFIG = {
+    # 趋势动能 (MT) 维度
+    'dynamic_ADX_CONFIRM': True,
+    'dynamic_v2_MA_SLOPE': True,
+    'dynamic_v2_MA_SCORE': True,
+    'dynamic_v2_CPC_Factor': True,
+    'dynamic_v2_VPCF': True,
+    
+    # 强势突破 (BO) 维度
+    'dynamic_BREAKOUT_PWR': True,
+    'dynamic_VOLUME_SURGE': True,
+    'dynamic_MOM_ACCEL': True,
+
+    # 均值回归 (MR) 维度
+    'dynamic_RSI_OS': True,
+    'dynamic_NEG_DEV': True,
+    'dynamic_BOLL_LB': True,
+
+    # 质量防御 (QD) 维度
+    'dynamic_LOW_VOL': True,
+    'dynamic_MAX_DD': True,
+    'dynamic_DOWNSIDE_RISK': True,
+
+    # 新因子
+    'dynamic_MACD_SIGNAL': False,
+
+    'dynamic_BREAKOUT_DURATION': False,
+
+    # --- 老M值体系因子 ---
+    'dynamic_Old_D': True,
+    'dynamic_Old_I': True,
+    'dynamic_Old_M': True,
+}
+
+# ==============================================================================
+#  独立的因子计算器 (Decoupled Factor Calculator)
+# ==============================================================================
+class FactorCalculator:
+    """
+    一个独立的、解耦的因子计算器。
+    它只接收一个标准的OHLCVA DataFrame，并计算所有预定义的因子。
+    这个类将被复制到 m_value_service.py 中以保持解耦。
+    """
+    def __init__(self, df: pd.DataFrame):
+        if not all(col in df.columns for col in ['open', 'high', 'low', 'close', 'volume', 'amount']):
+            raise ValueError("输入DataFrame必须包含 'open', 'high', 'low', 'close', 'volume', 'amount' 列")
+        self.df = df.copy()
+        # 确保 pandas_ta 不会打印不必要的信息
+        ta.Imports["verbose"] = False
+
+    def run(self, config: dict) -> (pd.DataFrame, list):
+        """
+        根据配置运行所有启用的因子计算。
+        返回一个包含所有因子值的DataFrame和使用的因子列表。
+        """
+        all_factors_df = pd.DataFrame(index=self.df.index)
+        enabled_factors = []
+
+        # 获取所有可用的计算方法
+        calculator_methods = {
+            'dynamic_ADX_CONFIRM': self._calc_adx_confirm,
+            'dynamic_v2_MA_SLOPE': self._calc_v2_ma_slope,
+            'dynamic_v2_MA_SCORE': self._calc_v2_ma_score,
+            'dynamic_v2_CPC_Factor': self._calc_v2_cpc_factor,
+            'dynamic_v2_VPCF': self._calc_v2_vpcf,
+            'dynamic_BREAKOUT_PWR': self._calc_breakout_pwr,
+            'dynamic_VOLUME_SURGE': self._calc_volume_surge,
+            'dynamic_MOM_ACCEL': self._calc_mom_accel,
+            'dynamic_RSI_OS': self._calc_rsi_os,
+            'dynamic_NEG_DEV': self._calc_neg_dev,
+            'dynamic_BOLL_LB': self._calc_boll_lb,
+            'dynamic_LOW_VOL': self._calc_low_vol,
+            'dynamic_MAX_DD': self._calc_max_dd,
+            'dynamic_DOWNSIDE_RISK': self._calc_downside_risk,
+            'dynamic_MACD_SIGNAL':self._calc_macd_signal,
+            'dynamic_BREAKOUT_DURATION':self._calc_breakout_duration,
+             # --- 新增老M值体系因子 ---
+            'dynamic_Old_D': self._calc_old_d,
+            'dynamic_Old_I': self._calc_old_i,
+            'dynamic_Old_M': self._calc_old_m,
+        }
+
+        for factor_name, is_enabled in config.items():
+            if is_enabled:
+                if factor_name in calculator_methods:
+                    logger.debug(f"Calculating factor: {factor_name}")
+                    factor_series = calculator_methods[factor_name]()
+                    all_factors_df[factor_name] = factor_series
+                    enabled_factors.append(factor_name)
+                else:
+                    logger.warning(f"Factor '{factor_name}' is enabled in config but no calculation method found.")
+        
+        return all_factors_df, enabled_factors
+
+    # --- 趋势动能 (MT) 因子 ---
+    def _calc_adx_confirm(self, length=14, adx_threshold=25):
+        adx_df = self.df.ta.adx(length=length, high=self.df['high'], low=self.df['low'], close=self.df['close'])
+        adx_col, dmp_col, dmn_col = f'ADX_{length}', f'DMP_{length}', f'DMN_{length}'
+        condition = (adx_df[adx_col] > adx_threshold) & (adx_df[dmp_col] > adx_df[dmn_col])
+        return adx_df[adx_col].where(condition, 0.0).rename('dynamic_ADX_CONFIRM')
+
+    def _calc_v2_ma_slope(self, ma_period=20, ema_period=20):
+        ma = self.df['close'].rolling(window=ma_period).mean()
+        ma_roc = ma.pct_change(1)
+        return ma_roc.ewm(span=ema_period, adjust=False).mean().rename('dynamic_v2_MA_SLOPE')
+
+    def _calc_v2_ma_score(self, p1=5, p2=10, p3=20):
+        close = self.df['close']
+        ma5 = close.rolling(window=p1).mean()
+        ma10 = close.rolling(window=p2).mean()
+        ma20 = close.rolling(window=p3).mean()
+        spread1 = (close - ma5) / ma5.replace(0, 1e-9)
+        spread2 = (ma5 - ma10) / ma10.replace(0, 1e-9)
+        spread3 = (ma10 - ma20) / ma20.replace(0, 1e-9)
+        return ((spread1 + spread2 + spread3) / 3.0).rename('dynamic_v2_MA_SCORE')
+
+    def _calc_v2_cpc_factor(self, ema_period=10):
+        high, low, close = self.df['high'], self.df['low'], self.df['close']
+        price_range = high - low
+        dcp = (2 * close - high - low) / price_range.replace(0, 1e-9)
+        return dcp.ewm(span=ema_period, adjust=False).mean().rename('dynamic_v2_CPC_Factor')
+
+    def _calc_v2_vpcf(self, s=5, l=20, n_smooth=5):
+        ma_close_s = self.df['close'].rolling(window=s).mean()
+        price_momentum = ma_close_s.pct_change(1)
+        ma_amount_s = self.df['amount'].rolling(window=s).mean()
+        ma_amount_l = self.df['amount'].rolling(window=l).mean()
+        volume_level = (ma_amount_s / ma_amount_l.replace(0, 1e-9)) - 1
+        daily_score = price_momentum * volume_level
+        return daily_score.ewm(span=n_smooth, adjust=False).mean().rename('dynamic_v2_VPCF')
+
+    # --- 强势突破 (BO) 因子 ---
+    def _calc_breakout_pwr(self, lookback=60, atr_period=14):
+        high_lookback = self.df['high'].rolling(window=lookback).max().shift(1)
+        atr = self.df.ta.atr(length=atr_period, high=self.df['high'], low=self.df['low'], close=self.df['close'])
+        return ((self.df['close'] - high_lookback) / atr.replace(0, 1e-9)).rename('dynamic_BREAKOUT_PWR')
+
+    def _calc_volume_surge(self, lookback=20):
+        avg_amount = self.df['amount'].rolling(window=lookback).mean().shift(1)
+        return (self.df['amount'] / avg_amount.replace(0, 1e-9)).rename('dynamic_VOLUME_SURGE')
+
+    def _calc_mom_accel(self, roc_period=5, shift_period=11):
+        roc = self.df['close'].pct_change(roc_period)
+        roc_shifted = roc.shift(shift_period)
+        return ((roc / roc_shifted.replace(0, np.nan)) - 1).rename('dynamic_MOM_ACCEL')
+
+    # --- 均值回归 (MR) 因子 ---
+    def _calc_rsi_os(self, length=14):
+        return self.df.ta.rsi(close=self.df['close'], length=length).rename('dynamic_RSI_OS')
+
+    def _calc_neg_dev(self, period=60):
+        ma = self.df['close'].rolling(window=period).mean()
+        return ((self.df['close'] - ma) / ma.replace(0, 1e-9)).rename('dynamic_NEG_DEV')
+
+    def _calc_boll_lb(self, length=20, std=2.0):
+        boll = self.df.ta.bbands(close=self.df['close'], length=length, std=std)
+        lower_band = boll[f'BBL_{length}_{std}']
+        upper_band = boll[f'BBU_{length}_{std}']
+        band_width = upper_band - lower_band
+        return ((self.df['close'] - lower_band) / band_width.replace(0, 1e-9)).rename('dynamic_BOLL_LB')
+
+    # --- 质量防御 (QD) 因子 ---
+    def _calc_low_vol(self, period=20):
+        returns = self.df['close'].pct_change()
+        return returns.rolling(window=period).std().rename('dynamic_LOW_VOL')
+
+    def _calc_max_dd(self, period=60):
+        rolling_max = self.df['close'].rolling(window=period, min_periods=1).max()
+        daily_dd = self.df['close'] / rolling_max - 1.0
+        return daily_dd.rolling(window=period, min_periods=1).min().rename('dynamic_MAX_DD')
+
+    def _calc_downside_risk(self, period=60):
+        returns = self.df['close'].pct_change()
+        downside_returns = returns.copy()
+        downside_returns[downside_returns > 0] = 0
+        return downside_returns.rolling(window=period).std().rename('dynamic_DOWNSIDE_RISK')
+    
+    # --- 新因子 ---
+    def _calc_macd_signal(self, fast=12, slow=26, signal=9):
+        macd_df = self.df.ta.macd(fast=fast, slow=slow, signal=signal)
+        macd_line = macd_df[f'MACD_{fast}_{slow}_{signal}']
+        signal_line = macd_df[f'MACDs_{fast}_{slow}_{signal}']
+        # 因子定义为：MACD线上穿信号线的强度，且MACD线在0轴之上
+        factor = (macd_line - signal_line).where(macd_line > 0, 0)
+        return factor.rename('dynamic_MACD_SIGNAL')
+    
+    def _calc_breakout_duration(self, lookback=20):
+        high_lookback = self.df['close'].rolling(window=lookback).max().shift(1)
+        is_breakout = self.df['close'] > high_lookback
+        
+        # 计算连续为True的天数
+        breakout_streaks = is_breakout.groupby((is_breakout != is_breakout.shift()).cumsum()).cumsum()
+        return breakout_streaks.rename('dynamic_BREAKOUT_DURATION')
+    
+
+    def _calc_old_d(self, lookback_k=20, a_param=200.0):
+        """
+        计算老M值体系中的方向函数 D(t)。
+        D(t) = tanh(a * h(t,K))
+        h(t,K) 是过去K天不同周期线性回归斜率的均值。
+        """
+        from scipy.stats import linregress # 仅在此方法中需要
+        close_prices = self.df['close']
+        g_values_list = []
+        
+        # 为了向量化计算，我们创建一个包含所有需要回归的窗口的DataFrame
+        # 对于每个交易日t，我们需要计算从t-k到t的回归，k从1到lookback_k
+        for k in range(1, lookback_k + 1):
+            # 截取 k+1 个数据点
+            windows = close_prices.rolling(window=k + 1)
+            
+            # 使用apply函数对每个窗口进行线性回归
+            # apply函数会比较慢，但对于这种复杂的窗口计算是必要的
+            # 注意：linregress需要numpy数组
+            slopes = windows.apply(lambda x: linregress(np.arange(len(x)), x).slope, raw=True)
+            
+            # 获取 t-k 日的收盘价
+            close_t_minus_k = close_prices.shift(k)
+            
+            # 计算 g(t,k)
+            g_tk = slopes / close_t_minus_k.replace(0, 1e-9)
+            g_values_list.append(g_tk)
+        # 将所有g(t,k)的值合并成一个DataFrame
+        g_df = pd.concat(g_values_list, axis=1)
+        
+        # 计算 h(t,K)，即对每一行（每个交易日）的g值求均值
+        h_t_k = g_df.mean(axis=1)
+        
+        # 计算 D(t)
+        d_t = np.tanh(a_param * h_t_k)
+        
+        return d_t.rename('dynamic_Old_D')
+    def _calc_old_i(self, adx_period=14, adx_threshold=20.0, b_param=0.075):
+        """
+        计算老M值体系中的强度函数 I(t)。
+        I(t) = max(0, tanh(b * (ADX(t) - threshold)))
+        """
+        # pandas_ta库可以非常高效地计算ADX
+        adx_df = self.df.ta.adx(length=adx_period, high=self.df['high'], low=self.df['low'], close=self.df['close'])
+        adx_series = adx_df[f'ADX_{adx_period}']
+        
+        # 计算 I(t)
+        raw_i = np.tanh(b_param * (adx_series - adx_threshold))
+        i_t = raw_i.clip(lower=0) # 使用clip实现max(0, raw_i)
+        
+        return i_t.rename('dynamic_Old_I')
+    def _calc_old_m(self):
+        """
+        计算老M值 OldM(t) = D(t) * I(t)。
+        这个因子依赖于 _calc_old_d 和 _calc_old_i 的计算结果。
+        为了效率，我们直接在这里调用它们，而不是重复计算。
+        """
+        # 为了避免重复计算，我们检查这些列是否已存在于一个临时的DataFrame中
+        # 但在当前架构下，最简单的做法是重新计算一次，或者修改run方法
+        # 这里我们选择直接计算，因为因子计算是独立的
+        d_t = self._calc_old_d()
+        i_t = self._calc_old_i()
+        
+        m_t = d_t * i_t
+        
+        return m_t.rename('dynamic_Old_M')
+
+
+
+
+# ==============================================================================
+#  主命令 (Main Command)
+# ==============================================================================
+class Command(BaseCommand):
+    help = '[M-Value Refactor] 基于精选因子和连续夏普比率标签，为沪深300指数生成机器学习数据集。'
+
+    # --- 路径和配置 ---
+    MODELS_DIR = settings.BASE_DIR / 'selection_manager' / 'ml_models'
+    DATASET_FILE = MODELS_DIR / 'm_value_dataset.pkl'
+    MODEL_CONFIG_FILE = MODELS_DIR / 'm_value_model_config.json'
+
+    # --- 新标签体系配置 ---
+    LABEL_LOOKFORWARD = 3      # 向前看60个交易日计算夏普比率
+    RISK_FREE_RATE_ANNUAL = 0.02 # 无风险年利率，设为4%
+    TANH_SCALING_FACTOR = 1    # tanh的缩放因子a，使得夏普=1时接近饱和
+
+    def _get_continuous_m_labels(self, df: pd.DataFrame) -> pd.Series:
+        """
+        根据未来60日年化夏普比率，计算连续的M值标签。
+        标签公式: M = tanh(a * SharpeRatio)
+        """
+        self.stdout.write("步骤 2/4: 应用新的连续M值标签体系 (基于夏普比率)...")
+        
+        # 计算每日收益率
+        returns = df['close'].pct_change()
+        
+        # 将年化无风险利率转换为日无风险利率
+        # (1 + r_annual) = (1 + r_daily)^252  => r_daily = (1 + r_annual)^(1/252) - 1
+        # 一年大约有252个交易日
+        daily_risk_free_rate = (1 + self.RISK_FREE_RATE_ANNUAL)**(1/252) - 1
+        
+        # 计算超额收益率
+        excess_returns = returns - daily_risk_free_rate
+        
+        # 使用高效的向量化方法计算未来60天的滚动指标
+        # 为了计算未来60天，我们将数据向前移动60天，然后计算过去60天的滚动值
+        # 这等价于在当前点计算未来60天的数据
+        future_mean = excess_returns.shift(-self.LABEL_LOOKFORWARD).rolling(window=self.LABEL_LOOKFORWARD).mean()
+        future_std = excess_returns.shift(-self.LABEL_LOOKFORWARD).rolling(window=self.LABEL_LOOKFORWARD).std()
+        
+        # 计算年化夏普比率
+        # 年化因子 = sqrt(252)
+        # 避免除以零
+        annualized_sharpe_ratio = (future_mean / future_std.replace(0, np.nan)) * np.sqrt(252)
+        
+        # 应用tanh函数生成最终的M值标签
+        m_labels = np.tanh(self.TANH_SCALING_FACTOR * annualized_sharpe_ratio)
+        m_labels_raw = np.tanh(self.TANH_SCALING_FACTOR * annualized_sharpe_ratio)
+        m_labels_smoothed = m_labels_raw.rolling(window=5, min_periods=1).mean()
+        self.stdout.write(f"标签计算完成。缩放因子a={self.TANH_SCALING_FACTOR}, 无风险利率(年)={self.RISK_FREE_RATE_ANNUAL}")
+        
+        return m_labels_smoothed
+
+    def handle(self, *args, **options):
+        self.stdout.write(self.style.SUCCESS("===== [M-Value Refactor] 开始准备机器学习数据集 ====="))
+        self.MODELS_DIR.mkdir(parents=True, exist_ok=True)
+
+        # 1. 加载并准备数据
+        self.stdout.write("步骤 1/4: 加载沪深300行情数据...")
+        quotes_qs = IndexQuotesCsi300.objects.all().order_by('trade_date').values()
+        df = pd.DataFrame.from_records(quotes_qs)
+        df['trade_date'] = pd.to_datetime(df['trade_date'])
+        df.set_index('trade_date', inplace=True)
+        
+        numeric_cols = ['open', 'high', 'low', 'close', 'volume', 'amount']
+        for col in numeric_cols:
+            df[col] = pd.to_numeric(df[col], errors='coerce')
+        df.dropna(subset=numeric_cols, inplace=True)
+
+        # 2. 生成标签 (已重构为连续M值)
+        labels = self._get_continuous_m_labels(df)
+        df['label'] = labels
+
+        # 3. 计算特征
+        self.stdout.write("步骤 3/4: 计算所有已启用的特征...")
+        calculator = FactorCalculator(df)
+        features_df, enabled_features = calculator.run(FEATURE_CONFIG)
+        
+        # 4. 对齐数据并保存
+        self.stdout.write("步骤 4/4: 对齐特征和标签，并保存到文件...")
+        
+        # 合并特征和标签
+        final_df = pd.concat([features_df, df['label']], axis=1)
+        
+        # 剔除所有包含NaN的行（通常是序列开头和结尾，以及标签计算的未来窗口）
+        final_df.dropna(inplace=True)
+        
+        # 分离 X 和 y
+        X = final_df[enabled_features]
+        y = final_df['label'].astype(float) # 标签现在是浮点数
+        
+        self.stdout.write(f"数据集准备完成。总样本数: {len(X)}")
+        self.stdout.write("标签（M值）统计信息:")
+        self.stdout.write(str(y.describe()))
+        
+        # 保存数据集和配置
+        dataset = {
+            'X': X,
+            'y': y,
+            'index': X.index,
+            'feature_names': enabled_features,
+            # 'label_map' 不再需要，因为这是回归任务
+        }
+        with open(self.DATASET_FILE, 'wb') as f:
+            pickle.dump(dataset, f)
+        
+        self.stdout.write(self.style.SUCCESS(f"数据集已成功保存至: {self.DATASET_FILE}"))
+        
+        # 保存模型配置，主要是特征列表，供预测时使用
+        model_config = {'feature_names': enabled_features}
+        with open(self.MODEL_CONFIG_FILE, 'w') as f:
+            json.dump(model_config, f, indent=4)
+        self.stdout.write(self.style.SUCCESS(f"模型配置文件已成功保存至: {self.MODEL_CONFIG_FILE}"))
+        self.stdout.write(self.style.SUCCESS("===== [M-Value Refactor] 数据准备流程结束 ====="))
+
+####文件结束####
+
+####selection_manager\management\commands\train_csi300_model_test.py####
+# selection_manager/management/commands/train_csi300_model_test.py
+
+import logging
+import pickle
+import json
+
+import numpy as np
+import pandas as pd
+import lightgbm as lgb
+from django.core.management.base import BaseCommand
+from django.conf import settings
+from sklearn.model_selection import TimeSeriesSplit
+from sklearn.metrics import mean_squared_error, r2_score
+# 移除分类相关的导入
+# from sklearn.utils.class_weight import compute_sample_weight
+import joblib
+import optuna
+
+logger = logging.getLogger(__name__)
+
+class Command(BaseCommand):
+    help = '[M-Value Refactor] 训练LightGBM回归模型以直接预测M值。'
+
+    # --- 路径配置 ---
+    MODELS_DIR = settings.BASE_DIR / 'selection_manager' / 'ml_models'
+    DATASET_FILE = MODELS_DIR / 'm_value_dataset.pkl'
+    MODEL_FILE = MODELS_DIR / 'm_value_lgbm_model.joblib'
+    MODEL_CONFIG_FILE = MODELS_DIR / 'm_value_model_config.json'
+
+    def handle(self, *args, **options):
+        self.stdout.write(self.style.SUCCESS("===== [M-Value Refactor] 开始训练LightGBM回归模型 ====="))
+
+        # 1. 加载数据集
+        self.stdout.write(f"步骤 1/4: 从 {self.DATASET_FILE} 加载数据集...")
+        try:
+            with open(self.DATASET_FILE, 'rb') as f:
+                dataset = pickle.load(f)
+            X, y, feature_names = dataset['X'], dataset['y'], dataset['feature_names']
+            # label_map 不再存在
+        except FileNotFoundError:
+            self.stdout.write(self.style.ERROR(f"错误: 数据集文件 {self.DATASET_FILE} 不存在。请先运行 'prepare_csi300_features' 命令。"))
+            return
+
+        # 2. 定义模型和交叉验证
+        self.stdout.write("步骤 2/4: 设置回归模型参数和时间序列交叉验证...")
+        
+        # LightGBM 回归模型参数
+        lgbm_params = {
+            # --- 核心参数 (定义模型的基本任务和类型) ---
+            'objective': 'regression',      # 目标函数: 'regression' (或 'regression_l1', 'regression_l2') 表示这是一个回归问题。模型的目标是最小化均方误差(L2损失)。
+            # 'num_class' 参数在回归任务中不需要
+            'boosting_type': 'gbdt',        # 提升类型: 'gbdt' (Gradient Boosting Decision Tree) 是最经典、最常用的算法。
+            'metric': 'rmse',               # 评估指标: 'rmse' (Root Mean Squared Error, 均方根误差) 是回归问题中最常用的评估指标，用于监控验证集性能和早停。
+            
+            # --- 性能与速度 (影响训练效率和模型学习能力) ---
+            'n_estimators': 5000,           # 迭代次数 (树的数量): 模型要构建的树的总数。
+                                            # 改大: 允许模型进行更多轮的学习，可能捕捉更复杂的模式，但增加训练时间。
+                                            # 改小: 训练速度更快，但可能导致欠拟合。
+                                            # 后果: 通常设置一个较大的值（如1000-10000），并配合早停使用，让模型在验证集性能不再提升时自动停止，从而找到最佳迭代次数。
+            'learning_rate': 0.01,          # 学习率: 控制每次迭代（每棵树）对最终结果的贡献程度。
+                                            # 改小 (如0.005): 模型学习得更慢、更精细，需要更多的 'n_estimators' 才能达到好的效果，但通常能找到泛化能力更好的模型。
+                                            # 改大 (如0.1): 模型学习得更快，但容易跳过最优解，导致模型性能下降。
+                                            # 后果: 'learning_rate' 和 'n_estimators' 强相关。推荐策略是：低 'learning_rate' (如 0.01-0.05) + 高 'n_estimators' + 早停。
+            'n_jobs': -1,                   # 并行线程数: '-1' 表示使用所有可用的CPU核心，以最大化训练速度。
+            'seed': 42,                     # 随机种子: 用于确保每次训练的结果可复现。只要种子不变，数据划分、特征选择等随机过程的结果就会固定。
+            'verbose': -1,                  # 日志详细程度: '-1' 表示不输出训练过程中的详细日志，保持控制台输出干净。
+            
+            # --- 控制过拟合 (关键调优区，防止模型在新数据上表现差) ---
+            'num_leaves': 31,               # 每棵树的最大叶子节点数: 控制模型复杂度的核心参数。
+                                            # 改大: 允许树模型学习到更复杂的规则，可能提升训练集表现，但极易导致过拟合。
+                                            # 改小: 限制树的复杂度，防止过拟合，但过小会使模型过于简单，导致欠拟合。
+                                            # 后果: 它的值应小于 2^max_depth。'31' 是一个常用的、稳健的默认值。
+            'max_depth': -1,                # 树的最大深度: 限制树可以生长的最大层数。在LightGBM中，通常优先用 'num_leaves' 控制复杂度，'max_depth'设为-1（不限制）。
+            'subsample': 0.8,               # 样本采样比例 (行采样): 每次迭代时，从总训练数据中随机采样的比例。
+                                            # 改小 (如0.7): 每次只用一部分数据训练，增加了模型的随机性，有助于防止过拟合，提高泛化能力。值必须在 (0, 1.0] 之间。
+            'colsample_bytree': 0.8,        # 特征采样比例 (列采样): 每次迭代时，从总特征中随机选择的比例。
+                                            # 改小 (如0.7): 每次只用一部分特征来建树，有助于防止模型过度依赖少数几个强特征，从而防止过拟合。
+            'reg_alpha': 0.1,               # L1 正则化项: 对模型权重施加L1惩罚。
+            'reg_lambda': 0.1,              # L2 正则化项: 对模型权重施加L2惩罚。
+        }
+
+        # 步骤 3/4: 使用 Optuna 进行超参数优化和验证
+        self.stdout.write("步骤 3/4: 使用 Optuna 进行超参数优化...")
+        # 将数据的后20%作为验证集，前80%作为训练集
+        split_point = int(len(X) * 0.8)
+        X_train, X_val = X.iloc[:split_point], X.iloc[split_point:]
+        y_train, y_val = y.iloc[:split_point], y.iloc[split_point:]
+        self.stdout.write(f"训练集大小: {len(X_train)}, 验证集大小: {len(X_val)}")
+        
+        # 回归任务不需要计算样本权重
+        # sample_weights = compute_sample_weight(...)
+
+        # 定义 Optuna 的目标函数 (objective function)
+        def objective(trial):
+            # --- 定义要搜索的参数空间 ---
+            params_to_tune = {
+                'num_leaves': trial.suggest_int('num_leaves', 10, 100),
+                'max_depth': trial.suggest_int('max_depth', 3, 100),
+                'learning_rate': trial.suggest_float('learning_rate', 0.001, 0.05, log=True),
+                'subsample': trial.suggest_float('subsample', 0.6, 1.0),
+                'colsample_bytree': trial.suggest_float('colsample_bytree', 0.6, 1.0),
+                'reg_alpha': trial.suggest_float('reg_alpha', 1e-3, 1.0, log=True),
+                'reg_lambda': trial.suggest_float('reg_lambda', 1e-3, 1.0, log=True),
+            }
+            
+            # 合并基础参数和当前尝试的参数
+            current_params = lgbm_params.copy()
+            current_params.update(params_to_tune)
+            
+            # --- 使用时序交叉验证进行评估 ---
+            tscv = TimeSeriesSplit(n_splits=5) 
+            rmses = []
+            for train_index, val_index in tscv.split(X):
+                X_train_fold, X_val_fold = X.iloc[train_index], X.iloc[val_index]
+                y_train_fold, y_val_fold = y.iloc[train_index], y.iloc[val_index]
+                
+                model = lgb.LGBMRegressor(**current_params)
+                
+                # 训练模型
+                model.fit(X_train_fold, y_train_fold)
+                
+                # 在验证集上进行预测
+                val_preds = model.predict(X_val_fold)
+                
+                # 计算均方根误差
+                rmse = np.sqrt(mean_squared_error(y_val_fold, val_preds))
+                rmses.append(rmse)
+                
+            # 返回所有折叠分数的平均值，Optuna将最小化这个平均值
+            return np.mean(rmses)
+
+        # --- 运行 Optuna 优化 ---
+        self.stdout.write("开始参数搜索 (n_trials=50)...")
+        study = optuna.create_study(direction='minimize') # 目标是最小化 RMSE
+        study.optimize(objective, n_trials=5) # 尝试 50 组参数组合
+        
+        # --- 获取并报告最佳参数 ---
+        best_params = lgbm_params.copy()
+        best_params.update(study.best_params)
+        self.stdout.write(self.style.SUCCESS(f"\n搜索完成！最佳验证集 RMSE: {study.best_value:.4f}"))
+        self.stdout.write(self.style.SUCCESS(f"找到的最佳参数: {study.best_params}"))
+        
+        # --- 使用最佳参数在验证集上进行最终评估 ---
+        self.stdout.write(self.style.SUCCESS("\n--- 使用最佳参数在验证集上进行评估 ---"))
+        best_model = lgb.LGBMRegressor(**best_params)
+        best_model.fit(X_train, y_train,
+                       eval_set=[(X_val, y_val)],
+                       eval_metric='rmse',
+                       callbacks=[lgb.early_stopping(100, verbose=False)])
+        
+        val_preds = best_model.predict(X_val)
+        val_rmse = np.sqrt(mean_squared_error(y_val, val_preds))
+        val_r2 = r2_score(y_val, val_preds)
+        self.stdout.write(f"最终验证集 RMSE: {val_rmse:.4f}")
+        self.stdout.write(f"最终验证集 R^2 Score: {val_r2:.4f}")
+
+        # 步骤 4/4: 使用最佳参数训练最终模型并保存
+        self.stdout.write("\n步骤 4/4: 使用最佳参数训练最终模型并保存...")
+        self.stdout.write("\n--- 训练最终模型 (使用全部数据和最佳参数) ---")
+        final_model = lgb.LGBMRegressor(**best_params)
+        
+        # 回归任务不需要样本权重
+        final_model.fit(X, y)
+        
+        # 保存模型
+        joblib.dump(final_model, self.MODEL_FILE)
+        self.stdout.write(self.style.SUCCESS(f"最终模型已保存至: {self.MODEL_FILE}"))
+        
+        # 显示并保存特征重要性
+        feature_importance_df = pd.DataFrame({
+            'feature': feature_names,
+            'importance': final_model.feature_importances_
+        }).sort_values('importance', ascending=False)
+        self.stdout.write("\n--- 特征重要性 ---")
+        self.stdout.write(str(feature_importance_df.head(20)))
+        
+        # 更新模型配置文件，加入特征重要性
+        try:
+            with open(self.MODEL_CONFIG_FILE, 'r') as f:
+                model_config = json.load(f)
+            
+            model_config['feature_importance'] = feature_importance_df.to_dict('records')
+            model_config['best_params'] = {k: (v.isoformat() if isinstance(v, pd.Timestamp) else v) for k, v in study.best_params.items()}
+            
+            with open(self.MODEL_CONFIG_FILE, 'w') as f:
+                json.dump(model_config, f, indent=4)
+            self.stdout.write(self.style.SUCCESS(f"特征重要性和最佳参数已更新至: {self.MODEL_CONFIG_FILE}"))
+        except Exception as e:
+            self.stdout.write(self.style.ERROR(f"更新模型配置文件时出错: {e}"))
+            
+        self.stdout.write(self.style.SUCCESS("===== [M-Value Refactor] 模型训练流程结束！ ====="))
 
 ####文件结束####
 
@@ -7314,10 +7999,10 @@ class DecisionOrderService:
         elif M_t<Decimal('0.0'):
             S_cap=Decimal('0.0')
         else:
-            S_cap=M_t
+            S_cap=min(M_t*2,Decimal('1.0'))
             #Decimal('1.0')
         
-        S_cap=Decimal('1.0')
+        #S_cap=Decimal('1.0')
         # iv. 计算动态调整后的名义本金
         adjusted_unit_principal = baseline_unit_principal * S_cap
         
