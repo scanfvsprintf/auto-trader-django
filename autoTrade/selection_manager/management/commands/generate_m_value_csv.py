@@ -49,7 +49,7 @@ class Command(BaseCommand):
             # 3. 循环计算每一天的M值
             results = []
             self.stdout.write("开始逐日计算M值...")
-            LOOKBACK_BUFFER = 80
+            LOOKBACK_BUFFER = 100
             if len(all_dates) <= LOOKBACK_BUFFER:
                 self.stdout.write(self.style.ERROR(f"错误：总交易日数 ({len(all_dates)}) 不足以满足 {LOOKBACK_BUFFER} 天的回溯期。"))
                 return

@@ -274,7 +274,9 @@ class MValueMLService:
         numeric_cols = ['open', 'high', 'low', 'close', 'volume', 'amount']
         for col in numeric_cols:
             df[col] = pd.to_numeric(df[col], errors='coerce')
-        df.ffill(inplace=True).bfill(inplace=True)
+        #df.ffill(inplace=True).bfill(inplace=True)
+        df.ffill(inplace=True)
+        df.bfill(inplace=True)
 
         # 计算所有需要的特征
         feature_names = self._config['feature_names']
@@ -309,7 +311,7 @@ class MValueMLService:
             
             # 2. 模型预测
             # 回归模型直接输出预测值
-            model_input = feature_vector.values.reshape(1, -1)
+            model_input = feature_vector.to_frame().T 
             m_value = self._model.predict(model_input)[0]
             
             # 3. 裁剪M值确保在[-1, 1]范围内，以防模型预测略微超限

@@ -301,9 +301,9 @@ class SelectionService:
             # 1. 获取最近60个交易日的数据
             quotes_60_days_qs = IndexQuotesCsi300.objects.filter(
                 trade_date__lte=self.trade_date
-            ).order_by('-trade_date')[:60]
+            ).order_by('-trade_date')[:100]
             
-            if len(quotes_60_days_qs) < 60:
+            if len(quotes_60_days_qs) < 100:
                 logger.warning("沪深300数据不足60天，无法使用ML模型进行预测，将回退到传统方法。")
             else:
                 # [修复] 从QuerySet直接构建DataFrame
