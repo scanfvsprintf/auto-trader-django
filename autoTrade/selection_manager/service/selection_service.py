@@ -60,7 +60,7 @@ class SelectionService:
                 return
 
             # 1. 计算市场M值
-            self.market_regime_M = self._calculate_market_regime_M()
+            self.market_regime_M = self._calculate_market_regime_M(initial_stock_pool)
 
             # 2. 调用新服务获取所有股票的模型评分
             self.stdout.write("调用StockValueService获取所有股票的模型评分...")
