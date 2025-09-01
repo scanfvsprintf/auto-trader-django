@@ -277,6 +277,7 @@ class EmailNotificationService:
                     <th>股票代码</th>
                     <th>股票名称</th>
                     <th>可接受开盘区间</th>
+                    <th>选股得分</th>
                     <th>预期止盈率</th>
                     <th>预期止损率</th>
                 </tr>
@@ -295,6 +296,7 @@ class EmailNotificationService:
                 <td>{stock_info.stock_code}</td>
                 <td>{stock_info.stock_name}</td>
                 <td>{plan.miop:.2f} - {plan.maop:.2f}</td>
+                <td>{plan.final_score}</td>
                 <td class="red">{tp_rate_str}</td>
                 <td class="green">{sl_rate_str}</td>
             </tr>
