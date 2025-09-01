@@ -279,7 +279,7 @@ class StockValueService:
             stock_code_id__in=stock_pool,
             trade_date__gte=start_date,
             trade_date__lte=trade_date
-        ).values('trade_date', 'stock_code_id', 'open', 'high', 'low', 'close', 'volume', 'turnover')
+        ).values('trade_date', 'stock_code_id', 'open', 'high', 'low', 'close', 'volume', 'turnover', 'hfq_close')
         
         if not quotes_qs:
             logger.warning("在指定日期范围内未找到任何股票行情数据。")
