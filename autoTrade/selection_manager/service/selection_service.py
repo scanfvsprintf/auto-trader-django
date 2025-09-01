@@ -63,7 +63,7 @@ class SelectionService:
             self.market_regime_M = self._calculate_market_regime_M(initial_stock_pool)
 
             # 2. 调用新服务获取所有股票的模型评分
-            self.stdout.write("调用StockValueService获取所有股票的模型评分...")
+            logger.info("调用StockValueService获取所有股票的模型评分...")
             final_scores = self.stock_value_service.get_all_stock_scores(
                 stock_pool=initial_stock_pool,
                 trade_date=self.trade_date,
@@ -269,6 +269,7 @@ class SelectionService:
         logger.debug(f"已保存 {len(plans_to_create)} 条交易预案。")
 
     def _log_to_db(self, level, message):
+        logger.info(message)
         # 在回测等高性能场景下可以关闭
         # SystemLog.objects.create(log_level=level, module_name=MODULE_NAME, message=message)
         pass
