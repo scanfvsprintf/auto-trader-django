@@ -93,19 +93,19 @@ class Command(BaseCommand):
 
             for i, batch_codes in batch_iterator:
                 batch_iterator.set_description(f"处理批次 {i+1}/{len(stock_batches)}")
-                
+                self.stdout.write(f"\n  - [批次 {i+1}] 开始加载 {len(batch_codes)} 只股票的行情数据...")
                 # 2.1 加载当前批次的行情数据
                 quotes_df = self._load_batch_quotes(batch_codes, start_date)
                 if quotes_df.empty:
                     self.stdout.write(self.style.WARNING(f"警告: 批次 {i+1} 未能加载到任何数据，已跳过。"))
                     continue
-
+                self.stdout.write(f"  - [批次 {i+1}] 行情数据加载完成，共 {len(quotes_df)} 条记录。开始生成标签...")
                 # 2.2 为当前批次生成标签
                 labels_df = self._generate_labels(quotes_df)
-
+                self.stdout.write(f"  - [批次 {i+1}] 标签生成完成。开始计算特征...")
                 # 2.3 为当前批次计算因子特征
                 features_df = self._calculate_batch_features(quotes_df, feature_names)
-
+                self.stdout.write(f"  - [批次 {i+1}] 标签生成完成。开始计算特征...")
                 # 2.4 合并批次内的特征、M值和标签
                 # 将M值作为一个特征加入
                 features_df['market_m_value'] = features_df.index.get_level_values('trade_date').map(m_values_series)
