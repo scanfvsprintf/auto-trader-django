@@ -220,7 +220,7 @@ class Command(BaseCommand):
             quotes_df[col] = pd.to_numeric(quotes_df[col], errors='coerce')
         
         quotes_df['adj_factor'] = quotes_df['hfq_close'] / (quotes_df['close'] + 1e-9)
-    
+        quotes_df.drop_duplicates(subset=['trade_date', 'stock_code_id'], keep='last', inplace=True)
         # 3. 计算后复权的 open, high, low
         quotes_df['hfq_open'] = quotes_df['open'] * quotes_df['adj_factor']
         quotes_df['hfq_high'] = quotes_df['high'] * quotes_df['adj_factor']
