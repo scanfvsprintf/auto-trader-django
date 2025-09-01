@@ -49,7 +49,7 @@ class Command(BaseCommand):
             'boosting_type': 'gbdt',
             'metric': 'rmse',
             'n_estimators': 2000, # 减少迭代次数，因为数据集更大
-            'learning_rate': 0.02,
+            'learning_rate': 0.001,
             'n_jobs': -1,
             'seed': 42,
             'verbose': -1,

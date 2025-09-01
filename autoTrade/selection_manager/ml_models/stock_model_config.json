@@ -1,0 +1,104 @@
+{
+    "feature_names": [
+        "dynamic_ADX_CONFIRM",
+        "dynamic_v2_MA_SLOPE",
+        "dynamic_v2_MA_SCORE",
+        "dynamic_v2_CPC_Factor",
+        "dynamic_v2_VPCF",
+        "dynamic_BREAKOUT_PWR",
+        "dynamic_VOLUME_SURGE",
+        "dynamic_MOM_ACCEL",
+        "dynamic_RSI_OS",
+        "dynamic_NEG_DEV",
+        "dynamic_BOLL_LB",
+        "dynamic_LOW_VOL",
+        "dynamic_MAX_DD",
+        "dynamic_DOWNSIDE_RISK",
+        "dynamic_Old_D",
+        "dynamic_Old_I",
+        "dynamic_Old_M",
+        "market_m_value"
+    ],
+    "feature_importance": [
+        {
+            "feature": "market_m_value",
+            "importance": 3961
+        },
+        {
+            "feature": "dynamic_DOWNSIDE_RISK",
+            "importance": 496
+        },
+        {
+            "feature": "dynamic_v2_CPC_Factor",
+            "importance": 462
+        },
+        {
+            "feature": "dynamic_NEG_DEV",
+            "importance": 452
+        },
+        {
+            "feature": "dynamic_LOW_VOL",
+            "importance": 441
+        },
+        {
+            "feature": "dynamic_v2_MA_SLOPE",
+            "importance": 406
+        },
+        {
+            "feature": "dynamic_BOLL_LB",
+            "importance": 312
+        },
+        {
+            "feature": "dynamic_Old_I",
+            "importance": 292
+        },
+        {
+            "feature": "dynamic_v2_VPCF",
+            "importance": 263
+        },
+        {
+            "feature": "dynamic_RSI_OS",
+            "importance": 262
+        },
+        {
+            "feature": "dynamic_Old_D",
+            "importance": 262
+        },
+        {
+            "feature": "dynamic_BREAKOUT_PWR",
+            "importance": 255
+        },
+        {
+            "feature": "dynamic_MAX_DD",
+            "importance": 244
+        },
+        {
+            "feature": "dynamic_v2_MA_SCORE",
+            "importance": 237
+        },
+        {
+            "feature": "dynamic_VOLUME_SURGE",
+            "importance": 210
+        },
+        {
+            "feature": "dynamic_MOM_ACCEL",
+            "importance": 161
+        },
+        {
+            "feature": "dynamic_Old_M",
+            "importance": 150
+        },
+        {
+            "feature": "dynamic_ADX_CONFIRM",
+            "importance": 74
+        }
+    ],
+    "best_params": {
+        "num_leaves": 150,
+        "learning_rate": 0.01014457748509157,
+        "subsample": 0.7523731685865975,
+        "colsample_bytree": 0.6823148764114997,
+        "reg_alpha": 0.03651898528643067,
+        "reg_lambda": 0.02730516833082554
+    }
+}
