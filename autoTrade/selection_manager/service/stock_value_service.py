@@ -125,7 +125,8 @@ class VectorizedFactorEngine:
         roc = self.close.pct_change(roc_period)
         roc_shifted = roc.shift(shift_period)
         # 使用 where 避免分母为0时产生 inf
-        return (np.where(roc_shifted != 0, roc / roc_shifted, 1) - 1).iloc[-1]
+        acceleration = (roc / roc_shifted).where(roc_shifted != 0, 1) - 1
+        return acceleration.iloc[-1]
     def _calc_rsi_os(self, length=14):
         delta = self.close.diff()
         gain = delta.clip(lower=0)
