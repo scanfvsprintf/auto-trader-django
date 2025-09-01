@@ -219,6 +219,27 @@ class Command(BaseCommand):
         for col in numeric_cols:
             quotes_df[col] = pd.to_numeric(quotes_df[col], errors='coerce')
         
+        quotes_df['adj_factor'] = quotes_df['hfq_close'] / (quotes_df['close'] + 1e-9)
+    
+        # 3. 计算后复权的 open, high, low
+        quotes_df['hfq_open'] = quotes_df['open'] * quotes_df['adj_factor']
+        quotes_df['hfq_high'] = quotes_df['high'] * quotes_df['adj_factor']
+        quotes_df['hfq_low'] = quotes_df['low'] * quotes_df['adj_factor']
+        
+        # 4. 为了后续计算器接口统一，重命名列
+        #    现在 'open', 'high', 'low', 'close' 都代表后复权价格
+        quotes_df.rename(columns={
+            'hfq_open': 'open',
+            'hfq_high': 'high',
+            'hfq_low': 'low',
+            'hfq_close': 'close',
+            'turnover': 'amount' # 同时修正 amount 列名
+        }, inplace=True)
+
+        # 5. 只保留计算所需的列
+        final_cols = ['trade_date', 'stock_code_id', 'open', 'high', 'low', 'close', 'volume', 'amount']
+        quotes_df = quotes_df[final_cols]
+        
         return quotes_df
 
 
@@ -227,7 +248,7 @@ class Command(BaseCommand):
         [无改动] 根据配置为给定的DataFrame生成标签。
         此函数逻辑不变，现在作用于小批量的DataFrame，因此内存友好。
         """
-        df = quotes_df.set_index(['trade_date', 'stock_code_id'])['hfq_close'].unstack()
+        df = quotes_df.set_index(['trade_date', 'stock_code_id'])['close'].unstack()
         df.replace(0, np.nan, inplace=True)
         if LABEL_CONFIG['mode'] == 'return':
             # 计算未来N日收益率
@@ -282,7 +303,7 @@ class Command(BaseCommand):
         
         # 这里的tqdm现在显示单批次内的股票计算进度，可以禁用以减少日志输出
         for stock_code, group_df in stock_groups: # tqdm(stock_groups, desc="计算批次内因子", leave=False)
-            group_df = group_df.rename(columns={'turnover': 'amount'})
+            #group_df = group_df.rename(columns={'turnover': 'amount'})
             group_df = group_df.set_index('trade_date').sort_index()
             
             # 确保数据连续，填充缺失的交易日
