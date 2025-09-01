@@ -235,7 +235,7 @@ class Command(BaseCommand):
             labels = (future_price / df) - 1
         elif LABEL_CONFIG['mode'] == 'sharpe':
             # 计算未来N日夏普比率
-            returns = df.pct_change()
+            returns = df.pct_change(fill_method=None)
             daily_rf = (1 + LABEL_CONFIG['risk_free_rate_annual'])**(1/252) - 1
             excess_returns = returns - daily_rf
             
