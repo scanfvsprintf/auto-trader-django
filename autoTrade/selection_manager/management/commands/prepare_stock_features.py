@@ -26,7 +26,7 @@ logger = logging.getLogger(__name__)
 # 通过修改此处的配置，来控制数据集的生成方式
 LABEL_CONFIG = {
     'mode': 'sharpe',  # 'return' (未来收益率) 或 'sharpe' (未来夏普比率)
-    'lookforward_days': 10, # 标签向前看的天数 (N)
+    'lookforward_days': 3, # 标签向前看的天数 (N)
     'risk_free_rate_annual': 0.02, # 年化无风险利率，仅在 'sharpe' 模式下使用
     'tanh_scaling_factor': 1.0, # tanh缩放因子，仅在 'sharpe' 模式下使用
 }
@@ -220,7 +220,7 @@ class Command(BaseCommand):
             quotes_df[col] = pd.to_numeric(quotes_df[col], errors='coerce')
         
         quotes_df['adj_factor'] = quotes_df['hfq_close'] / (quotes_df['close'] + 1e-9)
-        quotes_df.drop_duplicates(subset=['trade_date', 'stock_code_id'], keep='last', inplace=True)
+        
         # 3. 计算后复权的 open, high, low
         quotes_df['hfq_open'] = quotes_df['open'] * quotes_df['adj_factor']
         quotes_df['hfq_high'] = quotes_df['high'] * quotes_df['adj_factor']
@@ -228,19 +228,18 @@ class Command(BaseCommand):
         
         # 4. 为了后续计算器接口统一，重命名列
         #    现在 'open', 'high', 'low', 'close' 都代表后复权价格
-        quotes_df.rename(columns={
-            'hfq_open': 'open',
-            'hfq_high': 'high',
-            'hfq_low': 'low',
-            'hfq_close': 'close',
-            'turnover': 'amount' # 同时修正 amount 列名
-        }, inplace=True)
-
-        # 5. 只保留计算所需的列
-        final_cols = ['trade_date', 'stock_code_id', 'open', 'high', 'low', 'close', 'volume', 'amount']
-        quotes_df = quotes_df[final_cols]
+        final_df = pd.DataFrame({
+            'trade_date': quotes_df['trade_date'],
+            'stock_code_id': quotes_df['stock_code_id'],
+            'open': quotes_df['hfq_open'],
+            'high': quotes_df['hfq_high'],
+            'low': quotes_df['hfq_low'],
+            'close': quotes_df['hfq_close'], # 直接使用hfq_close作为复权收盘价
+            'volume': quotes_df['volume'],
+            'amount': quotes_df['turnover'] # 同时在这里完成turnover到amount的重命名
+        })
         
-        return quotes_df
+        return final_df
 
 
     def _generate_labels(self, quotes_df: pd.DataFrame) -> pd.DataFrame:
