@@ -302,12 +302,6 @@ class StockValueService:
         all_quotes_df['close'] = all_quotes_df['hfq_close'] # 直接使用后复权收盘价
         all_quotes_df.rename(columns={'turnover': 'amount'}, inplace=True)
         
-        # 2. 预处理和构建面板数据
-        logger.info("构建面板数据...")
-        numeric_cols = ['open', 'high', 'low', 'close', 'volume', 'turnover']
-        for col in numeric_cols:
-            all_quotes_df[col] = pd.to_numeric(all_quotes_df[col], errors='coerce')
-        all_quotes_df.rename(columns={'turnover': 'amount'}, inplace=True)
 
         panel_data = {}
         for col in ['open', 'high', 'low', 'close', 'volume', 'amount']:
