@@ -226,50 +226,55 @@ class StockValueService:
         except Exception as e:
             logger.error(f"加载个股评分模型依赖时出错: {e}", exc_info=True)
 
-    def get_all_stock_scores(self, stock_pool: list, trade_date, m_value: float) -> pd.Series:
+    def get_all_stock_scores(self, stock_pool: list, trade_date, m_value: float, preloaded_panels: dict = None) -> pd.Series:
         if not self._dependencies_loaded:
             logger.warning("模型未加载，返回空评分列表。")
             return pd.Series(dtype=float)
-
-        # 1. 高效加载数据
-        logger.info("高效加载所有股票的回溯期数据...")
-        start_date = trade_date - timedelta(days=FACTOR_LOOKBACK_BUFFER * 2)
-        quotes_qs = DailyQuotes.objects.filter(
-            stock_code_id__in=stock_pool,
-            trade_date__gte=start_date,
-            trade_date__lte=trade_date
-        ).values('trade_date', 'stock_code_id', 'open', 'high', 'low', 'close', 'volume', 'turnover', 'hfq_close')
-        
-        if not quotes_qs:
-            logger.warning("在指定日期范围内未找到任何股票行情数据。")
-            return pd.Series(dtype=float)
-
-        all_quotes_df = pd.DataFrame.from_records(quotes_qs)
-
-        # 2. 预处理：价格复权和列名统一
-        logger.info("正在进行价格后复权处理...")
-        numeric_cols = ['open', 'high', 'low', 'close', 'volume', 'turnover', 'hfq_close']
-        for col in numeric_cols:
-            all_quotes_df[col] = pd.to_numeric(all_quotes_df[col], errors='coerce')
-        
-        all_quotes_df['adj_factor'] = all_quotes_df['hfq_close'] / (all_quotes_df['close'] + 1e-9)
-        
-        # 直接在原始DataFrame上创建后复权价格列
-        all_quotes_df['open'] = all_quotes_df['open'] * all_quotes_df['adj_factor']
-        all_quotes_df['high'] = all_quotes_df['high'] * all_quotes_df['adj_factor']
-        all_quotes_df['low'] = all_quotes_df['low'] * all_quotes_df['adj_factor']
-        all_quotes_df['close'] = all_quotes_df['hfq_close'] # 直接使用后复权收盘价
-        all_quotes_df.rename(columns={'turnover': 'amount'}, inplace=True)
-        
-
         panel_data = {}
-        for col in ['open', 'high', 'low', 'close', 'volume', 'amount']:
-            panel = all_quotes_df.pivot(index='trade_date', columns='stock_code_id', values=col)
-            full_date_range = pd.date_range(start=panel.index.min(), end=panel.index.max(), freq='B')
-            panel = panel.reindex(full_date_range).ffill()
-            panel_data[col] = panel
-
-        # 3. 使用向量化引擎计算所有特征
+        # --- [关键修正] 开始 ---
+        if preloaded_panels:
+            logger.debug("StockValueService 检测到预加载面板数据，直接使用。")
+            # 直接使用预加载的数据，但要确保列名是 'amount'
+            panel_data = preloaded_panels.copy()
+            if 'turnover' in panel_data and 'amount' not in panel_data:
+                panel_data['amount'] = panel_data.pop('turnover')
+        else:
+            logger.info("未提供预加载面板，StockValueService 将从数据库加载数据...")
+            # 1. 高效加载数据 (回退逻辑)
+            start_date = trade_date - timedelta(days=FACTOR_LOOKBACK_BUFFER * 2)
+            quotes_qs = DailyQuotes.objects.filter(
+                stock_code_id__in=stock_pool,
+                trade_date__gte=start_date,
+                trade_date__lte=trade_date
+            ).values('trade_date', 'stock_code_id', 'open', 'high', 'low', 'close', 'volume', 'turnover', 'hfq_close')
+            
+            if not quotes_qs:
+                logger.warning("在指定日期范围内未找到任何股票行情数据。")
+                return pd.Series(dtype=float)
+            all_quotes_df = pd.DataFrame.from_records(quotes_qs)
+            
+            # 2. 预处理：价格复权和列名统一
+            logger.info("正在进行价格后复权处理...")
+            numeric_cols = ['open', 'high', 'low', 'close', 'volume', 'turnover', 'hfq_close']
+            for col in numeric_cols:
+                all_quotes_df[col] = pd.to_numeric(all_quotes_df[col], errors='coerce')
+            
+            all_quotes_df['adj_factor'] = all_quotes_df['hfq_close'] / (all_quotes_df['close'] + 1e-9)
+            
+            all_quotes_df['open'] = all_quotes_df['open'] * all_quotes_df['adj_factor']
+            all_quotes_df['high'] = all_quotes_df['high'] * all_quotes_df['adj_factor']
+            all_quotes_df['low'] = all_quotes_df['low'] * all_quotes_df['adj_factor']
+            all_quotes_df['close'] = all_quotes_df['hfq_close']
+            all_quotes_df.rename(columns={'turnover': 'amount'}, inplace=True)
+            # 3. 构建面板数据
+            logger.info("构建面板数据...")
+            for col in ['open', 'high', 'low', 'close', 'volume', 'amount']:
+                panel = all_quotes_df.pivot(index='trade_date', columns='stock_code_id', values=col)
+                full_date_range = pd.date_range(start=panel.index.min(), end=panel.index.max(), freq='B')
+                panel = panel.reindex(full_date_range).ffill()
+                panel_data[col] = panel
+        # --- [关键修正] 结束 ---
+        # 4. 使用向量化引擎计算所有特征
         logger.info("启动向量化因子计算引擎...")
         features_to_calc = [f for f in self._feature_names if f != 'market_m_value']
         engine = VectorizedFactorEngine(panel_data, features_to_calc)

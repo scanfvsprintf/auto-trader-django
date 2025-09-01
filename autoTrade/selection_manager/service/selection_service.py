@@ -31,7 +31,7 @@ class SelectionService:
     4. 保存结果。
     """
 
-    def __init__(self, trade_date: date, mode: str = 'realtime'):
+    def __init__(self, trade_date: date, mode: str = 'realtime', one_strategy: str = None, preloaded_panels: dict = None):
         if mode not in ['realtime', 'backtest']:
             raise ValueError("模式(mode)必须是 'realtime' 或 'backtest'")
 
@@ -45,7 +45,7 @@ class SelectionService:
         self.params = {}
         self.market_regime_M = 0.0
         self.stock_value_service = StockValueService() # 实例化新的服务
-
+        self.preloaded_panels = preloaded_panels
         logger.debug(f"--- {MODULE_NAME} 初始化 ---")
         logger.debug(f"交易日期 (T-1): {self.trade_date}, 运行模式: {self.mode}")
 
@@ -68,15 +68,22 @@ class SelectionService:
                 stock_pool=initial_stock_pool,
                 trade_date=self.trade_date,
                 m_value=self.market_regime_M
+                preloaded_panels=self.preloaded_panels
             )
             final_scores = final_scores.sort_values(ascending=False)
 
             if final_scores.empty:
                 self._log_to_db('WARNING', "模型未对任何股票给出有效评分，流程终止。")
                 return
-
+            if self.preloaded_panels:
+                plan_panels = self.preloaded_panels
+            else:
+                # 如果是实时运行，没有预加载数据，需要为TopN股票加载数据
+                top_n_codes = final_scores.head(int(self.params.get('dynamic_top_n', 10))).index.tolist()
+                plan_panels = self._load_panels_for_plan(top_n_codes)
+            trading_plan = self._generate_trading_plan(final_scores, plan_panels)
             # 3. 生成交易预案
-            trading_plan = self._generate_trading_plan(final_scores)
+            #trading_plan = self._generate_trading_plan(final_scores)
             if trading_plan.empty:
                 self._log_to_db('WARNING', "最终未生成任何交易预案。")
                 return
@@ -171,48 +178,45 @@ class SelectionService:
         except Exception as e:
             logger.error(f"调用ML模型预测M值时发生错误: {e}", exc_info=True)
 
-    def _generate_trading_plan(self, final_scores: pd.Series) -> pd.DataFrame:
-        """基于模型评分生成交易预案"""
+    def _generate_trading_plan(self, final_scores: pd.Series, panels: dict) -> pd.DataFrame:
+        """基于模型评分和面板数据生成交易预案"""
         logger.debug("基于模型评分生成交易预案...")
         top_n = int(self.params.get('dynamic_top_n', 10))
         top_stocks_scores = final_scores.head(top_n)
         
         if top_stocks_scores.empty:
             return pd.DataFrame()
-
         top_stock_codes = top_stocks_scores.index.tolist()
         
-        # 获取计算MIOP/MAOP所需的数据
-        quotes_qs = DailyQuotes.objects.filter(
-            stock_code_id__in=top_stock_codes,
-            trade_date__lte=self.trade_date
-        ).order_by('-trade_date').values('stock_code_id', 'close', 'high', 'low')
-        quotes_df = pd.DataFrame.from_records(quotes_qs)
-        numeric_cols = ['close', 'high', 'low']
-        for col in numeric_cols:
-            quotes_df[col] = pd.to_numeric(quotes_df[col], errors='coerce')
-        # 构建一个字典，方便快速查找
-        latest_quotes = {}
-        for q in quotes_qs:
-            if q['stock_code_id'] not in latest_quotes:
-                latest_quotes[q['stock_code_id']] = q
-
+        # --- [关键修正] 开始 ---
+        # 不再从数据库加载，直接使用传入的panels
+        if not panels or 'close' not in panels:
+            logger.error("生成交易预案时未提供有效的面板数据。")
+            return pd.DataFrame()
+        # 注意：MIOP/MAOP的计算应该基于不复权价格，但ATR也需要不复权价格
+        # 我们需要确保传入的panels包含不复权价格。
+        # 假设回测框架传入的panels已经是处理好的，包含了所需列。
+        # 如果没有，我们需要在这里进行处理，但为了保持与你原设计一致，我们假设panels是OK的。
+        # 这里的逻辑需要和你的回测框架传入的数据格式对齐。
+        # 假设你的回测框架传入的panels的 'close', 'high', 'low' 是不复权价。
+        close_panel = panels['close']
+        high_panel = panels['high']
+        low_panel = panels['low']
+        last_close_series = close_panel.iloc[-1].reindex(top_stock_codes)
+        # 简单的日内波幅作为ATR
+        last_atr_series = (high_panel.iloc[-1] - low_panel.iloc[-1]).reindex(top_stock_codes)
+        # --- [关键修正] 结束 ---
         k_gap = self.params.get('k_gap', 0.5)
         k_drop = self.params.get('k_drop', 0.3)
-
         plans = []
         for stock_code, score in top_stocks_scores.items():
-            quote = latest_quotes.get(stock_code)
-            if not quote:
+            close_price = last_close_series.get(stock_code)
+            atr = last_atr_series.get(stock_code)
+            if pd.isna(close_price) or pd.isna(atr):
                 continue
             
-            close_price = Decimal(str(quote['close']))
-            # 简单ATR计算
-            atr = Decimal(str(quote['high'])) - Decimal(str(quote['low']))
-            
-            miop = close_price - Decimal(str(k_drop)) * atr
-            maop = close_price + Decimal(str(k_gap)) * atr
-
+            miop = Decimal(str(close_price)) - Decimal(str(k_drop)) * Decimal(str(atr))
+            maop = Decimal(str(close_price)) + Decimal(str(k_gap)) * Decimal(str(atr))
             plans.append({
                 'stock_code': stock_code,
                 'rank': len(plans) + 1,
@@ -222,6 +226,29 @@ class SelectionService:
             })
         
         return pd.DataFrame(plans)
+    
+
+    def _load_panels_for_plan(self, stock_codes: list) -> dict:
+        """在实时模式下，为生成交易预案加载所需的不复权价格面板"""
+        if not stock_codes:
+            return {}
+        
+        start_date = self.trade_date - timedelta(days=30) # ATR计算通常不需要很长回溯
+        quotes_qs = DailyQuotes.objects.filter(
+            stock_code_id__in=stock_codes,
+            trade_date__gte=start_date,
+            trade_date__lte=self.trade_date
+        ).values('trade_date', 'stock_code_id', 'close', 'high', 'low')
+        if not quotes_qs:
+            return {}
+            
+        df = pd.DataFrame.from_records(quotes_qs)
+        panels = {}
+        for col in ['close', 'high', 'low']:
+            df[col] = pd.to_numeric(df[col], errors='coerce')
+            panel = df.pivot(index='trade_date', columns='stock_code_id', values=col)
+            panels[col] = panel
+        return panels
 
     @transaction.atomic
     def _save_results(self, final_scores: pd.Series, trading_plan_df: pd.DataFrame):
