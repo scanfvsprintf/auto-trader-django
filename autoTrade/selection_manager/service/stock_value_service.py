@@ -87,18 +87,23 @@ class VectorizedFactorEngine:
         plus_dm = pd.DataFrame(np.where((move_up > move_down) & (move_up > 0), move_up, 0.0), index=self.high.index, columns=self.high.columns)
         minus_dm = pd.DataFrame(np.where((move_down > move_up) & (move_down > 0), move_down, 0.0), index=self.low.index, columns=self.low.columns)
         
+        # --- [关键修正] 开始 ---
+        # 正确的向量化TR计算
         tr1 = self.high - self.low
         tr2 = abs(self.high - self.close.shift(1))
         tr3 = abs(self.low - self.close.shift(1))
-        tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1, skipna=False).to_frame().set_axis(self.close.columns, axis=1)
-
+        # 使用 np.maximum 逐元素比较，找出三者中的最大值。这会保持原始的DataFrame形状。
+        tr = np.maximum(tr1, tr2, tr3)
+        # --- [关键修正] 结束 ---
         alpha = 1 / length
         atr = tr.ewm(alpha=alpha, adjust=False).mean()
+        # ... 后续逻辑不变 ...
         plus_di = 100 * (plus_dm.ewm(alpha=alpha, adjust=False).mean() / (atr + self.epsilon))
         minus_di = 100 * (minus_dm.ewm(alpha=alpha, adjust=False).mean() / (atr + self.epsilon))
         
         di_sum = plus_di + minus_di
-        dx = 100 * (abs(plus_di - minus_di) / (di_sum + self.epsilon))
+        # 修正：确保di_sum为0时，dx也为0，而不是NaN
+        dx = 100 * (abs(plus_di - minus_di) / di_sum.replace(0, np.inf))
         adx = dx.ewm(alpha=alpha, adjust=False).mean()
         
         condition = (adx.iloc[-1] > adx_threshold) & (plus_di.iloc[-1] > minus_di.iloc[-1])
