@@ -29,12 +29,6 @@ class VectorizedFactorEngine:
     它接收面板数据，并一次性计算所有股票的因子值。
     """
     def __init__(self, panel_data: dict, feature_names: list):
-        """
-        初始化引擎。
-        :param panel_data: 一个字典，key是['open', 'high', 'low', 'close', 'volume', 'amount']，
-                           value是对应的面板DataFrame (index=date, columns=stock_code)。
-        :param feature_names: 需要计算的因子名称列表。
-        """
         self.open = panel_data['open']
         self.high = panel_data['high']
         self.low = panel_data['low']
@@ -42,13 +36,8 @@ class VectorizedFactorEngine:
         self.volume = panel_data['volume']
         self.amount = panel_data['amount']
         self.feature_names = feature_names
-        self.epsilon = 1e-9 # 用于防止除零错误
-
+        self.epsilon = 1e-9
     def run(self) -> pd.DataFrame:
-        """
-        运行所有需要的因子计算，并返回一个包含所有股票最新因子值的DataFrame。
-        """
-        # 因子计算方法的映射
         calculator_methods = {
             'dynamic_ADX_CONFIRM': self._calc_adx_confirm,
             'dynamic_v2_MA_SLOPE': self._calc_v2_ma_slope,
@@ -68,52 +57,40 @@ class VectorizedFactorEngine:
             'dynamic_Old_I': self._calc_old_i,
             'dynamic_Old_M': self._calc_old_m,
         }
-
         all_factors = {}
         for factor_name in self.feature_names:
             if factor_name in calculator_methods:
                 logger.debug(f"Vectorized calculation for: {factor_name}")
-                # 每个方法都返回一个Series (index=stock_code)
                 all_factors[factor_name] = calculator_methods[factor_name]()
-        
-        # 将所有Series合并成一个DataFrame
         return pd.DataFrame(all_factors)
-
-    # --- 向量化因子计算方法 ---
-
+    def _calculate_tr(self):
+        """[内部辅助函数] 统一计算真实波幅 (True Range)"""
+        tr1 = self.high - self.low
+        tr2 = abs(self.high - self.close.shift(1))
+        tr3 = abs(self.low - self.close.shift(1))
+        return np.maximum(tr1, np.maximum(tr2, tr3))
     def _calc_adx_confirm(self, length=14, adx_threshold=25):
         move_up = self.high.diff()
         move_down = -self.low.diff()
         plus_dm = pd.DataFrame(np.where((move_up > move_down) & (move_up > 0), move_up, 0.0), index=self.high.index, columns=self.high.columns)
         minus_dm = pd.DataFrame(np.where((move_down > move_up) & (move_down > 0), move_down, 0.0), index=self.low.index, columns=self.low.columns)
         
-        # --- [关键修正] 开始 ---
-        # 正确的向量化TR计算
-        tr1 = self.high - self.low
-        tr2 = abs(self.high - self.close.shift(1))
-        tr3 = abs(self.low - self.close.shift(1))
-        # 使用 np.maximum 逐元素比较，找出三者中的最大值。这会保持原始的DataFrame形状。
-        tr = np.maximum(tr1, tr2, tr3)
-        # --- [关键修正] 结束 ---
+        tr = self._calculate_tr() # 调用统一的TR计算函数
         alpha = 1 / length
         atr = tr.ewm(alpha=alpha, adjust=False).mean()
-        # ... 后续逻辑不变 ...
         plus_di = 100 * (plus_dm.ewm(alpha=alpha, adjust=False).mean() / (atr + self.epsilon))
         minus_di = 100 * (minus_dm.ewm(alpha=alpha, adjust=False).mean() / (atr + self.epsilon))
         
         di_sum = plus_di + minus_di
-        # 修正：确保di_sum为0时，dx也为0，而不是NaN
         dx = 100 * (abs(plus_di - minus_di) / di_sum.replace(0, np.inf))
         adx = dx.ewm(alpha=alpha, adjust=False).mean()
         
         condition = (adx.iloc[-1] > adx_threshold) & (plus_di.iloc[-1] > minus_di.iloc[-1])
         return adx.iloc[-1].where(condition, 0.0)
-
     def _calc_v2_ma_slope(self, ma_period=20, ema_period=20):
         ma = self.close.rolling(window=ma_period).mean()
         ma_roc = ma.pct_change(1)
         return ma_roc.ewm(span=ema_period, adjust=False).mean().iloc[-1]
-
     def _calc_v2_ma_score(self, p1=5, p2=10, p3=20):
         ma5 = self.close.rolling(window=p1).mean()
         ma10 = self.close.rolling(window=p2).mean()
@@ -122,12 +99,10 @@ class VectorizedFactorEngine:
         spread2 = (ma5 - ma10) / (ma10 + self.epsilon)
         spread3 = (ma10 - ma20) / (ma20 + self.epsilon)
         return ((spread1 + spread2 + spread3) / 3.0).iloc[-1]
-
     def _calc_v2_cpc_factor(self, ema_period=10):
         price_range = self.high - self.low
         dcp = (2 * self.close - self.high - self.low) / (price_range + self.epsilon)
         return dcp.ewm(span=ema_period, adjust=False).mean().iloc[-1]
-
     def _calc_v2_vpcf(self, s=5, l=20, n_smooth=5):
         ma_close_s = self.close.rolling(window=s).mean()
         price_momentum = ma_close_s.pct_change(1)
@@ -136,27 +111,21 @@ class VectorizedFactorEngine:
         volume_level = (ma_amount_s / (ma_amount_l + self.epsilon)) - 1
         daily_score = price_momentum * volume_level
         return daily_score.ewm(span=n_smooth, adjust=False).mean().iloc[-1]
-
     def _calc_breakout_pwr(self, lookback=60, atr_period=14):
         high_lookback = self.high.rolling(window=lookback).max().shift(1)
         
-        tr1 = self.high - self.low
-        tr2 = abs(self.high - self.close.shift(1))
-        tr3 = abs(self.low - self.close.shift(1))
-        tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1, skipna=False).to_frame().set_axis(self.close.columns, axis=1)
+        tr = self._calculate_tr() # 调用统一的TR计算函数
         atr = tr.ewm(alpha=1/atr_period, adjust=False).mean()
         
         return ((self.close - high_lookback) / (atr + self.epsilon)).iloc[-1]
-
     def _calc_volume_surge(self, lookback=20):
         avg_amount = self.amount.rolling(window=lookback).mean().shift(1)
         return (self.amount / (avg_amount + self.epsilon)).iloc[-1]
-
     def _calc_mom_accel(self, roc_period=5, shift_period=11):
         roc = self.close.pct_change(roc_period)
         roc_shifted = roc.shift(shift_period)
-        return ((roc / (roc_shifted + self.epsilon)) - 1).iloc[-1]
-
+        # 使用 where 避免分母为0时产生 inf
+        return (np.where(roc_shifted != 0, roc / roc_shifted, 1) - 1).iloc[-1]
     def _calc_rsi_os(self, length=14):
         delta = self.close.diff()
         gain = delta.clip(lower=0)
@@ -165,11 +134,9 @@ class VectorizedFactorEngine:
         avg_loss = loss.ewm(com=length - 1, adjust=False).mean()
         rs = avg_gain / (avg_loss + self.epsilon)
         return (100 - (100 / (1 + rs))).iloc[-1]
-
     def _calc_neg_dev(self, period=60):
         ma = self.close.rolling(window=period).mean()
         return ((self.close - ma) / (ma + self.epsilon)).iloc[-1]
-
     def _calc_boll_lb(self, length=20, std=2.0):
         ma = self.close.rolling(window=length).mean()
         rolling_std = self.close.rolling(window=length).std()
@@ -177,24 +144,18 @@ class VectorizedFactorEngine:
         lower_band = ma - (rolling_std * std)
         band_width = upper_band - lower_band
         return ((self.close - lower_band) / (band_width + self.epsilon)).iloc[-1]
-
     def _calc_low_vol(self, period=20):
         returns = self.close.pct_change()
         return returns.rolling(window=period).std().iloc[-1]
-
     def _calc_max_dd(self, period=60):
         rolling_max = self.close.rolling(window=period, min_periods=1).max()
         daily_dd = self.close / rolling_max - 1.0
         return daily_dd.rolling(window=period, min_periods=1).min().iloc[-1]
-
     def _calc_downside_risk(self, period=60):
         returns = self.close.pct_change()
         downside_returns = returns.clip(upper=0)
         return downside_returns.rolling(window=period).std().iloc[-1]
-
     def _calc_old_d(self, lookback_k=20, a_param=200.0):
-        # This one is hard to vectorize efficiently without custom C extensions.
-        # We will use a loop over columns, which is still much faster than grouping.
         slopes = {}
         x_range = np.arange(lookback_k + 1)
         for stock_code in self.close.columns:
@@ -203,41 +164,33 @@ class VectorizedFactorEngine:
                 slopes[stock_code] = np.nan
                 continue
             
-            # Use stride_tricks for efficient windowing
-            shape = (series.shape[0] - lookback_k, lookback_k + 1)
-            strides = (series.strides[0], series.strides[0])
-            windows = np.lib.stride_tricks.as_strided(series, shape=shape, strides=strides)
-            
-            # Get slopes for all windows
-            # This is still slow part
-            # A simplified version: use slope of the last window
             y = series.iloc[-lookback_k-1:].values
+            # 增加对y中NaN值的检查
+            if np.isnan(y).any():
+                slopes[stock_code] = np.nan
+                continue
             slope, _, _, _, _ = linregress(x_range, y)
-            h_t_k = slope / (series.iloc[-lookback_k-1] + self.epsilon)
+            denominator = series.iloc[-lookback_k-1]
+            h_t_k = slope / (denominator + self.epsilon) if denominator != 0 else 0
             slopes[stock_code] = np.tanh(a_param * h_t_k)
         return pd.Series(slopes)
-
     def _calc_old_i(self, adx_period=14, adx_threshold=20.0, b_param=0.075):
-        # Re-use the ADX calculation
         move_up = self.high.diff()
         move_down = -self.low.diff()
         plus_dm = pd.DataFrame(np.where((move_up > move_down) & (move_up > 0), move_up, 0.0), index=self.high.index, columns=self.high.columns)
         minus_dm = pd.DataFrame(np.where((move_down > move_up) & (move_down > 0), move_down, 0.0), index=self.low.index, columns=self.low.columns)
-        tr1 = self.high - self.low
-        tr2 = abs(self.high - self.close.shift(1))
-        tr3 = abs(self.low - self.close.shift(1))
-        tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1, skipna=False).to_frame().set_axis(self.close.columns, axis=1)
+        
+        tr = self._calculate_tr() # 调用统一的TR计算函数
         alpha = 1 / adx_period
         atr = tr.ewm(alpha=alpha, adjust=False).mean()
         plus_di = 100 * (plus_dm.ewm(alpha=alpha, adjust=False).mean() / (atr + self.epsilon))
         minus_di = 100 * (minus_dm.ewm(alpha=alpha, adjust=False).mean() / (atr + self.epsilon))
         di_sum = plus_di + minus_di
-        dx = 100 * (abs(plus_di - minus_di) / (di_sum + self.epsilon))
+        dx = 100 * (abs(plus_di - minus_di) / di_sum.replace(0, np.inf))
         adx = dx.ewm(alpha=alpha, adjust=False).mean().iloc[-1]
         
         raw_i = np.tanh(b_param * (adx - adx_threshold))
         return raw_i.clip(lower=0)
-
     def _calc_old_m(self):
         d_t = self._calc_old_d()
         i_t = self._calc_old_i()
