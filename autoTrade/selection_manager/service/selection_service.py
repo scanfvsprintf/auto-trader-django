@@ -67,7 +67,7 @@ class SelectionService:
             final_scores = self.stock_value_service.get_all_stock_scores(
                 stock_pool=initial_stock_pool,
                 trade_date=self.trade_date,
-                m_value=self.market_regime_M
+                m_value=self.market_regime_M,
                 preloaded_panels=self.preloaded_panels
             )
             final_scores = final_scores.sort_values(ascending=False)
