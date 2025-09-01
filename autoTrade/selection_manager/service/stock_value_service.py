@@ -56,19 +56,13 @@ class StockValueService:
 
     def get_all_stock_scores(self, stock_pool: list, trade_date, m_value: float) -> pd.Series:
         """
-        获取股票池中所有股票的模型评分。
-
-        :param stock_pool: 待评分的股票代码列表。
-        :param trade_date: 评分基准日 (T-1日)。
-        :param m_value: 当日的市场M值。
-        :return: 一个包含 {stock_code: score} 的 Pandas Series。
+        [高效向量化版] 获取股票池中所有股票的模型评分。
         """
         if not self._dependencies_loaded:
             logger.warning("模型未加载，返回空评分列表。")
             return pd.Series(dtype=float)
-
         # 1. 高效加载所有需要的数据
-        start_date = trade_date - timedelta(days=FACTOR_LOOKBACK_BUFFER * 2) # 넉넉하게
+        start_date = trade_date - timedelta(days=FACTOR_LOOKBACK_BUFFER * 2)
         quotes_qs = DailyQuotes.objects.filter(
             stock_code_id__in=stock_pool,
             trade_date__gte=start_date,
@@ -78,31 +72,81 @@ class StockValueService:
         if not quotes_qs:
             logger.warning("在指定日期范围内未找到任何股票行情数据。")
             return pd.Series(dtype=float)
-
         all_quotes_df = pd.DataFrame.from_records(quotes_qs)
+        
+        # 预处理：类型转换和列名统一
         numeric_cols = ['open', 'high', 'low', 'close', 'volume', 'turnover']
         for col in numeric_cols:
             all_quotes_df[col] = pd.to_numeric(all_quotes_df[col], errors='coerce')
-        # 2. 并行计算特征和预测
-        scores = {}
-        # 使用tqdm包装ThreadPoolExecutor以显示进度条
-        with ThreadPoolExecutor(max_workers=8) as executor:
-            future_to_stock = {
-                executor.submit(self._predict_single_stock, stock_code, group_df, m_value): stock_code
-                for stock_code, group_df in all_quotes_df.groupby('stock_code_id')
-            }
+        all_quotes_df.rename(columns={'turnover': 'amount'}, inplace=True)
+        # 2. 构建面板数据 (Panel Data)
+        # 这是向量化计算的基础
+        logger.debug("构建面板数据...")
+        panel_data = {}
+        for col in ['open', 'high', 'low', 'close', 'volume', 'amount']:
+            panel = all_quotes_df.pivot(index='trade_date', columns='stock_code_id', values=col)
+            # 确保数据连续，并向前填充
+            panel = panel.reindex(pd.date_range(start=panel.index.min(), end=panel.index.max(), freq='B')).ffill()
+            panel_data[col] = panel
+        # 3. 一次性计算所有股票的因子特征
+        # 我们需要一个修改版的因子计算器，让它能处理面板数据
+        # 但为了最小改动，我们这里模拟一个可以处理面板的简单循环
+        # 注意：理想的FactorCalculator也应该是全向量化的，但这里我们先解决主要矛盾
+        logger.debug("开始向量化计算所有因子...")
+        
+        # 创建一个临时的、包含所有面板数据的DataFrame，以适配现有的FactorCalculator
+        # 这不是最高效的，但避免了修改FactorCalculator
+        all_features_list = []
+        
+        # 这里的循环是在列上（股票代码），而不是在行上，数量少得多
+        for stock_code in tqdm(panel_data['close'].columns, desc="计算因子特征"):
+            # 为每只股票构建一个符合FactorCalculator输入的DataFrame
+            stock_df = pd.DataFrame({
+                'open': panel_data['open'][stock_code],
+                'high': panel_data['high'][stock_code],
+                'low': panel_data['low'][stock_code],
+                'close': panel_data['close'][stock_code],
+                'volume': panel_data['volume'][stock_code],
+                'amount': panel_data['amount'][stock_code],
+            }).dropna(how='all') # 删除完全是NaN的行
+            if len(stock_df) < FACTOR_LOOKBACK_BUFFER:
+                continue
+            calculator = FactorCalculator(stock_df)
+            features_to_calc = [f for f in self._feature_names if f != 'market_m_value']
+            stock_features_df = calculator.run(features_to_calc)
             
-            progress = tqdm(as_completed(future_to_stock), total=len(stock_pool), desc="计算个股评分")
-            for future in progress:
-                stock_code = future_to_stock[future]
-                try:
-                    score = future.result()
-                    if score is not None:
-                        scores[stock_code] = score
-                except Exception as exc:
-                    logger.error(f"为股票 {stock_code} 计算评分时出错: {exc}")
-
-        return pd.Series(scores)
+            # 只取最后一天的特征
+            latest_features = stock_features_df.iloc[-1].copy()
+            latest_features.name = stock_code # 将Series的name设置为股票代码
+            all_features_list.append(latest_features)
+        if not all_features_list:
+            logger.warning("未能为任何股票计算出有效的特征。")
+            return pd.Series(dtype=float)
+        # 将所有股票的最新特征合并成一个DataFrame
+        features_df = pd.concat(all_features_list, axis=1).T
+        features_df.index.name = 'stock_code_id'
+        # 4. 准备模型输入
+        logger.debug("准备模型输入并进行预测...")
+        # 添加M值特征
+        features_df['market_m_value'] = m_value
+        
+        # 剔除任何包含NaN的行
+        features_df.dropna(inplace=True)
+        
+        if features_df.empty:
+            logger.warning("所有股票在特征计算后都因NaN被剔除。")
+            return pd.Series(dtype=float)
+        # 保证特征顺序
+        model_input = features_df[self._feature_names]
+        
+        # 5. 一次性预测所有股票
+        scores = self._model.predict(model_input)
+        
+        # 6. 组装成最终的Series
+        final_scores = pd.Series(scores, index=model_input.index)
+        
+        logger.info(f"成功为 {len(final_scores)} 只股票计算了模型评分。")
+        return final_scores
 
     def _predict_single_stock(self, stock_code: str, stock_df: pd.DataFrame, m_value: float) -> float | None:
         """
