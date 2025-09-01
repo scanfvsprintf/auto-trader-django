@@ -185,7 +185,7 @@ class DecisionOrderService:
             S_cap=min(M_t*2,Decimal('1.0'))
             #Decimal('1.0')
         
-        S_cap=Decimal('1.0')
+        #S_cap=Decimal('1.0')
         # iv. 计算动态调整后的名义本金
         adjusted_unit_principal = baseline_unit_principal * S_cap
         
