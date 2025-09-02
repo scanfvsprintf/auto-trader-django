@@ -289,8 +289,13 @@ class StockFactorCalculator:
             return pd.DataFrame(0, index=self.close.index, columns=self.close.columns)
         
         m_lagged = self.m_value_series.shift(1)
-        # Broadcast the lagged M-value series to all stock columns
-        return pd.DataFrame(np.tile(m_lagged.values, (len(self.close.columns), 1)).T, 
+        
+        # --- 修改开始 ---
+        # 使用 reindex 将全局M值序列与当前批次的日期索引对齐
+        aligned_m_lagged = m_lagged.reindex(self.close.index)
+        
+        # 使用对齐后的序列进行广播
+        return pd.DataFrame(np.tile(aligned_m_lagged.values, (len(self.close.columns), 1)).T, 
                             index=self.close.index, columns=self.close.columns)
 
     def _calc_m_value_slope_5d(self):
@@ -298,7 +303,9 @@ class StockFactorCalculator:
             return pd.DataFrame(0, index=self.close.index, columns=self.close.columns)
         
         slopes = self._rolling_regression_slope(self.m_value_series.to_frame(), window=5).iloc[:, 0]
-        return pd.DataFrame(np.tile(slopes.values, (len(self.close.columns), 1)).T,
+        # --- 修改开始 ---
+        aligned_slopes = slopes.reindex(self.close.index)
+        return pd.DataFrame(np.tile(aligned_slopes.values, (len(self.close.columns), 1)).T,
                             index=self.close.index, columns=self.close.columns)
 
     def _calc_m_value_slope_20d(self):
@@ -306,7 +313,9 @@ class StockFactorCalculator:
             return pd.DataFrame(0, index=self.close.index, columns=self.close.columns)
             
         slopes = self._rolling_regression_slope(self.m_value_series.to_frame(), window=20).iloc[:, 0]
-        return pd.DataFrame(np.tile(slopes.values, (len(self.close.columns), 1)).T,
+        # --- 修改开始 ---
+        aligned_slopes = slopes.reindex(self.close.index)
+        return pd.DataFrame(np.tile(aligned_slopes.values, (len(self.close.columns), 1)).T,
                             index=self.close.index, columns=self.close.columns)
 
     def _calc_corporate_action_factor(self):
