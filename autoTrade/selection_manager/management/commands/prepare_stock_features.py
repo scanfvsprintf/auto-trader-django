@@ -38,7 +38,7 @@ LABEL_CONFIG = {
     'lookback_days_vol': 20,   # 用于过去波动的回看窗口, 仅 'risk_adjusted_return' 模式使用
     
     'risk_free_rate_annual': 0.02, # 年化无风险利率, 仅 'sharpe' 模式使用
-    'tanh_scaling_factor': 4.0,    # tanh缩放因子, 用于所有模式
+    'tanh_scaling_factor': 2.75,    # tanh缩放因子, 用于所有模式
 }
 
 FACTOR_LOOKBACK_BUFFER = 250 # 因子计算所需的最大回溯期, 넉넉하게
