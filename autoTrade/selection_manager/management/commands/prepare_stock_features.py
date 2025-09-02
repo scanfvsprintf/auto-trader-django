@@ -25,10 +25,20 @@ from selection_manager.service.stock_factor_calculator import StockFactorCalcula
 logger = logging.getLogger(__name__)
 
 # --- [配置区] ---
+# 文件: selection_manager/management/commands/prepare_stock_features.py
+# --- [配置区] ---
 LABEL_CONFIG = {
-    'mode': 'forward_sharpe',  # 'return' (未来收益率) 或 'forward_sharpe' (风险调整后收益)
-    'lookforward_days': 20,    # N值
-    'tanh_scaling_factor': 4.0,
+    # 'mode' 可选:
+    #   'return': 未来N日收益率 (tanh缩放)
+    #   'sharpe': 未来N日夏普比率 (收益和波动都向后看)
+    #   'risk_adjusted_return': 风险调整后收益 (收益向后看，波动向前看)
+    'mode': 'risk_adjusted_return',  # <--- 您可以根据需要切换这里
+    
+    'lookforward_days': 20,    # N值, 用于未来收益
+    'lookback_days_vol': 20,   # 用于过去波动的回看窗口, 仅 'risk_adjusted_return' 模式使用
+    
+    'risk_free_rate_annual': 0.02, # 年化无风险利率, 仅 'sharpe' 模式使用
+    'tanh_scaling_factor': 4.0,    # tanh缩放因子, 用于所有模式
 }
 
 FACTOR_LOOKBACK_BUFFER = 250 # 因子计算所需的最大回溯期, 넉넉하게
@@ -277,26 +287,54 @@ class Command(BaseCommand):
         return final_df[['trade_date', 'stock_code', 'open', 'high', 'low', 'close', 'volume', 'amount']]
 
     def _generate_labels(self, quotes_df: pd.DataFrame) -> pd.DataFrame:
-        """根据配置为给定的DataFrame生成标签"""
         df = quotes_df.set_index(['trade_date', 'stock_code'])['close'].unstack()
         df.replace(0, np.nan, inplace=True)
         
-        N = LABEL_CONFIG['lookforward_days']
+        N_forward = LABEL_CONFIG['lookforward_days']
         
-        if LABEL_CONFIG['mode'] == 'return':
-            future_price = df.shift(-N)
+        # --- 计算每日收益率 (sharpe 和 risk_adjusted_return 模式都需要) ---
+        daily_returns = df.pct_change(fill_method=None)
+        # --- 根据模式选择不同的标签计算逻辑 ---
+        mode = LABEL_CONFIG['mode']
+        
+        if mode == 'return':
+            # 模式1: 未来N日收益率
+            self.stdout.write(f"  - [标签模式: return] 计算未来 {N_forward} 日收益率...")
+            future_price = df.shift(-N_forward)
             labels = (future_price / df) - 1
-        elif LABEL_CONFIG['mode'] == 'forward_sharpe':
-            forward_return = (df.shift(-N) / df) - 1
-            daily_returns = df.pct_change()
-            forward_volatility = daily_returns.shift(-N).rolling(window=N).std()
-            labels = forward_return / (forward_volatility + 1e-9)
+        elif mode == 'sharpe':
+            # 模式2: 未来N日夏普比率 (收益和波动都向后看)
+            self.stdout.write(f"  - [标签模式: sharpe] 计算未来 {N_forward} 日夏普比率...")
+            daily_rf = (1 + LABEL_CONFIG['risk_free_rate_annual'])**(1/252) - 1
+            excess_returns = daily_returns - daily_rf
+            
+            # 计算未来N日的滚动均值和标准差
+            future_mean = excess_returns.shift(-N_forward).rolling(window=N_forward).mean()
+            future_std = excess_returns.shift(-N_forward).rolling(window=N_forward).std()
+            
+            # 计算年化夏普比率
+            annualized_sharpe = (future_mean / (future_std + self.epsilon)) * np.sqrt(252)
+            labels = annualized_sharpe
+        elif mode == 'risk_adjusted_return':
+            # 模式3: 风险调整后收益 (收益向后看，波动向前看)
+            self.stdout.write(f"  - [标签模式: risk_adjusted_return] 计算风险调整后收益...")
+            N_lookback_vol = LABEL_CONFIG['lookback_days_vol']
+            
+            # 收益向后看N天
+            future_price = df.shift(-N_forward)
+            forward_return = (future_price / df) - 1
+            
+            # 波动向前看N天 (即历史N日波动率)
+            past_volatility = daily_returns.rolling(window=N_lookback_vol).std()
+            
+            # 计算标签
+            labels = forward_return / (past_volatility + self.epsilon)
         else:
-            raise ValueError(f"未知的标签模式: {LABEL_CONFIG['mode']}")
-
-        # 使用tanh进行缩放
-        labels = np.tanh(LABEL_CONFIG['tanh_scaling_factor'] * labels)
-        return labels.stack().rename('label').to_frame()
+            raise ValueError(f"未知的标签模式: {mode}")
+        # 对所有模式的最终结果应用tanh进行缩放
+        scaled_labels = np.tanh(LABEL_CONFIG['tanh_scaling_factor'] * labels)
+        
+        return scaled_labels.stack().rename('label').to_frame()
 
     def _build_panels(self, quotes_df: pd.DataFrame) -> dict:
         """将长格式的DataFrame转换为面板字典"""
