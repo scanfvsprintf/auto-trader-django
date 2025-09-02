@@ -1,7 +1,10 @@
-# ==============================================================================
-# 文件: selection_manager/service/stock_value_service.py (终极性能优化版)
-# 描述: 提供个股模型评分的服务，使用完全向量化的因子计算引擎。
-# ==============================================================================
+# selection_manager/service/stock_value_service.py
+# [修改后]
+# 描述: 提供个股模型评分的服务。
+#       - 使用新的 StockFactorCalculator 进行因子计算。
+#       - 增加了在实时模式下批量加载数据并构建面板的能力。
+#       - 能够处理回测时传入的预加载面板数据。
+
 import logging
 import json
 from pathlib import Path
@@ -11,195 +14,16 @@ import numpy as np
 import pandas as pd
 import joblib
 from django.conf import settings
-from scipy.stats import linregress
 
-from common.models import DailyQuotes
+from common.models import DailyQuotes, DailyFactorValues, CorporateAction
+from .selection_service import MARKET_INDICATOR_CODE
+# [修改] 导入新的因子计算器
+from .stock_factor_calculator import StockFactorCalculator
 
 logger = logging.getLogger(__name__)
 
-# 因子计算所需的最大回溯期
-FACTOR_LOOKBACK_BUFFER = 100
+FACTOR_LOOKBACK_BUFFER = 250 # 与prepare脚本保持一致
 
-# ==============================================================================
-#  高效向量化因子计算引擎 (High-Performance Vectorized Factor Engine)
-# ==============================================================================
-class VectorizedFactorEngine:
-    """
-    一个完全向量化的因子计算引擎。
-    它接收面板数据，并一次性计算所有股票的因子值。
-    """
-    def __init__(self, panel_data: dict, feature_names: list):
-        self.open = panel_data['open']
-        self.high = panel_data['high']
-        self.low = panel_data['low']
-        self.close = panel_data['close']
-        self.volume = panel_data['volume']
-        self.amount = panel_data['amount']
-        self.feature_names = feature_names
-        self.epsilon = 1e-9
-    def run(self) -> pd.DataFrame:
-        calculator_methods = {
-            'dynamic_ADX_CONFIRM': self._calc_adx_confirm,
-            'dynamic_v2_MA_SLOPE': self._calc_v2_ma_slope,
-            'dynamic_v2_MA_SCORE': self._calc_v2_ma_score,
-            'dynamic_v2_CPC_Factor': self._calc_v2_cpc_factor,
-            'dynamic_v2_VPCF': self._calc_v2_vpcf,
-            'dynamic_BREAKOUT_PWR': self._calc_breakout_pwr,
-            'dynamic_VOLUME_SURGE': self._calc_volume_surge,
-            'dynamic_MOM_ACCEL': self._calc_mom_accel,
-            'dynamic_RSI_OS': self._calc_rsi_os,
-            'dynamic_NEG_DEV': self._calc_neg_dev,
-            'dynamic_BOLL_LB': self._calc_boll_lb,
-            'dynamic_LOW_VOL': self._calc_low_vol,
-            'dynamic_MAX_DD': self._calc_max_dd,
-            'dynamic_DOWNSIDE_RISK': self._calc_downside_risk,
-            'dynamic_Old_D': self._calc_old_d,
-            'dynamic_Old_I': self._calc_old_i,
-            'dynamic_Old_M': self._calc_old_m,
-        }
-        all_factors = {}
-        for factor_name in self.feature_names:
-            if factor_name in calculator_methods:
-                logger.debug(f"Vectorized calculation for: {factor_name}")
-                all_factors[factor_name] = calculator_methods[factor_name]()
-        return pd.DataFrame(all_factors)
-    def _calculate_tr(self):
-        """[内部辅助函数] 统一计算真实波幅 (True Range)"""
-        tr1 = self.high - self.low
-        tr2 = abs(self.high - self.close.shift(1))
-        tr3 = abs(self.low - self.close.shift(1))
-        return np.maximum(tr1, np.maximum(tr2, tr3))
-    def _calc_adx_confirm(self, length=14, adx_threshold=25):
-        move_up = self.high.diff()
-        move_down = -self.low.diff()
-        plus_dm = pd.DataFrame(np.where((move_up > move_down) & (move_up > 0), move_up, 0.0), index=self.high.index, columns=self.high.columns)
-        minus_dm = pd.DataFrame(np.where((move_down > move_up) & (move_down > 0), move_down, 0.0), index=self.low.index, columns=self.low.columns)
-        
-        tr = self._calculate_tr() # 调用统一的TR计算函数
-        alpha = 1 / length
-        atr = tr.ewm(alpha=alpha, adjust=False).mean()
-        plus_di = 100 * (plus_dm.ewm(alpha=alpha, adjust=False).mean() / (atr + self.epsilon))
-        minus_di = 100 * (minus_dm.ewm(alpha=alpha, adjust=False).mean() / (atr + self.epsilon))
-        
-        di_sum = plus_di + minus_di
-        dx = 100 * (abs(plus_di - minus_di) / di_sum.replace(0, np.inf))
-        adx = dx.ewm(alpha=alpha, adjust=False).mean()
-        
-        condition = (adx.iloc[-1] > adx_threshold) & (plus_di.iloc[-1] > minus_di.iloc[-1])
-        return adx.iloc[-1].where(condition, 0.0)
-    def _calc_v2_ma_slope(self, ma_period=20, ema_period=20):
-        ma = self.close.rolling(window=ma_period).mean()
-        ma_roc = ma.pct_change(1)
-        return ma_roc.ewm(span=ema_period, adjust=False).mean().iloc[-1]
-    def _calc_v2_ma_score(self, p1=5, p2=10, p3=20):
-        ma5 = self.close.rolling(window=p1).mean()
-        ma10 = self.close.rolling(window=p2).mean()
-        ma20 = self.close.rolling(window=p3).mean()
-        spread1 = (self.close - ma5) / (ma5 + self.epsilon)
-        spread2 = (ma5 - ma10) / (ma10 + self.epsilon)
-        spread3 = (ma10 - ma20) / (ma20 + self.epsilon)
-        return ((spread1 + spread2 + spread3) / 3.0).iloc[-1]
-    def _calc_v2_cpc_factor(self, ema_period=10):
-        price_range = self.high - self.low
-        dcp = (2 * self.close - self.high - self.low) / (price_range + self.epsilon)
-        return dcp.ewm(span=ema_period, adjust=False).mean().iloc[-1]
-    def _calc_v2_vpcf(self, s=5, l=20, n_smooth=5):
-        ma_close_s = self.close.rolling(window=s).mean()
-        price_momentum = ma_close_s.pct_change(1)
-        ma_amount_s = self.amount.rolling(window=s).mean()
-        ma_amount_l = self.amount.rolling(window=l).mean()
-        volume_level = (ma_amount_s / (ma_amount_l + self.epsilon)) - 1
-        daily_score = price_momentum * volume_level
-        return daily_score.ewm(span=n_smooth, adjust=False).mean().iloc[-1]
-    def _calc_breakout_pwr(self, lookback=60, atr_period=14):
-        high_lookback = self.high.rolling(window=lookback).max().shift(1)
-        
-        tr = self._calculate_tr() # 调用统一的TR计算函数
-        atr = tr.ewm(alpha=1/atr_period, adjust=False).mean()
-        
-        return ((self.close - high_lookback) / (atr + self.epsilon)).iloc[-1]
-    def _calc_volume_surge(self, lookback=20):
-        avg_amount = self.amount.rolling(window=lookback).mean().shift(1)
-        return (self.amount / (avg_amount + self.epsilon)).iloc[-1]
-    def _calc_mom_accel(self, roc_period=5, shift_period=11):
-        roc = self.close.pct_change(roc_period)
-        roc_shifted = roc.shift(shift_period)
-        # 使用 where 避免分母为0时产生 inf
-        acceleration = (roc / roc_shifted).where(roc_shifted != 0, 1) - 1
-        return acceleration.iloc[-1]
-    def _calc_rsi_os(self, length=14):
-        delta = self.close.diff()
-        gain = delta.clip(lower=0)
-        loss = -delta.clip(upper=0)
-        avg_gain = gain.ewm(com=length - 1, adjust=False).mean()
-        avg_loss = loss.ewm(com=length - 1, adjust=False).mean()
-        rs = avg_gain / (avg_loss + self.epsilon)
-        return (100 - (100 / (1 + rs))).iloc[-1]
-    def _calc_neg_dev(self, period=60):
-        ma = self.close.rolling(window=period).mean()
-        return ((self.close - ma) / (ma + self.epsilon)).iloc[-1]
-    def _calc_boll_lb(self, length=20, std=2.0):
-        ma = self.close.rolling(window=length).mean()
-        rolling_std = self.close.rolling(window=length).std()
-        upper_band = ma + (rolling_std * std)
-        lower_band = ma - (rolling_std * std)
-        band_width = upper_band - lower_band
-        return ((self.close - lower_band) / (band_width + self.epsilon)).iloc[-1]
-    def _calc_low_vol(self, period=20):
-        returns = self.close.pct_change()
-        return returns.rolling(window=period).std().iloc[-1]
-    def _calc_max_dd(self, period=60):
-        rolling_max = self.close.rolling(window=period, min_periods=1).max()
-        daily_dd = self.close / rolling_max - 1.0
-        return daily_dd.rolling(window=period, min_periods=1).min().iloc[-1]
-    def _calc_downside_risk(self, period=60):
-        returns = self.close.pct_change()
-        downside_returns = returns.clip(upper=0)
-        return downside_returns.rolling(window=period).std().iloc[-1]
-    def _calc_old_d(self, lookback_k=20, a_param=200.0):
-        slopes = {}
-        x_range = np.arange(lookback_k + 1)
-        for stock_code in self.close.columns:
-            series = self.close[stock_code].dropna()
-            if len(series) < lookback_k + 1:
-                slopes[stock_code] = np.nan
-                continue
-            
-            y = series.iloc[-lookback_k-1:].values
-            # 增加对y中NaN值的检查
-            if np.isnan(y).any():
-                slopes[stock_code] = np.nan
-                continue
-            slope, _, _, _, _ = linregress(x_range, y)
-            denominator = series.iloc[-lookback_k-1]
-            h_t_k = slope / (denominator + self.epsilon) if denominator != 0 else 0
-            slopes[stock_code] = np.tanh(a_param * h_t_k)
-        return pd.Series(slopes)
-    def _calc_old_i(self, adx_period=14, adx_threshold=20.0, b_param=0.075):
-        move_up = self.high.diff()
-        move_down = -self.low.diff()
-        plus_dm = pd.DataFrame(np.where((move_up > move_down) & (move_up > 0), move_up, 0.0), index=self.high.index, columns=self.high.columns)
-        minus_dm = pd.DataFrame(np.where((move_down > move_up) & (move_down > 0), move_down, 0.0), index=self.low.index, columns=self.low.columns)
-        
-        tr = self._calculate_tr() # 调用统一的TR计算函数
-        alpha = 1 / adx_period
-        atr = tr.ewm(alpha=alpha, adjust=False).mean()
-        plus_di = 100 * (plus_dm.ewm(alpha=alpha, adjust=False).mean() / (atr + self.epsilon))
-        minus_di = 100 * (minus_dm.ewm(alpha=alpha, adjust=False).mean() / (atr + self.epsilon))
-        di_sum = plus_di + minus_di
-        dx = 100 * (abs(plus_di - minus_di) / di_sum.replace(0, np.inf))
-        adx = dx.ewm(alpha=alpha, adjust=False).mean().iloc[-1]
-        
-        raw_i = np.tanh(b_param * (adx - adx_threshold))
-        return raw_i.clip(lower=0)
-    def _calc_old_m(self):
-        d_t = self._calc_old_d()
-        i_t = self._calc_old_i()
-        return d_t * i_t
-
-# ==============================================================================
-#  主服务 (Main Service)
-# ==============================================================================
 class StockValueService:
     MODELS_DIR = settings.BASE_DIR / 'selection_manager' / 'ml_models'
     MODEL_FILE = MODELS_DIR / 'stock_lgbm_model.joblib'
@@ -214,7 +38,7 @@ class StockValueService:
 
     def _load_dependencies(self):
         if not self.MODEL_FILE.exists() or not self.CONFIG_FILE.exists():
-            logger.error("个股评分模型或配置文件不存在。")
+            logger.error("个股评分模型或配置文件不存在。请先运行 'prepare_stock_features' 和 'train_stock_model'。")
             return
         try:
             self._model = joblib.load(self.MODEL_FILE)
@@ -230,73 +54,122 @@ class StockValueService:
         if not self._dependencies_loaded:
             logger.warning("模型未加载，返回空评分列表。")
             return pd.Series(dtype=float)
-        panel_data = {}
-        # --- [关键修正] 开始 ---
+
         if preloaded_panels:
             logger.debug("StockValueService 检测到预加载面板数据，直接使用。")
-            # 直接使用预加载的数据，但要确保列名是 'amount'
             panel_data = preloaded_panels.copy()
+            # 回测时，turnover列可能需要重命名
             if 'turnover' in panel_data and 'amount' not in panel_data:
                 panel_data['amount'] = panel_data.pop('turnover')
         else:
-            logger.info("未提供预加载面板，StockValueService 将从数据库加载数据...")
-            # 1. 高效加载数据 (回退逻辑)
-            start_date = trade_date - timedelta(days=FACTOR_LOOKBACK_BUFFER * 2)
-            quotes_qs = DailyQuotes.objects.filter(
-                stock_code_id__in=stock_pool,
-                trade_date__gte=start_date,
-                trade_date__lte=trade_date
-            ).values('trade_date', 'stock_code_id', 'open', 'high', 'low', 'close', 'volume', 'turnover', 'hfq_close')
-            
-            if not quotes_qs:
-                logger.warning("在指定日期范围内未找到任何股票行情数据。")
-                return pd.Series(dtype=float)
-            all_quotes_df = pd.DataFrame.from_records(quotes_qs)
-            
-            # 2. 预处理：价格复权和列名统一
-            logger.info("正在进行价格后复权处理...")
-            numeric_cols = ['open', 'high', 'low', 'close', 'volume', 'turnover', 'hfq_close']
-            for col in numeric_cols:
-                all_quotes_df[col] = pd.to_numeric(all_quotes_df[col], errors='coerce')
-            
-            all_quotes_df['adj_factor'] = all_quotes_df['hfq_close'] / (all_quotes_df['close'] + 1e-9)
-            
-            all_quotes_df['open'] = all_quotes_df['open'] * all_quotes_df['adj_factor']
-            all_quotes_df['high'] = all_quotes_df['high'] * all_quotes_df['adj_factor']
-            all_quotes_df['low'] = all_quotes_df['low'] * all_quotes_df['adj_factor']
-            all_quotes_df['close'] = all_quotes_df['hfq_close']
-            all_quotes_df.rename(columns={'turnover': 'amount'}, inplace=True)
-            # 3. 构建面板数据
-            logger.info("构建面板数据...")
-            for col in ['open', 'high', 'low', 'close', 'volume', 'amount']:
-                panel = all_quotes_df.pivot(index='trade_date', columns='stock_code_id', values=col)
-                full_date_range = pd.date_range(start=panel.index.min(), end=panel.index.max(), freq='B')
-                panel = panel.reindex(full_date_range).ffill()
-                panel_data[col] = panel
-        # --- [关键修正] 结束 ---
-        # 4. 使用向量化引擎计算所有特征
-        logger.info("启动向量化因子计算引擎...")
-        features_to_calc = [f for f in self._feature_names if f != 'market_m_value']
-        engine = VectorizedFactorEngine(panel_data, features_to_calc)
-        features_df = engine.run()
+            logger.info("未提供预加载面板，StockValueService 将从数据库加载实时数据...")
+            panel_data = self._load_data_for_live(stock_pool, trade_date)
 
-        # 4. 准备模型输入
-        logger.info("准备模型输入并进行预测...")
-        features_df['market_m_value'] = m_value
-        features_df.dropna(inplace=True)
-        
+        if not panel_data or panel_data['close'].empty:
+            logger.warning("数据加载后，面板为空，无法进行评分。")
+            return pd.Series(dtype=float)
+
+        # 启动向量化因子计算引擎
+        logger.info("启动因子计算引擎...")
+        calculator = StockFactorCalculator(panel_data, self._feature_names)
+        features_df = calculator.run()
+
         if features_df.empty:
+            logger.warning("特征计算后无有效数据。")
+            return pd.Series(dtype=float)
+
+        # 准备模型输入
+        logger.info("准备模型输入并进行预测...")
+        # 截取最后一天的特征
+        latest_features = features_df.loc[pd.to_datetime(trade_date)]
+        
+        # 加入当日M值
+        latest_features['market_m_value'] = m_value
+        latest_features.dropna(inplace=True)
+        
+        if latest_features.empty:
             logger.warning("所有股票在特征计算后都因NaN被剔除。")
             return pd.Series(dtype=float)
 
         # 保证特征顺序和数据类型
-        model_input = features_df[self._feature_names].astype(float)
+        model_input = latest_features[self._feature_names].astype(float)
         
-        # 5. 一次性预测所有股票
+        # 一次性预测所有股票
         scores = self._model.predict(model_input)
         
-        # 6. 组装成最终的Series
         final_scores = pd.Series(scores, index=model_input.index)
         
         logger.info(f"成功为 {len(final_scores)} 只股票计算了模型评分。")
         return final_scores
+
+    def _load_data_for_live(self, stock_pool: list, trade_date) -> dict:
+        """在实时模式下，为给定的股票池和日期加载所有需要的数据并构建面板。"""
+        if not stock_pool:
+            return {}
+
+        # 1. 定义数据加载的时间窗口
+        start_date = trade_date - timedelta(days=FACTOR_LOOKBACK_BUFFER * 2) # 넉넉하게
+        
+        # 2. 批量加载行情数据
+        quotes_qs = DailyQuotes.objects.filter(
+            stock_code_id__in=stock_pool,
+            trade_date__gte=start_date,
+            trade_date__lte=trade_date
+        ).values('trade_date', 'stock_code_id', 'open', 'high', 'low', 'close', 'volume', 'turnover', 'hfq_close')
+        
+        if not quotes_qs:
+            return {}
+        
+        quotes_df = pd.DataFrame.from_records(quotes_qs)
+        quotes_df.rename(columns={'stock_code_id': 'stock_code', 'turnover': 'amount'}, inplace=True)
+
+        # 3. 复权处理
+        numeric_cols = ['open', 'high', 'low', 'close', 'volume', 'amount', 'hfq_close']
+        for col in numeric_cols:
+            quotes_df[col] = pd.to_numeric(quotes_df[col], errors='coerce')
+        
+        quotes_df['adj_factor'] = quotes_df['hfq_close'] / (quotes_df['close'] + self.epsilon)
+        quotes_df['open'] = quotes_df['open'] * quotes_df['adj_factor']
+        quotes_df['high'] = quotes_df['high'] * quotes_df['adj_factor']
+        quotes_df['low'] = quotes_df['low'] * quotes_df['adj_factor']
+        quotes_df['close'] = quotes_df['hfq_close']
+        
+        # 4. 构建基础价格面板
+        panel_data = {}
+        quotes_df['trade_date'] = pd.to_datetime(quotes_df['trade_date'])
+        for col in ['open', 'high', 'low', 'close', 'volume', 'amount']:
+            panel = quotes_df.pivot(index='trade_date', columns='stock_code', values=col)
+            if not panel.empty:
+                full_date_range = pd.date_range(start=panel.index.min(), end=panel.index.max(), freq='B')
+                panel = panel.reindex(full_date_range).ffill()
+            panel_data[col] = panel
+
+        # 5. 加载并准备M值序列
+        m_values_qs = DailyFactorValues.objects.filter(
+            stock_code_id=MARKET_INDICATOR_CODE,
+            factor_code_id='dynamic_M_VALUE',
+            trade_date__gte=start_date,
+            trade_date__lte=trade_date
+        ).values('trade_date', 'raw_value')
+        m_values_df = pd.DataFrame.from_records(m_values_qs)
+        if not m_values_df.empty:
+            m_values_df['trade_date'] = pd.to_datetime(m_values_df['trade_date'])
+            panel_data['m_value_series'] = m_values_df.set_index('trade_date')['raw_value'].astype(float)
+        else:
+            panel_data['m_value_series'] = pd.Series(dtype=float)
+
+        # 6. 加载并构建公司行动因子面板
+        corp_actions_qs = CorporateAction.objects.filter(
+            stock_code__in=stock_pool,
+            ex_dividend_date__gte=start_date,
+            ex_dividend_date__lte=trade_date,
+            event_type__in=['dividend', 'bonus', 'transfer']
+        ).values()
+        corp_actions_df = pd.DataFrame.from_records(corp_actions_qs)
+        
+        # 复用prepare脚本中的构建逻辑
+        from ..management.commands.prepare_stock_features import Command as PrepareCommand
+        prepare_command_instance = PrepareCommand()
+        panel_data['corp_action_panel'] = prepare_command_instance._build_corp_action_panel(corp_actions_df, panel_data['close'])
+
+        return panel_data

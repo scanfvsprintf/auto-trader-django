@@ -1,7 +1,7 @@
-# ==============================================================================
-# 文件 2/4: selection_manager/management/commands/train_stock_model.py
-# 描述: 训练个股评分的LightGBM回归模型。
-# ==============================================================================
+# selection_manager/management/commands/train_stock_model.py
+# [修改后]
+# 描述: 训练个股评分的LightGBM回归模型。增加了对因子中文名的支持。
+
 import logging
 import pickle
 import json
@@ -16,12 +16,14 @@ from sklearn.metrics import mean_squared_error, r2_score
 import joblib
 import optuna
 
+# [修改] 导入因子描述字典
+from ..management.commands.prepare_stock_features import FACTOR_DESCRIPTIONS
+
 logger = logging.getLogger(__name__)
 
 class Command(BaseCommand):
     help = '训练个股评分的LightGBM回归模型。'
 
-    # --- 路径配置 ---
     MODELS_DIR = settings.BASE_DIR / 'selection_manager' / 'ml_models'
     DATASET_FILE = MODELS_DIR / 'stock_features_dataset.pkl'
     MODEL_FILE = MODELS_DIR / 'stock_lgbm_model.joblib'
@@ -43,17 +45,16 @@ class Command(BaseCommand):
         # 2. 定义模型和交叉验证
         self.stdout.write("步骤 2/4: 设置回归模型参数和时间序列交叉验证...")
         
-        # LightGBM 回归模型参数 (与M值模型风格一致)
         lgbm_params = {
-            'objective': 'regression_l1', # 使用L1损失 (MAE)，对异常值更鲁棒
+            'objective': 'regression_l1',
             'boosting_type': 'gbdt',
             'metric': 'rmse',
-            'n_estimators': 2000, # 减少迭代次数，因为数据集更大
-            'learning_rate': 0.001,
+            'n_estimators': 2000,
+            'learning_rate': 0.01, # 稍微调大一点的学习率
             'n_jobs': -1,
             'seed': 42,
             'verbose': -1,
-            'num_leaves': 63, # 允许更复杂的树
+            'num_leaves': 63,
             'max_depth': -1,
             'subsample': 0.8,
             'colsample_bytree': 0.7,
@@ -64,8 +65,6 @@ class Command(BaseCommand):
         # 3. 使用 Optuna 进行超参数优化和验证
         self.stdout.write("步骤 3/4: 使用 Optuna 进行超参数优化...")
         
-        # 由于数据集可能非常大，我们只取最后一部分数据进行快速的超参数搜索
-        # 例如，只用最后20%的数据进行调优
         sample_frac_for_tuning = 0.2
         tuning_data_size = int(len(X) * sample_frac_for_tuning)
         X_tuning = X.iloc[-tuning_data_size:]
@@ -75,7 +74,7 @@ class Command(BaseCommand):
         def objective(trial):
             params_to_tune = {
                 'num_leaves': trial.suggest_int('num_leaves', 20, 150),
-                'learning_rate': trial.suggest_float('learning_rate', 0.01, 0.1, log=True),
+                'learning_rate': trial.suggest_float('learning_rate', 0.005, 0.05, log=True),
                 'subsample': trial.suggest_float('subsample', 0.6, 1.0),
                 'colsample_bytree': trial.suggest_float('colsample_bytree', 0.6, 1.0),
                 'reg_alpha': trial.suggest_float('reg_alpha', 1e-2, 10.0, log=True),
@@ -102,7 +101,7 @@ class Command(BaseCommand):
 
         self.stdout.write("开始参数搜索 (n_trials=30)...")
         study = optuna.create_study(direction='minimize')
-        study.optimize(objective, n_trials=30) # 减少尝试次数以适应大数据集
+        study.optimize(objective, n_trials=30)
         
         best_params = lgbm_params.copy()
         best_params.update(study.best_params)
@@ -112,7 +111,6 @@ class Command(BaseCommand):
         # 步骤 4/4: 使用最佳参数在全部数据上训练最终模型并保存
         self.stdout.write("\n步骤 4/4: 使用最佳参数在全部数据上训练最终模型并保存...")
         
-        # 使用时间序列划分法，将最后20%作为验证集来展示最终性能
         split_point = int(len(X) * 0.8)
         X_train, X_val = X.iloc[:split_point], X.iloc[split_point:]
         y_train, y_val = y.iloc[:split_point], y.iloc[split_point:]
@@ -123,7 +121,6 @@ class Command(BaseCommand):
                         eval_metric='rmse',
                         callbacks=[lgb.early_stopping(100, verbose=True)])
         
-        # 在验证集上评估最终模型
         val_preds = final_model.predict(X_val)
         val_rmse = np.sqrt(mean_squared_error(y_val, val_preds))
         val_r2 = r2_score(y_val, val_preds)
@@ -131,17 +128,20 @@ class Command(BaseCommand):
         self.stdout.write(f"RMSE: {val_rmse:.4f}")
         self.stdout.write(f"R^2 Score: {val_r2:.4f}")
 
-        # 保存模型
         joblib.dump(final_model, self.MODEL_FILE)
         self.stdout.write(self.style.SUCCESS(f"最终模型已保存至: {self.MODEL_FILE}"))
         
-        # 显示并保存特征重要性
+        # [修改] 显示并保存带有中文描述的特征重要性
         feature_importance_df = pd.DataFrame({
             'feature': feature_names,
             'importance': final_model.feature_importances_
         }).sort_values('importance', ascending=False)
+        
+        # 增加中文描述列
+        feature_importance_df['description'] = feature_importance_df['feature'].map(FACTOR_DESCRIPTIONS).fillna('N/A')
+        
         self.stdout.write("\n--- 特征重要性 ---")
-        self.stdout.write(str(feature_importance_df.head(20)))
+        self.stdout.write(feature_importance_df[['feature', 'importance', 'description']].to_string())
         
         # 更新模型配置文件
         try:
