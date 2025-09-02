@@ -32,7 +32,7 @@ LABEL_CONFIG = {
     #   'return': 未来N日收益率 (tanh缩放)
     #   'sharpe': 未来N日夏普比率 (收益和波动都向后看)
     #   'risk_adjusted_return': 风险调整后收益 (收益向后看，波动向前看)
-    'mode': 'risk_adjusted_return',  # <--- 您可以根据需要切换这里
+    'mode': 'return',  # <--- 您可以根据需要切换这里
     
     'lookforward_days': 20,    # N值, 用于未来收益
     'lookback_days_vol': 20,   # 用于过去波动的回看窗口, 仅 'risk_adjusted_return' 模式使用
