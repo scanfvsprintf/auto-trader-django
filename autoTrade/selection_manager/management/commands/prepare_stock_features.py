@@ -181,11 +181,12 @@ class Command(BaseCommand):
             with open(self.MODEL_CONFIG_FILE, 'w') as f:
                 json.dump(model_config, f, indent=4)
             self.stdout.write(self.style.SUCCESS(f"模型配置文件已成功保存至: {self.MODEL_CONFIG_FILE}"))
-            
-        finally:
             if self.TEMP_DATA_DIR.exists():
                 shutil.rmtree(self.TEMP_DATA_DIR)
                 self.stdout.write(self.style.SUCCESS(f"临时目录已清理: {self.TEMP_DATA_DIR}"))
+            
+        finally:
+            pass
         
         self.stdout.write(self.style.SUCCESS("===== 数据准备流程结束 ====="))
 
