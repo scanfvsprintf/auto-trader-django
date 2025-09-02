@@ -92,6 +92,7 @@ class Command(BaseCommand):
     TEMP_DATA_DIR = MODELS_DIR / 'temp_feature_batches'
 
     def handle(self, *args, **options):
+        self.epsilon=1e-9
         use_local_db = options['use_local_db']
         self.db_alias_quotes = 'local_sqlite' if use_local_db else 'default'
         self.db_alias_other = 'default'
