@@ -16,9 +16,9 @@ import joblib
 from django.conf import settings
 
 from common.models import DailyQuotes, DailyFactorValues, CorporateAction
-from .selection_service import MARKET_INDICATOR_CODE
+from selection_manager.service.selection_service import MARKET_INDICATOR_CODE
 # [修改] 导入新的因子计算器
-from .stock_factor_calculator import StockFactorCalculator
+from selection_manager.service.stock_factor_calculator import StockFactorCalculator
 
 logger = logging.getLogger(__name__)
 

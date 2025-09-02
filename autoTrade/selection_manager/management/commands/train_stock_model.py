@@ -17,7 +17,7 @@ import joblib
 import optuna
 
 # [修改] 导入因子描述字典
-from ..management.commands.prepare_stock_features import FACTOR_DESCRIPTIONS
+from selection_manager.management.commands.prepare_stock_features import FACTOR_DESCRIPTIONS
 
 logger = logging.getLogger(__name__)
 
