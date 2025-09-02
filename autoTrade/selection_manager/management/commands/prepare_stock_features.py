@@ -26,7 +26,7 @@ logger = logging.getLogger(__name__)
 # 通过修改此处的配置，来控制数据集的生成方式
 LABEL_CONFIG = {
     'mode': 'sharpe',  # 'return' (未来收益率) 或 'sharpe' (未来夏普比率)
-    'lookforward_days': 3, # 标签向前看的天数 (N)
+    'lookforward_days': 20, # 标签向前看的天数 (N)
     'risk_free_rate_annual': 0.02, # 年化无风险利率，仅在 'sharpe' 模式下使用
     'tanh_scaling_factor': 1.0, # tanh缩放因子，仅在 'sharpe' 模式下使用
 }

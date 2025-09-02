@@ -22,83 +22,83 @@
     "feature_importance": [
         {
             "feature": "market_m_value",
-            "importance": 2589
-        },
-        {
-            "feature": "dynamic_v2_CPC_Factor",
-            "importance": 278
-        },
-        {
-            "feature": "dynamic_v2_MA_SLOPE",
-            "importance": 222
-        },
-        {
-            "feature": "dynamic_BOLL_LB",
-            "importance": 195
-        },
-        {
-            "feature": "dynamic_NEG_DEV",
-            "importance": 180
-        },
-        {
-            "feature": "dynamic_Old_D",
-            "importance": 173
-        },
-        {
-            "feature": "dynamic_RSI_OS",
-            "importance": 150
-        },
-        {
-            "feature": "dynamic_v2_MA_SCORE",
-            "importance": 138
-        },
-        {
-            "feature": "dynamic_VOLUME_SURGE",
-            "importance": 130
+            "importance": 4837
         },
         {
             "feature": "dynamic_LOW_VOL",
-            "importance": 109
+            "importance": 682
         },
         {
-            "feature": "dynamic_MAX_DD",
-            "importance": 108
+            "feature": "dynamic_v2_MA_SLOPE",
+            "importance": 621
+        },
+        {
+            "feature": "dynamic_NEG_DEV",
+            "importance": 582
         },
         {
             "feature": "dynamic_DOWNSIDE_RISK",
-            "importance": 90
+            "importance": 523
         },
         {
-            "feature": "dynamic_BREAKOUT_PWR",
-            "importance": 90
+            "feature": "dynamic_RSI_OS",
+            "importance": 469
         },
         {
-            "feature": "dynamic_MOM_ACCEL",
-            "importance": 90
+            "feature": "dynamic_v2_CPC_Factor",
+            "importance": 444
+        },
+        {
+            "feature": "dynamic_MAX_DD",
+            "importance": 382
+        },
+        {
+            "feature": "dynamic_Old_D",
+            "importance": 355
+        },
+        {
+            "feature": "dynamic_v2_MA_SCORE",
+            "importance": 326
+        },
+        {
+            "feature": "dynamic_BOLL_LB",
+            "importance": 306
         },
         {
             "feature": "dynamic_Old_I",
-            "importance": 87
+            "importance": 301
+        },
+        {
+            "feature": "dynamic_BREAKOUT_PWR",
+            "importance": 283
         },
         {
             "feature": "dynamic_v2_VPCF",
-            "importance": 78
+            "importance": 260
+        },
+        {
+            "feature": "dynamic_MOM_ACCEL",
+            "importance": 237
+        },
+        {
+            "feature": "dynamic_VOLUME_SURGE",
+            "importance": 171
         },
         {
             "feature": "dynamic_Old_M",
-            "importance": 64
+            "importance": 170
         },
         {
             "feature": "dynamic_ADX_CONFIRM",
-            "importance": 24
+            "importance": 77
         }
     ],
     "best_params": {
-        "num_leaves": 138,
-        "learning_rate": 0.014454126612820695,
-        "subsample": 0.6977524437314766,
-        "colsample_bytree": 0.6904566233599774,
-        "reg_alpha": 0.43317052896975505,
-        "reg_lambda": 2.3110502773250716
+        "num_leaves": 150,
+        "learning_rate": 0.010474580094745526,
+        "subsample": 0.8528150151732482,
+        "colsample_bytree": 0.6031815102854837,
+        "reg_alpha": 8.734979097071687,
+        "reg_lambda": 0.01081530130321744
     }
 }
