@@ -97,6 +97,10 @@ DATABASES = {
             'keepalives_interval': 10,
             'keepalives_count': 6,
         }
+    },
+    'local_sqlite': {
+        'ENGINE': 'django.db.backends.sqlite3',
+        'NAME': 'D:/project/mainDB.sqlite3', # 注意：在Python字符串中，路径最好使用正斜杠'/'
     }
 }
 

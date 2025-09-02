@@ -41,7 +41,13 @@ BATCH_SIZE = 100 # 每次处理100只股票，以控制内存使用
 
 class Command(BaseCommand):
     help = '为个股评分模型生成特征和标签数据集 (X, y)。采用分批处理以优化内存。'
-
+    def add_arguments(self, parser):
+        """添加命令行参数"""
+        parser.add_argument(
+            '--use-local-db',
+            action='store_true',  # 这使它成为一个开关，存在即为True
+            help='如果指定，则将数据源切换至 D:\\project\\mainDB.sqlite3 (需在settings.py中配置好local_sqlite)。'
+        )
     # --- 路径配置 ---
     MODELS_DIR = settings.BASE_DIR / 'selection_manager' / 'ml_models'
     DATASET_FILE = MODELS_DIR / 'stock_features_dataset.pkl'
@@ -60,6 +66,13 @@ class Command(BaseCommand):
         3. 最终合并：将所有临时文件合并为最终数据集。
         4. 清理：删除临时文件。
         """
+
+        use_local_db = options['use_local_db']
+        self.db_alias = 'local_sqlite' if use_local_db else 'default'
+        
+        db_source_message = f"D:\\project\\mainDB.sqlite3 (别名: {self.db_alias})" if use_local_db else f"默认数据库 (别名: {self.db_alias})"
+        self.stdout.write(self.style.SUCCESS(f"当前使用的数据源: {db_source_message}"))
+
         self.stdout.write(self.style.SUCCESS("===== 开始为个股评分模型准备机器学习数据集 (分批处理模式) ====="))
         
         # --- [改造] 步骤 0: 准备工作，创建临时目录 ---
@@ -185,7 +198,7 @@ class Command(BaseCommand):
         self.stdout.write(f"全局数据加载起始日期 (已考虑因子计算缓冲): {start_date}")
 
         # 加载所有唯一的股票代码
-        all_stock_codes = list(DailyQuotes.objects.values_list('stock_code_id', flat=True).distinct())
+        all_stock_codes = list(DailyQuotes.objects.using(self.db_alias).values_list('stock_code_id', flat=True).distinct())
         
         # 加载M值
         m_values_qs = DailyFactorValues.objects.filter(
@@ -205,7 +218,7 @@ class Command(BaseCommand):
         [新增] 从数据库加载一个批次股票的日线行情数据。
         """
         # 加载指定股票批次的日线行情
-        quotes_qs = DailyQuotes.objects.filter(
+        quotes_qs = DailyQuotes.objects.using(self.db_alias).filter(
             trade_date__gte=start_date,
             stock_code_id__in=batch_codes # 核心改动：只查询当前批次的股票
         ).values(
