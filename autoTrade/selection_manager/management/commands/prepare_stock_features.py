@@ -326,7 +326,7 @@ class Command(BaseCommand):
             forward_return = (future_price / df) - 1
             
             # 波动向前看N天 (即历史N日波动率)
-            past_volatility = daily_returns.rolling(window=N_lookback_vol).std()
+            past_volatility = (daily_returns.rolling(window=N_lookback_vol).std())* np.sqrt(N_forward)
             
             # 计算标签
             labels = forward_return / (past_volatility + self.epsilon)
