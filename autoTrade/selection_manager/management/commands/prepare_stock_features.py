@@ -25,10 +25,10 @@ logger = logging.getLogger(__name__)
 # --- [配置区] ---
 # 通过修改此处的配置，来控制数据集的生成方式
 LABEL_CONFIG = {
-    'mode': 'sharpe',  # 'return' (未来收益率) 或 'sharpe' (未来夏普比率)
+    'mode': 'return',  # 'return' (未来收益率) 或 'sharpe' (未来夏普比率)
     'lookforward_days': 3, # 标签向前看的天数 (N)
     'risk_free_rate_annual': 0.02, # 年化无风险利率，仅在 'sharpe' 模式下使用
-    'tanh_scaling_factor': 1.0, # tanh缩放因子，仅在 'sharpe' 模式下使用
+    'tanh_scaling_factor': 4.0, # tanh缩放因子，仅在 'sharpe' 模式下使用
 }
 
 # 因子计算所需的最大回溯期，应大于所有因子中最大的lookback period
@@ -253,6 +253,7 @@ class Command(BaseCommand):
             # 计算未来N日收益率
             future_price = df.shift(-LABEL_CONFIG['lookforward_days'])
             labels = (future_price / df) - 1
+            labels=np.tanh(LABEL_CONFIG['tanh_scaling_factor'] * labels)
         elif LABEL_CONFIG['mode'] == 'sharpe':
             # 计算未来N日夏普比率
             returns = df.pct_change(fill_method=None)
