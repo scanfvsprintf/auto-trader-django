@@ -390,9 +390,7 @@ class SimulateTradeService:
                     decision_order_service.adjust_trading_plan_daily()
                     
                     while True:
-                        open_positions_count = Position.objects.filter(status=Position.StatusChoices.OPEN).count()
-                        max_pos = decision_order_service.current_max_positions
-                        if open_positions_count >= max_pos: break
+                        
                         
                         self.last_buy_trade_id = None
                         decision_order_service.execute_orders()
