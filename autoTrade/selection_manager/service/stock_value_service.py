@@ -277,6 +277,42 @@ class StockValueService:
         # 4. 使用向量化引擎计算所有特征
         logger.info("启动向量化因子计算引擎...")
         features_to_calc = [f for f in self._feature_names if f != 'market_m_value']
+        logger.info("开始进行股票筛选（ST、低流动性）...")
+        # 筛选条件1：过滤低流动性股票
+        # 定义流动性阈值，一亿元
+        LIQUIDITY_THRESHOLD = 1e8 
+        # 取最近3个交易日的成交额数据
+        try:
+            last_3_days_amount = panel_data['amount'].iloc[-3:]
+            # 检查成交额是否均小于阈值
+            is_illiquid = (last_3_days_amount < LIQUIDITY_THRESHOLD).all()
+            # 获取不活跃股列表
+            low_liquidity_stocks = is_illiquid[is_illiquid].index.tolist()
+        except IndexError:
+            logger.warning("数据不足3天，无法进行流动性筛选。")
+            low_liquidity_stocks = []
+        logger.info(f"发现 {len(low_liquidity_stocks)} 只低流动性股票将被剔除。")
+        # 筛选条件2：过滤ST类股票
+        # 注意：这里需要一个获取ST股票列表的方法。
+        # 假设我们有一个从数据库或其他地方获取当日ST股票列表的函数。
+        # 你需要根据你的项目结构自行实现 get_st_stocks(trade_date)
+        # 下面是一个示例实现，假设ST股名称中包含'ST'
+        # from basic_info.models import StockInfo # 假设你有这样一个模型
+        # st_stocks = list(StockInfo.objects.filter(name__contains='ST').values_list('stock_code_id', flat=True))
+        # 为了演示，我们先假设一个空的列表，你需要替换它
+        st_stocks = []  # <--- 重要：请替换为真实的ST股票列表获取逻辑
+        logger.info(f"发现 {len(st_stocks)} 只ST股票将被剔除。")
+        # 合并需要剔除的股票列表
+        stocks_to_remove = set(low_liquidity_stocks) | set(st_stocks)
+        # 如果有需要剔除的股票，则在 panel_data 中剔除它们
+        if stocks_to_remove:
+            original_stock_count = len(panel_data['close'].columns)
+            # 从每个数据面板中删除这些股票的列
+            for key in panel_data:
+                panel_data[key].drop(columns=list(stocks_to_remove), inplace=True, errors='ignore')
+            
+            remaining_stock_count = len(panel_data['close'].columns)
+            logger.info(f"筛选完成: 共剔除 {original_stock_count - remaining_stock_count} 只股票。剩余 {remaining_stock_count} 只。")
         engine = VectorizedFactorEngine(panel_data, features_to_calc)
         features_df = engine.run()
 
