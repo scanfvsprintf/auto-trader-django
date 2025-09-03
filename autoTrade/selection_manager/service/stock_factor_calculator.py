@@ -98,7 +98,7 @@ class StockFactorCalculator:
         # 将宽格式 (日期 x (因子, 股票)) 转换为长格式 ( (日期, 股票) x 因子 )
         # stack() 默认会将最内层的列索引转换为行索引
         long_format_df = combined_df.stack(level=1)
-        long_format_df.index.names = ['trade_date', 'stock_code_id']
+        long_format_df.index.names = ['trade_date', 'stock_code']
         
         return long_format_df
 
@@ -159,7 +159,7 @@ class StockFactorCalculator:
 
     def _calc_v2_ma_slope(self, ma_period=20, ema_period=20):
         ma = self.close.rolling(window=ma_period).mean()
-        ma_roc = ma.pct_change(1)
+        ma_roc = ma.pct_change(1,fill_method=None)
         return ma_roc.ewm(span=ema_period, adjust=False).mean()
 
     def _calc_v2_ma_score(self, p1=5, p2=10, p3=20):
@@ -178,7 +178,7 @@ class StockFactorCalculator:
 
     def _calc_v2_vpcf(self, s=5, l=20, n_smooth=5):
         ma_close_s = self.close.rolling(window=s).mean()
-        price_momentum = ma_close_s.pct_change(1)
+        price_momentum = ma_close_s.pct_change(1,fill_method=None)
         ma_amount_s = self.amount.rolling(window=s).mean()
         ma_amount_l = self.amount.rolling(window=l).mean()
         volume_level = (ma_amount_s / (ma_amount_l + self.epsilon)) - 1
@@ -196,7 +196,7 @@ class StockFactorCalculator:
         return self.amount / (avg_amount + self.epsilon)
 
     def _calc_mom_accel(self, roc_period=5, shift_period=11):
-        roc = self.close.pct_change(roc_period)
+        roc = self.close.pct_change(roc_period,fill_method=None)
         roc_shifted = roc.shift(shift_period)
         return (roc / (roc_shifted + self.epsilon)) - 1
 
@@ -222,7 +222,7 @@ class StockFactorCalculator:
         return (self.close - lower_band) / (band_width + self.epsilon)
 
     def _calc_low_vol(self, period=20):
-        returns = self.close.pct_change()
+        returns = self.close.pct_change(fill_method=None)
         return returns.rolling(window=period).std()
 
     def _calc_max_dd(self, period=60):
@@ -231,7 +231,7 @@ class StockFactorCalculator:
         return daily_dd.rolling(window=period, min_periods=1).min()
 
     def _calc_downside_risk(self, period=60):
-        returns = self.close.pct_change()
+        returns = self.close.pct_change(fill_method=None)
         downside_returns = returns.clip(upper=0)
         return downside_returns.rolling(window=period).std()
 
@@ -290,33 +290,24 @@ class StockFactorCalculator:
         
         m_lagged = self.m_value_series.shift(1)
         
-        # --- 修改开始 ---
-        # 使用 reindex 将全局M值序列与当前批次的日期索引对齐
-        aligned_m_lagged = m_lagged.reindex(self.close.index)
-        
-        # 使用对齐后的序列进行广播
-        return pd.DataFrame(np.tile(aligned_m_lagged.values, (len(self.close.columns), 1)).T, 
-                            index=self.close.index, columns=self.close.columns)
-
+        # --- [推荐修改] ---
+        # 使用Pandas的广播机制，更简洁、更安全
+        # 创建一个与目标面板形状相同的空DataFrame，然后按行（axis=0）加上该序列
+        return pd.DataFrame(dtype=float,index=self.close.index, columns=self.close.columns).add(m_lagged, axis=0)
     def _calc_m_value_slope_5d(self):
         if self.m_value_series is None or self.m_value_series.empty:
             return pd.DataFrame(0, index=self.close.index, columns=self.close.columns)
         
         slopes = self._rolling_regression_slope(self.m_value_series.to_frame(), window=5).iloc[:, 0]
-        # --- 修改开始 ---
-        aligned_slopes = slopes.reindex(self.close.index)
-        return pd.DataFrame(np.tile(aligned_slopes.values, (len(self.close.columns), 1)).T,
-                            index=self.close.index, columns=self.close.columns)
-
+        # --- [推荐修改] ---
+        return pd.DataFrame(dtype=float,index=self.close.index, columns=self.close.columns).add(slopes, axis=0)
     def _calc_m_value_slope_20d(self):
         if self.m_value_series is None or self.m_value_series.empty:
             return pd.DataFrame(0, index=self.close.index, columns=self.close.columns)
             
         slopes = self._rolling_regression_slope(self.m_value_series.to_frame(), window=20).iloc[:, 0]
-        # --- 修改开始 ---
-        aligned_slopes = slopes.reindex(self.close.index)
-        return pd.DataFrame(np.tile(aligned_slopes.values, (len(self.close.columns), 1)).T,
-                            index=self.close.index, columns=self.close.columns)
+        # --- [推荐修改] ---
+        return pd.DataFrame(dtype=float,index=self.close.index, columns=self.close.columns).add(slopes, axis=0)
 
     def _calc_corporate_action_factor(self):
         if self.corp_action_panel is None or self.corp_action_panel.empty:

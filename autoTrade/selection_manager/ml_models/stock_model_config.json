@@ -17,88 +17,13 @@
         "dynamic_Old_D",
         "dynamic_Old_I",
         "dynamic_Old_M",
+        "market_m_value_lag1",
+        "m_value_slope_5d",
+        "m_value_slope_20d",
+        "corporate_action_factor",
+        "turnover_slope_3d",
+        "turnover_slope_10d",
+        "avg_turnover_5d",
         "market_m_value"
-    ],
-    "feature_importance": [
-        {
-            "feature": "market_m_value",
-            "importance": 38673
-        },
-        {
-            "feature": "dynamic_LOW_VOL",
-            "importance": 11108
-        },
-        {
-            "feature": "dynamic_DOWNSIDE_RISK",
-            "importance": 10985
-        },
-        {
-            "feature": "dynamic_v2_MA_SLOPE",
-            "importance": 10971
-        },
-        {
-            "feature": "dynamic_MOM_ACCEL",
-            "importance": 10613
-        },
-        {
-            "feature": "dynamic_MAX_DD",
-            "importance": 10527
-        },
-        {
-            "feature": "dynamic_VOLUME_SURGE",
-            "importance": 10165
-        },
-        {
-            "feature": "dynamic_v2_CPC_Factor",
-            "importance": 9832
-        },
-        {
-            "feature": "dynamic_NEG_DEV",
-            "importance": 9333
-        },
-        {
-            "feature": "dynamic_BOLL_LB",
-            "importance": 9037
-        },
-        {
-            "feature": "dynamic_v2_VPCF",
-            "importance": 9017
-        },
-        {
-            "feature": "dynamic_BREAKOUT_PWR",
-            "importance": 8683
-        },
-        {
-            "feature": "dynamic_RSI_OS",
-            "importance": 7179
-        },
-        {
-            "feature": "dynamic_v2_MA_SCORE",
-            "importance": 7169
-        },
-        {
-            "feature": "dynamic_Old_D",
-            "importance": 6676
-        },
-        {
-            "feature": "dynamic_Old_I",
-            "importance": 5459
-        },
-        {
-            "feature": "dynamic_Old_M",
-            "importance": 4302
-        },
-        {
-            "feature": "dynamic_ADX_CONFIRM",
-            "importance": 2089
-        }
-    ],
-    "best_params": {
-        "num_leaves": 92,
-        "learning_rate": 0.06285204932150698,
-        "subsample": 0.6485564906849107,
-        "colsample_bytree": 0.689904597208006,
-        "reg_alpha": 9.757786140028115,
-        "reg_lambda": 0.11934208109356978
-    }
+    ]
 }
