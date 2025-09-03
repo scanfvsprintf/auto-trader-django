@@ -411,6 +411,9 @@ class DecisionOrderService:
                     self.params['MAX_CAPITAL_PER_POSITION'], 
                     available_balance
                 )
+                if candidate.final_score<Decimal('0.2'):
+                    candidate.final_score=Decimal('0.0')
+
                 nominal_principal=nominal_principal*min(Decimal('1.0'),Decimal(2.0)*max(Decimal('0.0'),candidate.final_score))
                 logger.debug(f"标的 {stock_code}: 动态调整后本金={self.final_nominal_principal:.2f}, "
                              f"单仓上限={self.params['MAX_CAPITAL_PER_POSITION']:.2f}, "

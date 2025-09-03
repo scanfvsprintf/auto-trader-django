@@ -215,8 +215,8 @@ class SelectionService:
             if pd.isna(close_price) or pd.isna(atr):
                 continue
             
-            miop = Decimal(str(close_price)) - Decimal(str(k_drop)) * Decimal(str(atr))
-            maop = Decimal(str(close_price)) + Decimal(str(k_gap)) * Decimal(str(atr))
+            miop = Decimal(str(close_price)) - Decimal(str(k_drop)) * Decimal(str(atr))*Decimal(0.01)
+            maop = Decimal(str(close_price)) + Decimal(str(k_gap)) * Decimal(str(atr))*Decimal(99)
             plans.append({
                 'stock_code': stock_code,
                 'rank': len(plans) + 1,
