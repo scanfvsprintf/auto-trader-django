@@ -30,10 +30,10 @@ logger = logging.getLogger(__name__)
 # --- [配置区] --- (保持不变)
 LABEL_CONFIG = {
     'mode': 'return',
-    'lookforward_days': 5,
+    'lookforward_days': 10,
     'lookback_days_vol': 20,
     'risk_free_rate_annual': 0.02,
-    'tanh_scaling_factor': 3.6,
+    'tanh_scaling_factor': 1.8,
 }
 
 FACTOR_LOOKBACK_BUFFER = 250
