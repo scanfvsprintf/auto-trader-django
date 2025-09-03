@@ -333,45 +333,43 @@ class DecisionOrderService:
         else:
             # 2. 获取所有当前持仓
             open_positions = Position.objects.filter(status=Position.StatusChoices.OPEN)
-            total_consumed_slots = Decimal('0')
-            # 3. 遍历持仓，使用【当日开盘价】计算其市值和占用的仓位数
+            total_positions_market_value = Decimal('0')
+            # 3. 遍历持仓，累加【所有持仓的总市值】
             for pos in open_positions:
                 current_market_value = Decimal('0')
                 price_source_info = "成本价"
                 
                 try:
-                    # 【核心优化】使用 handler 获取当日开盘价来估值
                     open_price = self.handler.get_opening_price(pos.stock_code_id)
-                    
                     if open_price > 0:
                         current_market_value = pos.quantity * open_price
                         price_source_info = f"开盘价({open_price:.2f})"
                     else:
-                        # 如果获取的开盘价无效（例如停牌），使用成本价作为备用
                         logger.warning(f"持仓股 {pos.stock_code_id} 获取到的开盘价无效，将使用成本价估值。")
                         current_market_value = pos.quantity * pos.entry_price
                 except Exception as e:
-                    # 如果 handler 获取价格时发生异常，同样使用成本价作为备用
                     logger.error(f"为持仓股 {pos.stock_code_id} 获取开盘价时出错: {e}。将使用成本价估值。")
                     current_market_value = pos.quantity * pos.entry_price
-                # 4. 核心逻辑：计算该持仓占用了多少个“今日标准仓位”，并向上取整
-                consumed_slots_for_pos = (current_market_value / today_nominal_principal).to_integral_value(rounding='ROUND_CEILING')
-                total_consumed_slots += consumed_slots_for_pos
-                
-                logger.debug(f"持仓 {pos.stock_code_id}: 市值 {current_market_value:.2f} (基于{price_source_info}), "
-                            f"折合占用 {consumed_slots_for_pos} 个仓位 (基于今日标尺 {today_nominal_principal:.2f})")
+                logger.debug(f"持仓 {pos.stock_code_id}: 市值 {current_market_value:.2f} (基于{price_source_info})")
+                total_positions_market_value += current_market_value
+            logger.info(f"所有存量持仓的总市值为: {total_positions_market_value:.2f}")
+            # 4. 【核心修正】用总市值除以标尺，然后【仅进行一次】向上取整
+            equivalent_consumed_slots_decimal = total_positions_market_value / today_nominal_principal
+            equivalent_open_positions_count = int(equivalent_consumed_slots_decimal.to_integral_value(rounding='ROUND_CEILING'))
             # 5. 计算最终的剩余仓位数
-            equivalent_open_positions_count = int(total_consumed_slots)
             remaining_slots = self.current_max_positions - equivalent_open_positions_count
-            logger.info(f"动态仓位计算结果: 当日最大仓位 {self.current_max_positions}, "
-                        f"存量持仓折合占用 {equivalent_open_positions_count}, "
-                        f"剩余可用仓位: {remaining_slots}")
+            
+            logger.info(f"动态仓位计算结果: 总市值 {total_positions_market_value:.2f} / "
+                        f"名义本金 {today_nominal_principal:.2f} = {equivalent_consumed_slots_decimal:.4f}. "
+                        f"向上取整后折合占用 {equivalent_open_positions_count} 个仓位。")
+            logger.info(f"最终: 当日最大仓位数 {self.current_max_positions} - "
+                        f"已占用 {equivalent_open_positions_count} = 剩余 {remaining_slots} 个仓位。")
 
         # 使用动态计算的当日最大持仓数
         #remaining_slots = self.current_max_positions - open_positions_count
 
         if remaining_slots <= 0:
-            msg = f"当前持仓数 {open_positions_count} 已达或超过当日动态上限 {self.current_max_positions}，不进行买入。"
+            msg = f"当前持仓按开盘价折算后已占用 {equivalent_open_positions_count} 个仓位，达到或超过当日上限 {self.current_max_positions}，不进行新买入。"
             logger.debug(msg)
             self._log_to_db('WARNING', msg)
             return
