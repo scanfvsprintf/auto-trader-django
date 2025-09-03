@@ -255,7 +255,7 @@ class Command(BaseCommand):
         quotes_df['avg_turnover_20d'] = quotes_df.groupby('stock_code')['amount'].transform(
             lambda x: x.rolling(window=20, min_periods=15).mean()
         )
-        quotes_df = quotes_df[quotes_df['avg_turnover_20d'] >= 100_000_000]
+        quotes_df = quotes_df[quotes_df['avg_turnover_20d'] >= 100_000_00]
         if quotes_df.empty: return quotes_df
 
         numeric_cols = ['open', 'high', 'low', 'close', 'volume', 'amount', 'hfq_close']
