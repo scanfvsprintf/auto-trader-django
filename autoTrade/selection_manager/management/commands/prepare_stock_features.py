@@ -33,7 +33,7 @@ LABEL_CONFIG = {
     'lookforward_days': 10,
     'lookback_days_vol': 20,
     'risk_free_rate_annual': 0.02,
-    'tanh_scaling_factor': 1.8,
+    'tanh_scaling_factor': 3.6,
 }
 
 FACTOR_LOOKBACK_BUFFER = 250
