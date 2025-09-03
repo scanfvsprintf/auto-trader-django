@@ -330,6 +330,7 @@ class DecisionOrderService:
         if today_nominal_principal <= Decimal('0'):
             logger.warning(f"当日动态名义本金为 {today_nominal_principal:.2f}，不进行任何新开仓。")
             remaining_slots = 0
+            return  
         else:
             # 2. 获取所有当前持仓
             open_positions = Position.objects.filter(status=Position.StatusChoices.OPEN)
