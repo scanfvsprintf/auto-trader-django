@@ -433,6 +433,7 @@ class DecisionOrderService:
                     logger.warning(msg)
                     self._log_to_db('WARNING', msg)
                     continue
+                
  
                 msg = (f"确定唯一买入标的: {candidate.stock_code.stock_name}({stock_code}) (Rank:{candidate.rank})。 "
                        f"计划以限价 {limit_price} 买入 {quantity} 股。")

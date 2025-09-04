@@ -318,18 +318,58 @@ class BeforeFixService:
             logger.info(f"配股风险处理：将 {len(positions_to_update)} 条持仓的止盈/止损置为紧急退出状态。")
 
 
-# --- 如何在项目中使用这个服务 ---
-# 你可以在一个Django Management Command或者定时任务（如Celery）中调用它
-#
-# from trade_manager.service.before_fix_service import BeforeFixService
-#
-# def run_daily_premarket_fix():
-#     # 默认使用当天日期
-#     service = BeforeFixService()
-#     service.run()
-#
-# def run_backtest_premarket_fix(some_date):
-#     # 传入指定日期进行回测
-#     service = BeforeFixService(execution_date=some_date)
-#     service.run()
-
+    def backtest_handle_one_word_board(self):
+        """
+        【回测专用工具】检查T日交易预案中的股票是否为一字板，并将其设置为无法买入。
+        此方法不应在实盘`run`流程中调用，仅供回测模块在`run()`之后调用。
+        一字板定义：当天 open == high == low == close，且成交量大于0。
+        """
+        logger.info(f"[回测工具] 开始为日期 {self.t_day} 检查一字板股票...")
+        # 1. 找到T日所有待执行的交易预案
+        pending_plans = DailyTradingPlan.objects.filter(
+            plan_date=self.t_day,
+            status=DailyTradingPlan.StatusChoices.PENDING
+        )
+        if not pending_plans.exists():
+            logger.info(f"[回测工具] 日期 {self.t_day} 没有待执行的交易预案，无需检查。")
+            return
+        stock_codes_in_plan = list(pending_plans.values_list('stock_code_id', flat=True))
+        # 2. 获取这些股票在T日的行情数据
+        quotes_on_t_day = DailyQuotes.objects.filter(
+            trade_date=self.t_day,
+            stock_code_id__in=stock_codes_in_plan
+        )
+        one_word_board_stocks = []
+        for quote in quotes_on_t_day:
+            # 3. 判断是否为一字板
+            is_one_word_board = (
+                quote.open == quote.high and
+                quote.high == quote.low and
+                quote.low == quote.close
+            )
+            if is_one_word_board:
+                one_word_board_stocks.append(quote.stock_code_id)
+        if not one_word_board_stocks:
+            logger.info(f"[回测工具] 检查完毕，在交易预案中未发现一字板股票。")
+            return
+        logger.warning(
+            f"[回测工具] 检测到 {len(one_word_board_stocks)} 只一字板股票: {one_word_board_stocks}。"
+            f"将修改其交易预案以阻止回测买入。"
+        )
+        # 4. 对一字板股票的交易预案进行处理，使其无法被买入
+        plans_to_update_qs = DailyTradingPlan.objects.filter(
+            plan_date=self.t_day,
+            stock_code_id__in=one_word_board_stocks,
+            status=DailyTradingPlan.StatusChoices.PENDING
+        )
+        plans_to_update = []
+        for plan in plans_to_update_qs:
+            # 设置一个不可能达成的价格区间
+            plan.miop = Decimal('99999.00')  # 最低价设为极高
+            plan.maop = Decimal('0.00')      # 最高价设为极低
+            plans_to_update.append(plan)
+            logger.info(f"[回测工具] 已将股票 {plan.stock_code_id} 的预案设为无效，"
+                        f"MIOP: {plan.miop}, MAOP: {plan.maop}")
+        if plans_to_update:
+            DailyTradingPlan.objects.bulk_update(plans_to_update, ['miop', 'maop'])
+            logger.info(f"[回测工具] 成功更新 {len(plans_to_update)} 条交易预案，以模拟一字板无法买入。")

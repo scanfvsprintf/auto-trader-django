@@ -382,7 +382,7 @@ class SimulateTradeService:
                     logger.info("-> [T日 盘前校准] ...")
                     before_fix_service = BeforeFixService(execution_date=self.current_date)
                     before_fix_service.run()
-                    
+                    before_fix_service.backtest_handle_one_word_board()
                     self._handle_dividends()
 
                     logger.info("-> [T日 开盘决策与买入] ...")
