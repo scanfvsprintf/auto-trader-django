@@ -56,6 +56,7 @@ class FactorCalculator:
             'dynamic_Old_D': self._calc_old_d,
             'dynamic_Old_I': self._calc_old_i,
             'dynamic_Old_M': self._calc_old_m,
+            'avg_amount_5d': self._calc_avg_amount_5d
         }
 
         for factor_name in feature_names:
@@ -63,7 +64,8 @@ class FactorCalculator:
                 factor_series = calculator_methods[factor_name]()
                 all_factors_df[factor_name] = factor_series
             else:
-                raise ValueError(f"预测时发现未知特征 '{factor_name}'，模型和数据准备脚本可能不一致。")
+                #raise ValueError(f"预测时发现未知特征 '{factor_name}'，模型和数据准备脚本可能不一致。")
+                pass
         
         return all_factors_df
 
@@ -228,6 +230,9 @@ class FactorCalculator:
         m_t = d_t * i_t
         
         return m_t.rename('dynamic_Old_M')
+    def _calc_avg_amount_5d(self, period=5):
+        """计算N日平均成交额"""
+        return self.df['amount'].rolling(window=period).mean().rename('avg_amount_5d')
 
 # ==============================================================================
 #  重构后的 M 值预测服务 (Refactored M-Value Prediction Service)

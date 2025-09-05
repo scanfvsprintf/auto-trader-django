@@ -16,7 +16,7 @@ from django.core.management.base import BaseCommand
 from django.conf import settings
 from tqdm import tqdm
 
-from common.models import DailyQuotes, DailyFactorValues
+from common.models import DailyQuotes, DailyFactorValues,StockInfo 
 from selection_manager.service.m_value_service import FactorCalculator # 复用M值服务中的因子计算器
 from selection_manager.service.selection_service import MARKET_INDICATOR_CODE
 
@@ -86,6 +86,14 @@ class Command(BaseCommand):
             # --- [改造] 步骤 1: 一次性加载全局/轻量级数据 ---
             self.stdout.write("步骤 1/5: 加载全局数据 (股票列表, M值)...")
             all_stock_codes, m_values_series, start_date = self._load_global_data()
+            epsilon = 1e-9
+            clipped_m_values = m_values_series.clip(lower=-1.0 + epsilon, upper=1.0 - epsilon)
+            # 2. 将M值通过arctanh映射回线性空间
+            linear_m_values = np.arctanh(clipped_m_values)
+            # 3. 在线性空间中计算差值，这个差值更能反映真实变化
+            m_value_diff1_linear = linear_m_values.diff(1).rename('m_value_diff1')
+            m_value_diff1 = m_values_series.diff(1).rename('m_value_diff1')
+            m_value_ma5 = m_values_series.rolling(5).mean().rename('m_value_ma5')
             if not all_stock_codes:
                 self.stdout.write(self.style.ERROR("错误: 数据库中没有可用的股票代码。"))
                 return
@@ -122,6 +130,9 @@ class Command(BaseCommand):
                 # 2.4 合并批次内的特征、M值和标签
                 # 将M值作为一个特征加入
                 features_df['market_m_value'] = features_df.index.get_level_values('trade_date').map(m_values_series)
+                features_df['m_value_lag1'] = features_df.index.get_level_values('trade_date').map(m_value_diff1_linear)
+                features_df['m_value_diff1'] = features_df.index.get_level_values('trade_date').map(m_value_diff1)
+                features_df['m_value_ma5'] = features_df.index.get_level_values('trade_date').map(m_value_ma5)
                 
                 # 合并批次数据
                 batch_final_df = features_df.join(labels_df, how='inner')
@@ -153,8 +164,15 @@ class Command(BaseCommand):
             # --- [无改动] 步骤 5: 保存最终数据集和配置 ---
             self.stdout.write("步骤 5/5: 保存最终数据集和模型配置文件...")
             # 在最终合并后的DataFrame中加入market_m_value特征名
-            if 'market_m_value' not in feature_names:
-                feature_names.append('market_m_value')
+            new_feature_names = [
+                'market_m_value', 
+                'm_value_lag1', 
+                'm_value_diff1', 
+                'm_value_ma5'
+            ]
+            for name in new_feature_names:
+                if name not in feature_names:
+                    feature_names.append(name)
 
             X = final_df[feature_names]
             y = final_df['label']
@@ -257,19 +275,32 @@ class Command(BaseCommand):
 
     def _generate_labels(self, quotes_df: pd.DataFrame) -> pd.DataFrame:
         """
-        [无改动] 根据配置为给定的DataFrame生成标签。
-        此函数逻辑不变，现在作用于小批量的DataFrame，因此内存友好。
+        [修改] 根据配置为给定的DataFrame生成标签。
+        起点从当天收盘价变更为下一个交易日开盘价。
         """
-        df = quotes_df.set_index(['trade_date', 'stock_code_id'])['close'].unstack()
-        df.replace(0, np.nan, inplace=True)
+        # --- 修改: 同时处理 open 和 close 价格 ---
+        close_df = quotes_df.set_index(['trade_date', 'stock_code_id'])['close'].unstack()
+        open_df = quotes_df.set_index(['trade_date', 'stock_code_id'])['open'].unstack()
+        
+        close_df.replace(0, np.nan, inplace=True)
+        open_df.replace(0, np.nan, inplace=True)
         if LABEL_CONFIG['mode'] == 'return':
             # 计算未来N日收益率
-            future_price = df.shift(-LABEL_CONFIG['lookforward_days'])
-            labels = (future_price / df) - 1
-            labels=np.tanh(LABEL_CONFIG['tanh_scaling_factor'] * labels)
+            # 收益起点：下一个交易日的开盘价
+            start_price = open_df.shift(-1)
+            # 收益终点：N个交易日后的收盘价
+            end_price = close_df.shift(-LABEL_CONFIG['lookforward_days'])
+            
+            labels = (end_price / start_price) - 1
+            labels = np.tanh(LABEL_CONFIG['tanh_scaling_factor'] * labels)
         elif LABEL_CONFIG['mode'] == 'sharpe':
-            # 计算未来N日夏普比率
-            returns = df.pct_change(fill_method=None)
+            # 注意：夏普比率衡量的是未来一段时间内的“风险调整后收益路径”。
+            # 它的计算基于每日收益率序列。最直接的改动是改变这个每日收益率的定义。
+            # 但为了保持逻辑简单和稳定，一个常见的做法是继续使用 close-to-close 日收益率
+            # 来衡量未来N天的波动性路径，因为这依然能反映股价的“质量”。
+            # 而 'return' 模式的改变已经解决了你最核心的“买入价”问题。
+            # 因此，此处我们暂时保持原逻辑，如果你确认需要更复杂的每日 open-close 收益序列，可以再进行迭代。
+            returns = close_df.pct_change(fill_method=None) # 维持原状
             daily_rf = (1 + LABEL_CONFIG['risk_free_rate_annual'])**(1/252) - 1
             excess_returns = returns - daily_rf
             
@@ -280,7 +311,6 @@ class Command(BaseCommand):
             labels = np.tanh(LABEL_CONFIG['tanh_scaling_factor'] * annualized_sharpe)
         else:
             raise ValueError(f"未知的标签模式: {LABEL_CONFIG['mode']}")
-
         return labels.stack().rename('label').to_frame()
 
     def _get_feature_names(self):

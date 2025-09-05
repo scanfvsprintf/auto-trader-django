@@ -56,6 +56,7 @@ class VectorizedFactorEngine:
             'dynamic_Old_D': self._calc_old_d,
             'dynamic_Old_I': self._calc_old_i,
             'dynamic_Old_M': self._calc_old_m,
+            'avg_amount_5d': self._calc_avg_amount_5d,
         }
         all_factors = {}
         for factor_name in self.feature_names:
@@ -196,6 +197,10 @@ class VectorizedFactorEngine:
         d_t = self._calc_old_d()
         i_t = self._calc_old_i()
         return d_t * i_t
+    
+    def _calc_avg_amount_5d(self, period=5):
+        """计算N日平均成交额"""
+        return self.amount.rolling(window=period).mean().iloc[-1]
 
 # ==============================================================================
 #  主服务 (Main Service)
@@ -226,7 +231,7 @@ class StockValueService:
         except Exception as e:
             logger.error(f"加载个股评分模型依赖时出错: {e}", exc_info=True)
 
-    def get_all_stock_scores(self, stock_pool: list, trade_date, m_value: float, preloaded_panels: dict = None) -> pd.Series:
+    def get_all_stock_scores(self, stock_pool: list, trade_date, m_value_factors: float, preloaded_panels: dict = None) -> pd.Series:
         if not self._dependencies_loaded:
             logger.warning("模型未加载，返回空评分列表。")
             return pd.Series(dtype=float)
@@ -276,7 +281,10 @@ class StockValueService:
         # --- [关键修正] 结束 ---
         # 4. 使用向量化引擎计算所有特征
         logger.info("启动向量化因子计算引擎...")
-        features_to_calc = [f for f in self._feature_names if f != 'market_m_value']
+        features_to_calc = [
+            f for f in self._feature_names 
+            if f not in ['market_m_value', 'm_value_lag1', 'm_value_diff1', 'm_value_ma5']
+        ]
         logger.info("开始进行股票筛选（ST、低流动性）...")
         # 筛选条件1：过滤低流动性股票
         # 定义流动性阈值，一亿元
@@ -318,7 +326,9 @@ class StockValueService:
 
         # 4. 准备模型输入
         logger.info("准备模型输入并进行预测...")
-        features_df['market_m_value'] = m_value
+        for factor_name, factor_value in m_value_factors.items():
+            if factor_name in self._feature_names:
+                features_df[factor_name] = factor_value
         features_df.dropna(inplace=True)
         
         if features_df.empty:

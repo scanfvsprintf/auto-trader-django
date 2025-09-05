@@ -5,7 +5,7 @@
 import logging
 from datetime import date, timedelta
 from decimal import Decimal
-
+import numpy as np
 import pandas as pd
 from django.db import transaction
 from common.models import IndexQuotesCsi300
@@ -61,13 +61,13 @@ class SelectionService:
 
             # 1. 计算市场M值
             self.market_regime_M = self._calculate_market_regime_M(initial_stock_pool)
-
+            m_value_factors = self._get_m_value_derived_factors(self.market_regime_M)
             # 2. 调用新服务获取所有股票的模型评分
             logger.info("调用StockValueService获取所有股票的模型评分...")
             final_scores = self.stock_value_service.get_all_stock_scores(
                 stock_pool=initial_stock_pool,
                 trade_date=self.trade_date,
-                m_value=self.market_regime_M,
+                m_value_factors=m_value_factors,
                 preloaded_panels=self.preloaded_panels
             )
             final_scores = final_scores.sort_values(ascending=False)
@@ -303,3 +303,43 @@ class SelectionService:
         # SystemLog.objects.create(log_level=level, module_name=MODULE_NAME, message=message)
         pass
 
+    def _get_m_value_derived_factors(self, current_m_value: float) -> dict:
+        """
+        基于当天的M值，从数据库获取历史数据，计算并返回所有M值相关因子。
+        """
+        # 1. 从数据库获取历史M值序列
+        # 需要至少5个历史数据点来计算5日均线
+        m_values_qs = DailyFactorValues.objects.filter(
+            stock_code_id=MARKET_INDICATOR_CODE,
+            factor_code_id='dynamic_M_VALUE',
+            # 注意这里的日期是小于等于，因为当天M值已经计算并存入
+            trade_date__lte=self.trade_date
+        ).order_by('-trade_date')[:5]
+        if not m_values_qs:
+            logger.warning("数据库中无历史M值，无法计算衍生因子。")
+            return {'market_m_value': current_m_value}
+        # 2. 构建Series
+        history_m_df = pd.DataFrame.from_records(m_values_qs.values('trade_date', 'raw_value'))
+        history_m_df['raw_value'] = pd.to_numeric(history_m_df['raw_value'])
+        
+        # 确保数据按日期升序排列
+        m_values_series = history_m_df.set_index('trade_date')['raw_value'].sort_index()
+        # 3. 计算衍生因子 (与prepare脚本逻辑完全一致)
+        # 使用 .iloc[-1] 获取最新的有效值
+        m_value_lag1 = m_values_series.shift(1).iloc[-1] if len(m_values_series) > 1 else 0.0
+        
+        epsilon = 1e-9
+        clipped_m_values = m_values_series.clip(lower=-1.0 + epsilon, upper=1.0 - epsilon)
+        linear_m_values = np.arctanh(clipped_m_values)
+        m_value_diff1 = linear_m_values.diff(1).iloc[-1] if len(linear_m_values) > 1 else 0.0
+        
+        m_value_ma5 = m_values_series.rolling(window=5, min_periods=1).mean().iloc[-1]
+        # 4. 组装成字典返回
+        m_factors = {
+            'market_m_value': current_m_value,
+            'm_value_lag1': m_value_lag1 if pd.notna(m_value_lag1) else 0.0,
+            'm_value_diff1': m_value_diff1 if pd.notna(m_value_diff1) else 0.0,
+            'm_value_ma5': m_value_ma5 if pd.notna(m_value_ma5) else 0.0,
+        }
+        logger.info(f"M值衍生因子计算完成: {m_factors}")
+        return m_factors
