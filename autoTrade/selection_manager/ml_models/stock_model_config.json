@@ -25,5 +25,140 @@
         "turnover_slope_10d",
         "avg_turnover_5d",
         "market_m_value"
-    ]
+    ],
+    "feature_importance": [
+        {
+            "feature": "market_m_value",
+            "importance": 61876,
+            "description": "N/A"
+        },
+        {
+            "feature": "dynamic_DOWNSIDE_RISK",
+            "importance": 19844,
+            "description": "N/A"
+        },
+        {
+            "feature": "dynamic_MAX_DD",
+            "importance": 19171,
+            "description": "N/A"
+        },
+        {
+            "feature": "avg_turnover_5d",
+            "importance": 16740,
+            "description": "N/A"
+        },
+        {
+            "feature": "dynamic_LOW_VOL",
+            "importance": 16095,
+            "description": "N/A"
+        },
+        {
+            "feature": "dynamic_v2_MA_SLOPE",
+            "importance": 15653,
+            "description": "N/A"
+        },
+        {
+            "feature": "dynamic_BREAKOUT_PWR",
+            "importance": 12019,
+            "description": "N/A"
+        },
+        {
+            "feature": "dynamic_NEG_DEV",
+            "importance": 11860,
+            "description": "N/A"
+        },
+        {
+            "feature": "dynamic_v2_CPC_Factor",
+            "importance": 11559,
+            "description": "N/A"
+        },
+        {
+            "feature": "dynamic_MOM_ACCEL",
+            "importance": 9860,
+            "description": "N/A"
+        },
+        {
+            "feature": "dynamic_v2_VPCF",
+            "importance": 9657,
+            "description": "N/A"
+        },
+        {
+            "feature": "dynamic_BOLL_LB",
+            "importance": 9376,
+            "description": "N/A"
+        },
+        {
+            "feature": "turnover_slope_10d",
+            "importance": 8818,
+            "description": "N/A"
+        },
+        {
+            "feature": "dynamic_VOLUME_SURGE",
+            "importance": 8143,
+            "description": "N/A"
+        },
+        {
+            "feature": "dynamic_v2_MA_SCORE",
+            "importance": 7447,
+            "description": "N/A"
+        },
+        {
+            "feature": "dynamic_RSI_OS",
+            "importance": 6893,
+            "description": "N/A"
+        },
+        {
+            "feature": "dynamic_Old_I",
+            "importance": 6732,
+            "description": "N/A"
+        },
+        {
+            "feature": "dynamic_Old_D",
+            "importance": 6147,
+            "description": "N/A"
+        },
+        {
+            "feature": "turnover_slope_3d",
+            "importance": 6037,
+            "description": "N/A"
+        },
+        {
+            "feature": "dynamic_Old_M",
+            "importance": 3921,
+            "description": "N/A"
+        },
+        {
+            "feature": "corporate_action_factor",
+            "importance": 3436,
+            "description": "N/A"
+        },
+        {
+            "feature": "dynamic_ADX_CONFIRM",
+            "importance": 2836,
+            "description": "N/A"
+        },
+        {
+            "feature": "m_value_slope_20d",
+            "importance": 0,
+            "description": "N/A"
+        },
+        {
+            "feature": "market_m_value_lag1",
+            "importance": 0,
+            "description": "N/A"
+        },
+        {
+            "feature": "m_value_slope_5d",
+            "importance": 0,
+            "description": "N/A"
+        }
+    ],
+    "best_params": {
+        "num_leaves": 141,
+        "learning_rate": 0.03904088150169961,
+        "subsample": 0.7549645380439773,
+        "colsample_bytree": 0.9616145188136006,
+        "reg_alpha": 9.45137831958888,
+        "reg_lambda": 1.2596656653818543
+    }
 }
