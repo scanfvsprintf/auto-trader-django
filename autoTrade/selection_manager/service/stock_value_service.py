@@ -283,7 +283,7 @@ class StockValueService:
         logger.info("启动向量化因子计算引擎...")
         features_to_calc = [
             f for f in self._feature_names 
-            if f not in ['market_m_value', 'm_value_lag1', 'm_value_diff1', 'm_value_ma5']
+            if f not in ['market_m_value', 'm_value_lag1', 'm_value_diff1', 'm_value_ma5','avg_amount_5d']
         ]
         logger.info("开始进行股票筛选（ST、低流动性）...")
         # 筛选条件1：过滤低流动性股票
