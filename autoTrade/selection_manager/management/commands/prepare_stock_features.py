@@ -168,7 +168,8 @@ class Command(BaseCommand):
                 'market_m_value', 
                 'm_value_lag1', 
                 'm_value_diff1', 
-                'm_value_ma5'
+                'm_value_ma5',
+                'avg_amount_5d'
             ]
             for name in new_feature_names:
                 if name not in feature_names:
