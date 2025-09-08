@@ -3,7 +3,7 @@ const vue = require('@vitejs/plugin-vue2');
 module.exports = {
   plugins: [vue()],
   server: {
-    port: 5173,
+    port: 80,
     host: true,
     proxy: {
       '/webManager': {
