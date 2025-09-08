@@ -191,11 +191,11 @@ class MDistributionReporter:
         fig1, ax1 = plt.subplots(figsize=(20, 8))
         sns.heatmap(
             win_rate_df.replace(-999, np.nan), ax=ax1, cmap="viridis", annot=False, # 数据量大，关闭 annot
-            fmt=".1%", cbar_kws={'label': '胜率'}
+            fmt=".1%", cbar_kws={'label': 'win rate'}
         )
-        ax1.set_title('胜率分布 (M值 vs 选股得分)', fontsize=16)
-        ax1.set_xlabel('选股得分区间 (步长0.01)')
-        ax1.set_ylabel('M值区间 (步长0.1)')
+        ax1.set_title('win_rate (M vs score)', fontsize=16)
+        ax1.set_xlabel('score (0.01)')
+        ax1.set_ylabel('M (0.1)')
         # 简化X轴标签，每10个显示一个
         tick_labels = [f"{x.left:.2f}" for x in win_rate_df.columns]
         ax1.set_xticks(np.arange(len(tick_labels))[::10] + 0.5)
@@ -209,11 +209,11 @@ class MDistributionReporter:
         fig2, ax2 = plt.subplots(figsize=(20, 8))
         sns.heatmap(
             return_df.replace(-999, np.nan), ax=ax2, cmap="icefire", center=0, annot=False,
-            fmt=".2%", cbar_kws={'label': '期望收益率'}
+            fmt=".2%", cbar_kws={'label': 'yield rate'}
         )
-        ax2.set_title('期望收益率分布 (M值 vs 选股得分)', fontsize=16)
-        ax2.set_xlabel('选股得分区间 (步长0.01)')
-        ax2.set_ylabel('M值区间 (步长0.1)')
+        ax2.set_title('yield rate (M vs score)', fontsize=16)
+        ax2.set_xlabel('score (.01)')
+        ax2.set_ylabel('M (0.1)')
         ax2.set_xticks(np.arange(len(tick_labels))[::10] + 0.5)
         ax2.set_xticklabels(tick_labels[::10], rotation=45, ha='right')
         plt.tight_layout()
@@ -222,6 +222,34 @@ class MDistributionReporter:
         return_b64 = base64.b64encode(buf2.getvalue()).decode('utf-8')
         plt.close(fig2)
         return win_rate_b64, return_b64
+    def _format_2d_table_to_html(self, df_pivot: pd.DataFrame, value_format: str) -> str:
+        """
+        一个辅助函数，将丑陋的pivot_table格式化为美观的HTML表格。
+        """
+        if df_pivot.empty:
+            return "<p>无数据</p>"
+        # 1. 将行索引 'm_bin' 变为一个普通的列
+        df_flat = df_pivot.reset_index()
+        
+        # 2. 格式化列名 (将Interval对象转为字符串)
+        df_flat.columns = [
+            f"[{col.left:.1f}, {col.right:.1f})" if isinstance(col, pd.Interval) else col
+            for col in df_flat.columns
+        ]
+        # 3. 格式化第一列（原来的行索引）的显示值
+        m_bin_col_name = df_flat.columns[0]
+        df_flat[m_bin_col_name] = df_flat[m_bin_col_name].apply(
+             lambda x: f"[{x.left:.1f}, {x.right:.1f})" if isinstance(x, pd.Interval) else x
+        )
+        # 4. 格式化所有数据单元格（应用百分比格式并处理N/A）
+        for col in df_flat.columns[1:]: # 跳过第一列
+            df_flat[col] = df_flat[col].apply(
+                lambda x: value_format.format(x) if isinstance(x, (float, int)) and x != -999 else "N/A"
+            )
+        # 5. 重命名左上角的单元格，使其更具说明性
+        df_flat.rename(columns={m_bin_col_name: 'M值 \\ 得分'}, inplace=True)
+        # 6. 转换为HTML，这次使用 index=False，因为索引已经被移到列中了
+        return df_flat.to_html(classes='styled-table styled-table-2d', border=0, na_rep='-', index=False)
     def _format_html_content(self, all_analysis_results: dict, plot1_b64: str, plot2_b64: str,
                              two_dim_tables: dict, heatmap1_b64: str, heatmap2_b64: str) -> str:
         """将所有内容整合成HTML邮件"""
@@ -246,16 +274,20 @@ class MDistributionReporter:
             
             tables_html += df_display.to_html(index=False, classes='styled-table', border=0)
         # ===================== 新增二维表格HTML生成 =====================
-        tables_2d_html = "<h2>新增：M动态策略 - 二维统计表</h2>"
+        tables_2d_html = "<h2>M动态策略 - 二维统计表</h2>"
         if two_dim_tables:
             # 胜率二维表
             tables_2d_html += "<h3>胜率 (M值 vs 选股得分)</h3>"
-            df_wr = two_dim_tables['table_win_rate'].replace(-999, 'N/A').applymap(lambda x: f"{x:.1%}" if isinstance(x, (float, int)) else x)
-            tables_2d_html += df_wr.to_html(classes='styled-table styled-table-2d', border=0, na_rep='-')
+            tables_2d_html += self._format_2d_table_to_html(
+                two_dim_tables['table_win_rate'],
+                value_format="{:.1%}"
+            )
             # 收益率二维表
             tables_2d_html += "<h3>期望收益率 (M值 vs 选股得分)</h3>"
-            df_er = two_dim_tables['table_return'].replace(-999, 'N/A').applymap(lambda x: f"{x:.2%}" if isinstance(x, (float, int)) else x)
-            tables_2d_html += df_er.to_html(classes='styled-table styled-table-2d', border=0, na_rep='-')
+            tables_2d_html += self._format_2d_table_to_html(
+                two_dim_tables['table_return'],
+                value_format="{:.2%}"
+            )
         else:
             tables_2d_html += "<p>M动态策略无数据，无法生成二维表。</p>"
         # =============================================================
