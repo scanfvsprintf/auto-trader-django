@@ -11,7 +11,7 @@ matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 from datetime import date, timedelta,datetime
 from django.db.models import Q
-
+import seaborn as sns  
 from common.models.backtest_logs import MDistributionBacktestLog
 from data_manager.service.email_handler import EmailHandler
 
@@ -127,8 +127,103 @@ class MDistributionReporter:
         plt.close(fig_exp)
 
         return win_rate_b64, exp_return_b64
-
-    def _format_html_content(self, all_analysis_results: dict, plot1_b64: str, plot2_b64: str) -> str:
+    # ===================== 新增二维分析方法 =====================
+    def _analyze_2d_distribution(self, df: pd.DataFrame) -> dict:
+        """
+        对 M动态策略 的数据进行二维 M值 x 选股得分 的分析。
+        返回一个字典，包含用于表格和热力图的多个DataFrame。
+        """
+        if df.empty or 'final_score' not in df.columns:
+            return {}
+        df = df.copy()
+        df.dropna(subset=['final_score', 'm_value_at_plan'], inplace=True)
+        df['final_score'] = df['final_score'].astype(float)
+        df['m_value_at_plan'] = df['m_value_at_plan'].astype(float)
+        # 定义计算函数
+        def calculate_metrics(group):
+            win_trades = (group['exit_reason'] == 'TAKE_PROFIT').sum()
+            total_trades = len(group)
+            win_rate = win_trades / total_trades if total_trades > 0 else 0
+            
+            avg_tp = np.nan_to_num(group.loc[group['exit_reason'] == 'TAKE_PROFIT', 'preset_take_profit_rate'].astype(float).mean())
+            avg_sl = np.nan_to_num(group.loc[group['exit_reason'] == 'STOP_LOSS', 'preset_stop_loss_rate'].astype(float).mean())
+            expected_return = win_rate * avg_tp - (1 - win_rate) * avg_sl
+            
+            return pd.Series({'win_rate': win_rate, 'expected_return': expected_return})
+        # --- 为HTML表格进行分析 (0.1步长) ---
+        m_bins_table = np.arange(-1.0, 1.1, 0.1)
+        score_bins_table = np.arange(-1.0, 1.1, 0.1)
+        df['m_bin'] = pd.cut(df['m_value_at_plan'], bins=m_bins_table, right=False)
+        df['score_bin'] = pd.cut(df['final_score'], bins=score_bins_table, right=False)
+        
+        table_grouped = df.groupby(['m_bin', 'score_bin'], observed=False).apply(calculate_metrics, include_groups=False).reset_index()
+        
+        # --- 为热力图进行分析 (评分使用0.01步长) ---
+        score_bins_heatmap = np.arange(-1.0, 1.01, 0.01) # 步长为0.01
+        df['score_bin_fine'] = pd.cut(df['final_score'], bins=score_bins_heatmap, right=False)
+        
+        heatmap_grouped = df.groupby(['m_bin', 'score_bin_fine'], observed=False).apply(calculate_metrics, include_groups=False).reset_index()
+        
+        # 创建Pivot Tables
+        res = {
+            'table_win_rate': table_grouped.pivot_table(index='m_bin', columns='score_bin', values='win_rate'),
+            'table_return': table_grouped.pivot_table(index='m_bin', columns='score_bin', values='expected_return'),
+            'heatmap_win_rate': heatmap_grouped.pivot_table(index='m_bin', columns='score_bin_fine', values='win_rate'),
+            'heatmap_return': heatmap_grouped.pivot_table(index='m_bin', columns='score_bin_fine', values='expected_return')
+        }
+        
+        # 填充NaN值为-999，以便在热力图和表格中清晰区分无数据区域
+        for key in res:
+            res[key].fillna(-999, inplace=True)
+            
+        return res
+    # ===================== 新增热力图生成方法 =====================
+    def _generate_heatmaps_base64(self, win_rate_df: pd.DataFrame, return_df: pd.DataFrame) -> tuple[str, str]:
+        """为胜率和收益率生成两个热力图"""
+        if win_rate_df.empty or return_df.empty:
+            return "", ""
+        try:
+            plt.rcParams['font.sans-serif'] = ['SimHei', 'Microsoft YaHei']
+            plt.rcParams['axes.unicode_minus'] = False
+        except Exception:
+            pass
+        # --- 胜率热力图 ---
+        fig1, ax1 = plt.subplots(figsize=(20, 8))
+        sns.heatmap(
+            win_rate_df.replace(-999, np.nan), ax=ax1, cmap="viridis", annot=False, # 数据量大，关闭 annot
+            fmt=".1%", cbar_kws={'label': '胜率'}
+        )
+        ax1.set_title('胜率分布 (M值 vs 选股得分)', fontsize=16)
+        ax1.set_xlabel('选股得分区间 (步长0.01)')
+        ax1.set_ylabel('M值区间 (步长0.1)')
+        # 简化X轴标签，每10个显示一个
+        tick_labels = [f"{x.left:.2f}" for x in win_rate_df.columns]
+        ax1.set_xticks(np.arange(len(tick_labels))[::10] + 0.5)
+        ax1.set_xticklabels(tick_labels[::10], rotation=45, ha='right')
+        plt.tight_layout()
+        buf1 = io.BytesIO()
+        fig1.savefig(buf1, format='png', dpi=100)
+        win_rate_b64 = base64.b64encode(buf1.getvalue()).decode('utf-8')
+        plt.close(fig1)
+        # --- 期望收益热力图 ---
+        fig2, ax2 = plt.subplots(figsize=(20, 8))
+        sns.heatmap(
+            return_df.replace(-999, np.nan), ax=ax2, cmap="icefire", center=0, annot=False,
+            fmt=".2%", cbar_kws={'label': '期望收益率'}
+        )
+        ax2.set_title('期望收益率分布 (M值 vs 选股得分)', fontsize=16)
+        ax2.set_xlabel('选股得分区间 (步长0.01)')
+        ax2.set_ylabel('M值区间 (步长0.1)')
+        ax2.set_xticks(np.arange(len(tick_labels))[::10] + 0.5)
+        ax2.set_xticklabels(tick_labels[::10], rotation=45, ha='right')
+        plt.tight_layout()
+        buf2 = io.BytesIO()
+        fig2.savefig(buf2, format='png', dpi=100)
+        return_b64 = base64.b64encode(buf2.getvalue()).decode('utf-8')
+        plt.close(fig2)
+        return win_rate_b64, return_b64
+    def _format_html_content(self, all_analysis_results: dict, plot1_b64: str, plot2_b64: str,
+                             two_dim_tables: dict, heatmap1_b64: str, heatmap2_b64: str) -> str:
         """将所有内容整合成HTML邮件"""
         
         # --- 生成所有表格 ---
@@ -150,7 +245,20 @@ class MDistributionReporter:
             }, inplace=True)
             
             tables_html += df_display.to_html(index=False, classes='styled-table', border=0)
-
+        # ===================== 新增二维表格HTML生成 =====================
+        tables_2d_html = "<h2>新增：M动态策略 - 二维统计表</h2>"
+        if two_dim_tables:
+            # 胜率二维表
+            tables_2d_html += "<h3>胜率 (M值 vs 选股得分)</h3>"
+            df_wr = two_dim_tables['table_win_rate'].replace(-999, 'N/A').applymap(lambda x: f"{x:.1%}" if isinstance(x, (float, int)) else x)
+            tables_2d_html += df_wr.to_html(classes='styled-table styled-table-2d', border=0, na_rep='-')
+            # 收益率二维表
+            tables_2d_html += "<h3>期望收益率 (M值 vs 选股得分)</h3>"
+            df_er = two_dim_tables['table_return'].replace(-999, 'N/A').applymap(lambda x: f"{x:.2%}" if isinstance(x, (float, int)) else x)
+            tables_2d_html += df_er.to_html(classes='styled-table styled-table-2d', border=0, na_rep='-')
+        else:
+            tables_2d_html += "<p>M动态策略无数据，无法生成二维表。</p>"
+        # =============================================================
         # --- 最终HTML模板 ---
         html = f"""
         <!DOCTYPE html>
@@ -183,7 +291,18 @@ class MDistributionReporter:
                 <h3>各策略期望收益率 vs M值</h3>
                 <img src="data:image/png;base64,{plot2_b64}" alt="Expected Return Plot">
             </div>
-            
+            <!-- ===================== 新增二维热力图 ===================== -->
+            <h2>热力图分析 (M动态策略)</h2>
+            <div class="plot-container">
+                <h3>胜率热力图</h3>
+                <img src="data:image/png;base64,{heatmap1_b64}" alt="Win Rate Heatmap">
+            </div>
+            <div class="plot-container">
+                <h3>期望收益率热力图</h3>
+                <img src="data:image/png;base64,{heatmap2_b64}" alt="Expected Return Heatmap">
+            </div>
+            <!-- ======================================================== -->
+            {tables_2d_html} <!-- 新增的二维表格 -->
             {tables_html}
         </body>
         </html>
@@ -221,7 +340,25 @@ class MDistributionReporter:
 
             # 4. 生成图表和HTML
             plot1_b64, plot2_b64 = self._generate_combined_plots_base64(all_analysis_results)
-            html_content = self._format_html_content(all_analysis_results, plot1_b64, plot2_b64)
+            # --- 新增：二维分析 (只针对M动态策略) ---
+            m_dynamic_df = self._fetch_data_for_strategy(Q(one_stratage_mode__isnull=True))
+            two_dim_analysis_results = self._analyze_2d_distribution(m_dynamic_df)
+            
+            # --- 新增：生成热力图 ---
+            heatmap_win_rate_b64, heatmap_return_b64 = "", ""
+            if two_dim_analysis_results:
+                heatmap_win_rate_b64, heatmap_return_b64 = self._generate_heatmaps_base64(
+                    two_dim_analysis_results['heatmap_win_rate'],
+                    two_dim_analysis_results['heatmap_return']
+                )
+            html_content = self._format_html_content(
+                all_analysis_results,
+                plot1_b64,
+                plot2_b64,
+                two_dim_analysis_results,
+                heatmap_win_rate_b64,
+                heatmap_return_b64
+            )
             
             subject = f"M值胜率分布回测报告 (多策略版) - {datetime.now().strftime('%Y-%m-%d')}"
             

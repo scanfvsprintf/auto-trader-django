@@ -231,7 +231,13 @@ class MDistributionBacktestLog(models.Model):
         decimal_places=4,
         help_text="该笔交易的实际收益率 ( (exit_price / entry_price) - 1 )"
     )
-
+    final_score = models.DecimalField(
+        max_digits=18,
+        decimal_places=10,
+        null=True,  # 允许为空，以兼容旧数据
+        blank=True,
+        help_text="买入决策时，个股的选股模型最终得分"
+    )
     one_stratage_mode = models.CharField(
         max_length=10,
         null=True,

@@ -417,6 +417,7 @@ class MDistributionBacktestService:
             stock_name=plan_obj.stock_code.stock_name,
             m_value_at_plan=Decimal(str(m_value)),
             strategy_dna=plan_obj.strategy_dna,
+            final_score=plan_obj.final_score,
             entry_date=entry_date,
             entry_price=entry_price,
             exit_date=exit_info['date'],
