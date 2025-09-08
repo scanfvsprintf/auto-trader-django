@@ -1,0 +1,118 @@
+:root {
+  /* 浅色主题变量（微蓝灰，避免纯白刺眼） */
+  --bg-color: #f5f7fb;           /* 页面背景：极淡蓝灰 */
+  --card-bg: #fcfdff;            /* 卡片：接近白的浅蓝底 */
+  --text-color: #1f2937;         /* 主文字：深灰蓝 */
+  --muted-text: #6b7280;         /* 次文字 */
+  --primary: #2f6feb;            /* 主色：温和蓝 */
+  --primary-hover: #245ddb;      /* 悬停主色 */
+  --accent: #0ea5e9;             /* 强调：天蓝 */
+  --danger: #ef4444;             /* 错误 */
+  --border-color: #e6ebf2;       /* 边框/分割线：偏冷的灰 */
+  --grid-line: #e6ebf2;          /* 图表网格线 */
+}
+
+html, body {
+  background: var(--bg-color);
+  color: var(--text-color);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* 布局基础 */
+.layout-header {
+  background: linear-gradient(90deg, #ffffff 0%, #f9fafb 100%);
+  color: var(--text-color);
+  border-bottom: 1px solid var(--border-color);
+}
+.layout-sider {
+  background: var(--card-bg);
+  border-right: 1px solid var(--border-color);
+}
+.layout-content { background: transparent; }
+
+/* ElementUI 全局覆盖（浅色） */
+.el-card {
+  background: var(--card-bg) !important;
+  border-color: var(--border-color) !important;
+  color: var(--text-color);
+}
+.el-card__header {
+  background: #fafafa;
+  border-bottom-color: var(--border-color) !important;
+  color: var(--text-color);
+}
+.el-button, .el-tag { color: var(--text-color); }
+/* 朴素按钮：浅底+描边，避免大色块刺眼 */
+.el-button--primary {
+  background-color: #edf2ff !important;
+  color: #244fd8 !important;
+  border-color: #c7d2fe !important;
+}
+.el-button--primary:hover, .el-button--primary:focus {
+  background-color: #e5ecff !important;
+  border-color: #b3c0ff !important;
+  color: #1f3fc4 !important;
+}
+/* 次按钮统一柔和边框 */
+.el-button--default {
+  background-color: #ffffff !important;
+  border-color: var(--border-color) !important;
+}
+/* 危险按钮柔和一些 */
+.el-button--danger {
+  background: #fff1f2 !important;
+  color: #b91c1c !important;
+  border-color: #fecaca !important;
+}
+
+/* 菜单 */
+.el-menu { background-color: var(--card-bg) !important; border-right: none !important; }
+.el-submenu__title, .el-menu-item { color: var(--muted-text) !important; }
+.el-menu-item.is-active, .el-submenu__title:hover, .el-menu-item:hover {
+  color: var(--text-color) !important; background-color: #edf4ff !important;
+}
+
+/* 表单与输入 */
+.el-input__inner, .el-select .el-input__inner, .el-date-editor .el-range-input, .el-textarea__inner {
+  background: #ffffff !important; border-color: var(--border-color) !important; color: var(--text-color) !important;
+  border-radius: 6px !important;
+}
+.el-input.is-active .el-input__inner, .el-input__inner:focus { border-color: var(--primary) !important; }
+.el-form-item__label { color: var(--muted-text) !important; }
+
+/* 下拉/弹层类 */
+.el-select-dropdown, .el-dropdown-menu, .el-popover, .el-tooltip__popper, .el-picker-panel, .el-date-range-picker__content {
+  background: #ffffff !important; color: var(--text-color) !important; border-color: var(--border-color) !important;
+}
+.el-select-dropdown__item.hover, .el-dropdown-menu__item:hover { background: #f3f4f6 !important; }
+
+/* 表格 */
+.el-table { background: var(--card-bg) !important; color: var(--text-color) !important; }
+.el-table th, .el-table td { background: var(--card-bg) !important; border-bottom: 1px solid var(--border-color) !important; }
+.el-table__header th { background: #fafafa !important; }
+
+/* 抽屉/对话框 */
+.el-drawer__body, .el-dialog__body { background: var(--card-bg) !important; }
+.el-dialog__header, .el-drawer__header { background: #fafafa !important; border-bottom: 1px solid var(--border-color) !important; }
+
+/* 分页 */
+.el-pagination .btn-next, .el-pagination .btn-prev, .el-pager li { background: #ffffff !important; border: 1px solid var(--border-color) !important; }
+.el-pager li.active { border-color: var(--primary) !important; color: var(--primary) !important; }
+
+/* 复选/单选/开关 */
+.el-checkbox__label, .el-radio__label { color: var(--text-color) !important; }
+.el-switch.is-checked .el-switch__core { background: var(--primary) !important; border-color: var(--primary) !important; }
+
+/* Loading 遮罩 */
+.el-loading-mask { background: rgba(255,255,255,0.5) !important; }
+
+/* 滚动条（webkit） */
+*::-webkit-scrollbar { width: 10px; height: 10px; }
+*::-webkit-scrollbar-thumb { background: #d1d5db; border-radius: 6px; }
+*::-webkit-scrollbar-track { background: #f3f4f6; }
+
+/* ECharts 容器面板 */
+.chart-panel { background: #ffffff; border: 1px solid var(--border-color); border-radius: 6px; }
+
+

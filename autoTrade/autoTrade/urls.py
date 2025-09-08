@@ -21,5 +21,6 @@ urlpatterns = [
     path('admin/', admin.site.urls),
     path('dataManager/', include('data_manager.urls')),
     path('selectionManager/', include('selection_manager.urls')),
-    path('tradeManager/', include('trade_manager.urls'))
+    path('tradeManager/', include('trade_manager.urls')),
+    path('webManager/', include('web_manager.urls'))
 ]
