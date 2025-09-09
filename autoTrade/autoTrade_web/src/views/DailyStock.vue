@@ -252,7 +252,7 @@ export default {
           subYAxis.scale = true
         }
       }
-      const grids = [ { left: this.isMobile? 54 : '3%', right: this.isMobile? 54 : '3%', top:'10%', height: this.subMode==='ma' ? '56%' : '58%', containLabel:true }, { left: this.isMobile? 54 : '3%', right: this.isMobile? 54 : '3%', top: this.subMode==='ma' ? '76%' : '80%', height: this.subMode==='ma' ? '22%' : '18%', containLabel:true } ]
+      const grids = [ { left: this.isMobile? 38 : '3%', right: this.isMobile? 38 : '3%', top:'10%', height: this.subMode==='ma' ? '56%' : '58%', containLabel:true }, { left: this.isMobile? 38 : '3%', right: this.isMobile? 38 : '3%', top: this.subMode==='ma' ? '76%' : '80%', height: this.subMode==='ma' ? '22%' : '18%', containLabel:true } ]
 
       // 动态控制横轴标签密度，避免重叠（移动端更稀疏）
       const labelInterval = x.length > (this.isMobile? 40 : 60) ? Math.ceil(x.length / (this.isMobile? 10 : 12)) : 'auto'

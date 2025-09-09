@@ -117,7 +117,7 @@ export default {
 .layout-mobile-content.is-selection{ overflow:hidden }
 .layout-bottom-nav{ position:fixed; left:0; right:0; bottom:0; height:52px; border-top:1px solid #e6ebf2; background:#fff; z-index: 4000; }
 .bottom-nav{ height:100%; display:flex; align-items:center; justify-content:space-around; padding:0 8px }
-.bottom-item{ flex:1; text-align:center; color:#374151; padding:10px 4px; font-size:13px }
+.bottom-item{ flex:1; display:flex; align-items:center; justify-content:center; color:#374151; padding:0 6px; height:100%; line-height:1; font-size:13px; box-sizing:border-box; -webkit-tap-highlight-color:transparent }
 .bottom-item.active{ color:#2563eb; font-weight:600 }
 /* 去除箭头占位 */
 .bottom-item .arrow{ display:none }

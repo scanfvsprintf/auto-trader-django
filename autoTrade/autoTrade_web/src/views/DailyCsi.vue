@@ -84,7 +84,7 @@ export default {
           fontFamily:'-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif'
         },
         tooltip:{ trigger:'axis' },
-        grid:{ left: this.isMobile? 48 : '6%', right: this.isMobile? 48 : '6%', top: this.isMobile? 16: '8%', bottom: this.isMobile? 40 : '8%', containLabel:true },
+        grid:{ left: this.isMobile? 36 : '6%', right: this.isMobile? 36 : '6%', top: this.isMobile? 16: '8%', bottom: this.isMobile? 36 : '8%', containLabel:true },
         xAxis:{ type:'time', axisLine:{ onZero:false }, boundaryGap:false, axisLabel:{ color:'#6b7280', hideOverlap:true, rotate: this.isMobile? 30:0, fontSize: this.isMobile? 10:12 } },
         yAxis:[
           { type:'value', name:'价格', scale:true, axisLabel:{ color:'#6b7280', margin: this.isMobile? 6:8 } },

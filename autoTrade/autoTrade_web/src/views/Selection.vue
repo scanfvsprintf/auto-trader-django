@@ -224,8 +224,9 @@ export default {
 
 <style scoped>
 .selection-root{ display:flex; flex-direction:column; height:100%; background:#ffffff }
-.selection-toolbar-static{ flex:0 0 auto; background:#ffffff; padding:12px 12px; margin:0 -8px; border-bottom:1px solid #e6ebf2 }
-.selection-toolbar-form .el-form-item{ margin-right:8px; margin-bottom:0 }
+.selection-toolbar-static{ flex:0 0 auto; background:#ffffff; padding:12px 12px; margin:0 -8px; border-bottom:1px solid #e6ebf2; overflow-x:auto; -webkit-overflow-scrolling:touch }
+.selection-toolbar-form{ display:flex; flex-wrap:nowrap; align-items:center; gap:8px; width:max-content }
+.selection-toolbar-form .el-form-item{ margin-right:0; margin-bottom:0; flex:0 0 auto }
 .selection-toolbar-form .toolbar-actions .toolbar-actions-row{ display:flex; flex-wrap:nowrap; gap:8px }
 .selection-toolbar-form .el-input__inner, .selection-toolbar-form .el-date-editor{ height:28px; line-height:28px }
 .selection-toolbar-form .el-button{ height:28px; padding: 0 10px }
@@ -259,6 +260,7 @@ export default {
 .sysbt-drawer-actions{ display:flex; gap:8px; justify-content:flex-end; margin-top:10px }
 @media (max-width: 480px){
   .selection-toolbar-static{ padding:10px 8px }
+  .selection-toolbar-form .el-date-editor{ width: 152px }
 }
 </style>
 
