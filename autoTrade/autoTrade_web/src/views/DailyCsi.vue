@@ -7,6 +7,7 @@
           <el-date-picker
             v-model="csiRange"
             type="daterange"
+            :unlink-panels="true"
             value-format="yyyy-MM-dd"
             range-separator="至"
             start-placeholder="开始日期"

@@ -7,7 +7,7 @@
         <div style="padding:6px 4px">
           <el-form label-width="70px" size="mini">
             <el-form-item label="时间区间">
-              <el-date-picker v-model="stockRange" type="daterange" value-format="yyyy-MM-dd" range-separator="至" start-placeholder="开始日期" end-placeholder="结束日期" :picker-options="pickerOptions" />
+              <el-date-picker v-model="stockRange" type="daterange" :unlink-panels="true" value-format="yyyy-MM-dd" range-separator="至" start-placeholder="开始日期" end-placeholder="结束日期" :picker-options="pickerOptions" />
             </el-form-item>
             <el-form-item label="显示">
               <el-radio-group v-model="subMode">
@@ -78,13 +78,13 @@
               </el-form-item>
             </el-form>
           </div>
-          <div ref="stockChart" style="width:100%;flex:1;min-height:360px"></div>
+          <div ref="stockChart" :style="chartStyle"></div>
         </el-card>
       </el-col>
     </el-row>
 
     <!-- 移动端抽屉列表 -->
-    <el-drawer :visible.sync="showDrawer" title="股票列表" size="80%">
+    <el-drawer :visible.sync="showDrawer" title="股票列表" size="80%" :append-to-body="true" custom-class="stock-drawer" :destroy-on-close="true">
       <div style="padding:0 8px 8px 8px">
         <div style="display:flex;padding-bottom:8px">
           <el-input v-model="keyword" placeholder="代码/名称" size="small" @keyup.enter.native="searchList" style="flex:1;margin-right:6px" />
@@ -104,7 +104,14 @@ import axios from 'axios'
 import * as echarts from 'echarts'
 export default {
   name: 'DailyStock',
-  data(){ return { code:'', options:[], searching:false, stockRange:[], ma:'5,10,20', subMode:'ma', useHfq:false, showScore:false, stockData:[], pickerOptions:{}, loading:false, keyword:'', list:[], tableHeight:360, isMobile:false, showDrawer:false, _chart:null } },
+  data(){ return { code:'', options:[], searching:false, stockRange:[], ma:'5,10,20', subMode:'ma', useHfq:false, showScore:false, stockData:[], pickerOptions:{}, loading:false, keyword:'', list:[], tableHeight:360, isMobile:false, showDrawer:false, _chart:null, chartHeight:380 } },
+  computed: {
+    chartStyle(){
+      // 确保容器有明确高度，ECharts 才能渲染
+      const h = this.isMobile ? `${this.chartHeight}px` : '420px'
+      return { width: '100%', height: h, minHeight: '320px', flex: '1' }
+    }
+  },
   created(){
     const end = new Date(); const start = new Date(); start.setMonth(start.getMonth()-1)
     const fmt = d => `${d.getFullYear()}-${('0'+(d.getMonth()+1)).slice(-2)}-${('0'+d.getDate()).slice(-2)}`
@@ -135,7 +142,19 @@ export default {
   beforeDestroy(){ window.removeEventListener('resize', this.onResize); if(this._chart){ this._chart.dispose(); this._chart=null } },
   methods: {
     remoteSearch(q){ if(!q){ this.options=[]; return } this.searching=true; axios.get('/webManager/stock/search',{ params:{ q } }).then(r=>{ if(r.data.code===0) this.options=r.data.data||[] }).finally(()=> this.searching=false) },
-    onResize(){ try{ const h = window.innerHeight || 700; this.tableHeight = Math.max(240, h - 220); this.isMobile = (window.innerWidth <= 768); if(this._chart){ this._chart.resize() } }catch(e){ this.tableHeight = 360 } },
+    onResize(){
+      try{
+        const w = window.innerWidth || 768
+        const h = window.innerHeight || 700
+        this.isMobile = (w <= 768)
+        this.tableHeight = Math.max(240, h - 220)
+        const headerH = this.isMobile ? 40 : 0
+        const bottomNav = this.isMobile ? 56 : 0
+        const paddings = 24
+        this.chartHeight = Math.max(320, h - headerH - bottomNav - paddings - 80)
+        if(this._chart){ this._chart.resize() }
+      }catch(e){ this.tableHeight = 360 }
+    },
     searchList(init, noAutoSelect){
       const q = typeof init==='string' ? init : (this.keyword || '')
       if(!q){ this.$message.info('请输入关键词'); return }
@@ -241,4 +260,6 @@ export default {
 }
   </script>
 
-
+<style scoped>
+.mobile-stock-page .el-card__body{ padding:8px }
+</style>

@@ -17,7 +17,7 @@
                 <el-input v-model="codes" placeholder="留空=全部；或 sh.600000,sz.000001" style="width:320px" />
               </el-form-item>
               <el-form-item label="时间区间">
-                <el-date-picker v-model="range" type="daterange" value-format="yyyy-MM-dd" range-separator="至" start-placeholder="开始日期" end-placeholder="结束日期" :picker-options="pickerOptions" />
+                <el-date-picker v-model="range" type="daterange" :unlink-panels="true" value-format="yyyy-MM-dd" range-separator="至" start-placeholder="开始日期" end-placeholder="结束日期" :picker-options="pickerOptions" />
               </el-form-item>
             </template>
 

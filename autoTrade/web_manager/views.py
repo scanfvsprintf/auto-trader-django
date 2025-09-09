@@ -3,7 +3,7 @@ from django.views.decorators.http import require_http_methods
 from django.db import models
 from django.db import connection
 from django.db.models import F
-from datetime import datetime
+from datetime import datetime, timedelta
 from decimal import Decimal
 
 from common.models import (
@@ -36,6 +36,11 @@ def stock_search(request):
 # ----------------------- 选股管理 -----------------------
 @require_http_methods(["GET"])
 def selection_plans(request):
+    """
+    查询选股预案：
+    - 输入 date（YYYY-MM-DD）。若当日无预案，则在 [date-30天, date] 内回溯最近一个有预案的交易日并返回。
+    - 输出结构统一为 { date: 实际返回日期, rows: [...] }
+    """
     plan_date_str = request.GET.get('date')
     if not plan_date_str:
         return err("缺少参数: date")
@@ -44,9 +49,27 @@ def selection_plans(request):
     except Exception:
         return err("参数 date 格式应为 YYYY-MM-DD")
 
+    # 首先尝试当日
+    base_qs = DailyTradingPlan.objects.filter(plan_date=plan_date)
+    actual_date = plan_date
+    if not base_qs.exists():
+        # 回溯最近交易日，最多30天
+        start_date = plan_date - timedelta(days=30)
+        nearest = (
+            DailyTradingPlan.objects
+            .filter(plan_date__lte=plan_date, plan_date__gte=start_date)
+            .order_by('-plan_date')
+            .values_list('plan_date', flat=True)
+            .first()
+        )
+        if nearest:
+            actual_date = nearest
+            base_qs = DailyTradingPlan.objects.filter(plan_date=actual_date)
+        else:
+            return ok({"date": plan_date_str, "rows": []})
+
     qs = (
-        DailyTradingPlan.objects
-        .filter(plan_date=plan_date)
+        base_qs
         .select_related('stock_code')
         .order_by('rank')
         .values(
@@ -55,18 +78,17 @@ def selection_plans(request):
             stock_name=F('stock_code__stock_name')
         )
     )
-    data = []
+    rows = []
     for row in qs:
-        item = {
+        rows.append({
             'rank': row['rank'],
             'miop': row['miop'],
             'maop': row['maop'],
             'final_score': row['final_score'],
             'stock_code': row['stock_code_id'],
             'stock_name': row['stock_name'],
-        }
-        data.append(item)
-    return ok(data)
+        })
+    return ok({"date": actual_date.isoformat(), "rows": rows})
 
 
 @require_http_methods(["GET"])
@@ -76,13 +98,24 @@ def selection_factors(request):
     if not date_str or not stock_code:
         return err("缺少参数: date 或 stock")
     try:
-        trade_date = datetime.strptime(date_str, '%Y-%m-%d').date()
+        plan_date = datetime.strptime(date_str, '%Y-%m-%d').date()
     except Exception:
         return err("参数 date 格式应为 YYYY-MM-DD")
 
+    # 因子取上一个交易日（严格小于计划日的最近交易日）
+    prev_trade_date = (
+        DailyQuotes.objects
+        .filter(trade_date__lt=plan_date)
+        .order_by('-trade_date')
+        .values_list('trade_date', flat=True)
+        .first()
+    )
+    if not prev_trade_date:
+        return ok([])
+
     qs = (
         DailyFactorValues.objects
-        .filter(stock_code_id=stock_code, trade_date=trade_date)
+        .filter(stock_code_id=stock_code, trade_date=prev_trade_date)
         .select_related('factor_code')
         .values(
             'raw_value', 'norm_score',
