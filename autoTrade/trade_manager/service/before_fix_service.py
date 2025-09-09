@@ -13,7 +13,8 @@ from common.models import (
     DailyTradingPlan,
     Position,
     DailyQuotes,
-    SystemLog
+    SystemLog,
+    DailyFactorValues
 )
 
 # 配置日志记录器
@@ -132,7 +133,9 @@ class BeforeFixService:
         # a. 获取T日所有除权除息信息
         events_on_t_day = CorporateAction.objects.filter(ex_dividend_date=self.t_day)
         if not events_on_t_day.exists():
-            logger.debug(f"T日 ({self.t_day}) 无除权除息事件，无需校准。")
+            logger.debug(f"T日 ({self.t_day}) 无除权除息事件，无需校准除权，但继续执行评分风控调整。")
+            # 无除权事件也要执行评分驱动的风控校准
+            self.apply_score_based_risk_adjustments()
             return
 
         # 按股票代码分组事件
@@ -145,6 +148,8 @@ class BeforeFixService:
         if not affected_codes:
             logger.info("T日只有配股事件，常规校准流程跳过。")
             self._handle_rights_issue_special_case() # 仍然要处理配股的特殊情况
+            # 无常规校准时，仍继续执行评分风控调整
+            self.apply_score_based_risk_adjustments()
             return
         logger.info(f"T日共有 {len(affected_codes)} 只股票发生股权事件。")
 
@@ -192,6 +197,9 @@ class BeforeFixService:
 
         # e. 配股事件特殊处理
         self._handle_rights_issue_special_case()
+
+        # f. 无论是否存在除权事件，均执行评分驱动的风控校准
+        self.apply_score_based_risk_adjustments()
 
         logger.info(f"[{self.MODULE_NAME}] 任务成功完成。共处理 {len(self.adjustment_ratios)} 只股票的常规校准。")
 
@@ -373,3 +381,82 @@ class BeforeFixService:
         if plans_to_update:
             DailyTradingPlan.objects.bulk_update(plans_to_update, ['miop', 'maop'])
             logger.info(f"[回测工具] 成功更新 {len(plans_to_update)} 条交易预案，以模拟一字板无法买入。")
+
+    def apply_score_based_risk_adjustments(self):
+        """
+        基于昨日选股结果(针对T日的预案)对当前持仓执行评分驱动的风控校准：
+        - 若评分 < -0.2：直接“抛出”风控（止盈=0，止损=999999）。
+        - 若 -0.2 <= 评分 < 0：将止盈/止损分别向成本价靠拢50%。
+        说明：使用 `DailyTradingPlan(plan_date=T日)` 的 `final_score` 作为昨日选股后的评分。
+        """
+        try:
+            open_positions = list(
+                Position.objects.filter(status=Position.StatusChoices.OPEN)
+            )
+            if not open_positions:
+                logger.info("评分风控调整：当前无持仓，跳过。")
+                return
+
+            stock_codes = [pos.stock_code_id for pos in open_positions]
+            # 单次查询：使用 PostgreSQL DISTINCT ON 取每只股票在 T 日之前最近一次评分
+            latest_score_rows = (
+                DailyFactorValues.objects
+                .filter(
+                    factor_code_id='ML_STOCK_SCORE',
+                    trade_date__lt=self.t_day,
+                    stock_code_id__in=stock_codes
+                )
+                .order_by('stock_code_id', '-trade_date')
+                .distinct('stock_code_id')
+                .values('stock_code_id', 'norm_score', 'raw_value')
+            )
+            score_map = {}
+            for row in latest_score_rows:
+                val = row.get('norm_score')
+                if val is None:
+                    val = row.get('raw_value')
+                score_map[row['stock_code_id']] = val
+
+            if not score_map:
+                logger.info("评分风控调整：无历史评分，跳过。")
+                return
+
+            updates = []
+            for pos in open_positions:
+                score = score_map.get(pos.stock_code_id)
+                if score is None:
+                    continue
+                # 统一转为Decimal进行比较
+                try:
+                    score_dec = Decimal(str(score))
+                except Exception:
+                    continue
+
+                if score_dec < Decimal('-0.2'):
+                    # 直接抛出：止盈=0，止损=999999
+                    pos.current_take_profit = Decimal('0.00')
+                    pos.current_stop_loss = Decimal('999999.00')
+                    updates.append(pos)
+                    logger.warning(
+                        f"评分风控调整：{pos.stock_code_id} 评分={score_dec} < -0.2，设置紧急退出风控(TP=0, SL=999999)。"
+                    )
+                elif score_dec < Decimal('0'):
+                    # 向成本价靠拢50%
+                    new_tp = (pos.entry_price + (pos.current_take_profit - pos.entry_price) * Decimal('0.5')).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+                    new_sl = (pos.entry_price + (pos.current_stop_loss - pos.entry_price) * Decimal('0.5')).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+                    # 仅当发生变化时更新
+                    if new_tp != pos.current_take_profit or new_sl != pos.current_stop_loss:
+                        pos.current_take_profit = new_tp
+                        pos.current_stop_loss = new_sl
+                        updates.append(pos)
+                        logger.info(
+                            f"评分风控调整：{pos.stock_code_id} 评分={score_dec} < 0，将TP/SL向成本价收敛50% -> TP={new_tp}, SL={new_sl}。"
+                        )
+
+            if updates:
+                Position.objects.bulk_update(updates, ['current_take_profit', 'current_stop_loss'])
+                logger.info(f"评分风控调整：已更新 {len(updates)} 条持仓的风控价格。")
+            else:
+                logger.info("评分风控调整：无需更新任何持仓。")
+        except Exception as e:
+            logger.error(f"评分风控调整失败: {e}", exc_info=True)

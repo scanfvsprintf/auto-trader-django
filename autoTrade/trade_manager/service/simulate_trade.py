@@ -383,6 +383,8 @@ class SimulateTradeService:
                     before_fix_service = BeforeFixService(execution_date=self.current_date)
                     before_fix_service.run()
                     before_fix_service.backtest_handle_one_word_board()
+                    # 接入评分驱动的风控校准（与实盘保持一致）
+                    before_fix_service.apply_score_based_risk_adjustments()
                     self._handle_dividends()
 
                     logger.info("-> [T日 开盘决策与买入] ...")
