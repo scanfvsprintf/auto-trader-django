@@ -1,7 +1,7 @@
 <template>
   <div class="layout">
     <div class="layout-header">
-      <div>autoTrade 管理端</div>
+      <div>量化交易管理端</div>
       <div>
         <el-button size="mini" @click="doLogout">退出</el-button>
       </div>

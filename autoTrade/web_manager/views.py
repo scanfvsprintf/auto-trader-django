@@ -132,6 +132,94 @@ def selection_run(request):
     return ok({"executed": True, "send_mail": send_mail})
 
 
+@require_http_methods(["POST"])
+def selection_run_range(request):
+    """
+    在日期区间内回补选股/评分：
+    - 参数：start, end（YYYY-MM-DD）
+    - 逻辑：
+      1) 找出区间内的交易日（来自 tb_daily_quotes 的 distinct trade_date）。
+      2) 预加载滚动窗口所需的行情面板（open/high/low/close/volume/turnover）。
+      3) 对每个交易日，构造 SelectionService(trade_date=该日, mode='backtest', preloaded_panels=窗口切片)，仅执行选股与保存结果；
+         注意 SelectionService 内部会将 ML_STOCK_SCORE 存为当日，并把交易预案写入 T+1。
+    """
+    try:
+        import json
+        payload = json.loads(request.body.decode('utf-8') or '{}')
+    except Exception:
+        payload = {}
+    start = payload.get('start')
+    end = payload.get('end')
+    if not start or not end:
+        return err("缺少参数: start 或 end")
+
+    try:
+        from datetime import date, timedelta
+        s = datetime.strptime(start, '%Y-%m-%d').date()
+        e = datetime.strptime(end, '%Y-%m-%d').date()
+    except Exception:
+        return err("参数 start/end 格式应为 YYYY-MM-DD")
+
+    if s > e:
+        s, e = e, s
+
+    # 1) 找出该区间内的交易日
+    trading_days_qs = (
+        DailyQuotes.objects
+        .filter(trade_date__gte=s, trade_date__lte=e)
+        .order_by('trade_date')
+        .values_list('trade_date', flat=True)
+        .distinct()
+    )
+    trading_days = list(trading_days_qs)
+    if not trading_days:
+        return ok({"executed": False, "msg": "区间内无交易日"})
+
+    # 2) 预加载滚动窗口数据（一次查全量，后续按天切片），向量化效率更高
+    lookback_window_size = 250
+    extra_buffer_days = 20
+    preload_start = trading_days[0] - timedelta(days=lookback_window_size + extra_buffer_days)
+
+    quotes_qs = DailyQuotes.objects.filter(
+        trade_date__gte=preload_start,
+        trade_date__lte=trading_days[-1]
+    ).values('trade_date', 'stock_code_id', 'open', 'high', 'low', 'close', 'volume', 'turnover')
+
+    import pandas as pd
+    df = pd.DataFrame.from_records(quotes_qs)
+    if df.empty:
+        return ok({"executed": False, "msg": "预加载行情为空"})
+    # 转数值
+    for col in ['open', 'high', 'low', 'close', 'volume', 'turnover']:
+        df[col] = pd.to_numeric(df[col], errors='coerce')
+
+    # 构建全量面板
+    panels_all = {}
+    for col in ['open', 'high', 'low', 'close', 'volume', 'turnover']:
+        panel = df.pivot(index='trade_date', columns='stock_code_id', values=col)
+        panels_all[col] = panel
+
+    executed_days = 0
+    for td in trading_days:
+        # 3) 为当前交易日构造滚动窗口切片（按 index 过滤日期）
+        window_start = td - timedelta(days=lookback_window_size)
+        sliced = {}
+        for k, panel in panels_all.items():
+            try:
+                sliced[k] = panel.loc[(panel.index >= window_start) & (panel.index <= td)]
+            except Exception:
+                sliced[k] = panel
+        try:
+            svc = SelectionService(trade_date=td, mode='backtest', preloaded_panels=sliced)
+            svc.run_selection()
+            executed_days += 1
+        except Exception as ex:
+            # 不中断整体流程
+            continue
+
+    return ok({"executed": True, "days": executed_days})
+
+
 # ----------------------- 日线管理 -----------------------
 @require_http_methods(["GET"])
 def daily_csi300(request):

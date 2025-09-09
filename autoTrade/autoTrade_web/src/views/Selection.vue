@@ -38,14 +38,37 @@
       </div>
     </el-drawer>
 
-    <el-dialog :visible.sync="runVisible" title="手动发起一天选股">
-      <el-form label-width="100px">
-        <el-form-item label="日期">
-          <el-date-picker v-model="runDate" type="date" value-format="yyyy-MM-dd" placeholder="选择日期"></el-date-picker>
+    <el-dialog :visible.sync="runVisible" title="手动发起选股">
+      <el-form label-width="110px">
+        <el-form-item label="模式">
+          <el-radio-group v-model="runMode" size="mini">
+            <el-radio label="single">单日</el-radio>
+            <el-radio label="range">日期区间回补</el-radio>
+          </el-radio-group>
         </el-form-item>
-        <el-form-item label="是否补推邮件">
-          <el-switch v-model="sendMail" />
-        </el-form-item>
+        <template v-if="runMode==='single'">
+          <el-form-item label="日期">
+            <el-date-picker v-model="runDate" type="date" value-format="yyyy-MM-dd" placeholder="选择日期"></el-date-picker>
+          </el-form-item>
+          <el-form-item label="是否补推邮件">
+            <el-switch v-model="sendMail" />
+          </el-form-item>
+        </template>
+        <template v-else>
+          <el-form-item label="日期区间">
+            <el-date-picker
+              v-model="runRange"
+              type="daterange"
+              range-separator="至"
+              start-placeholder="开始日期"
+              end-placeholder="结束日期"
+              value-format="yyyy-MM-dd"
+            />
+          </el-form-item>
+          <div style="margin: 0 0 8px 110px; color: #666; font-size: 12px;">
+            说明：按区间内的交易日逐日回补，只生成评分与次日预案。
+          </div>
+        </template>
       </el-form>
       <span slot="footer">
         <el-button @click="runVisible=false">取消</el-button>
@@ -69,7 +92,9 @@ export default {
       loadingFactors: false,
       factorTitle: '',
       runVisible: false,
+      runMode: 'single',
       runDate: '',
+      runRange: [],
       sendMail: false,
       runLoading: false
     }
@@ -101,12 +126,29 @@ export default {
     },
     openRun(){ this.runVisible = true },
     doRun(){
-      if (!this.runDate) { this.$message.error('请选择日期'); return }
-      this.runLoading = true
-      axios.post('/webManager/selection/run', { date: this.runDate, send_mail: this.sendMail })
-        .then(res => { if (res.data.code===0) this.$message.success('发起成功'); else this.$message.error(res.data.msg) })
-        .catch(()=> this.$message.error('发起失败'))
-        .finally(()=> { this.runLoading=false; this.runVisible=false })
+      if (this.runMode==='single'){
+        if (!this.runDate) { this.$message.error('请选择日期'); return }
+        this.runLoading = true
+        axios.post('/webManager/selection/run', { date: this.runDate, send_mail: this.sendMail })
+          .then(res => { if (res.data.code===0) this.$message.success('发起成功'); else this.$message.error(res.data.msg) })
+          .catch(()=> this.$message.error('发起失败'))
+          .finally(()=> { this.runLoading=false; this.runVisible=false })
+      } else {
+        if (!this.runRange || this.runRange.length!==2){ this.$message.error('请选择日期区间'); return }
+        const [start, end] = this.runRange
+        this.runLoading = true
+        axios.post('/webManager/selection/run_range', { start, end })
+          .then(res => {
+            if (res.data.code===0){
+              const days = (res.data.data && res.data.data.days) || 0
+              this.$message.success('回补完成：' + days + ' 个交易日')
+            } else {
+              this.$message.error(res.data.msg)
+            }
+          })
+          .catch(()=> this.$message.error('回补失败'))
+          .finally(()=> { this.runLoading=false; this.runVisible=false })
+      }
     },
     goKline(row){
       if(!row || !row.stock_code){ this.$message.error('无效股票'); return }

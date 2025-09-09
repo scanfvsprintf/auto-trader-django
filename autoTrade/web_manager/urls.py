@@ -6,6 +6,7 @@ urlpatterns = [
     path('selection/plans', views.selection_plans),
     path('selection/factors', views.selection_factors),
     path('selection/run', views.selection_run),
+    path('selection/run_range', views.selection_run_range),
     # 通用-股票搜索
     path('stock/search', views.stock_search),
     # 日线管理
