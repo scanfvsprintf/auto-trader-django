@@ -1,32 +1,6 @@
 <template>
   <div v-loading="loading" element-loading-text="加载中..." style="height:100%">
-    <!-- 顶部移动端工具栏，仅在小屏显示 -->
-    <div v-if="isMobile" style="display:flex;gap:8px;margin-bottom:8px">
-      <el-button size="small" @click="showDrawer=true">股票</el-button>
-      <el-popover placement="bottom" width="340" trigger="click">
-        <div style="padding:6px 4px">
-          <el-form label-width="70px" size="mini">
-            <el-form-item label="时间区间">
-              <el-date-picker v-model="stockRange" type="daterange" :unlink-panels="true" value-format="yyyy-MM-dd" range-separator="至" start-placeholder="开始日期" end-placeholder="结束日期" :picker-options="pickerOptions" />
-            </el-form-item>
-            <el-form-item label="显示">
-              <el-radio-group v-model="subMode">
-                <el-radio-button label="ma">均线</el-radio-button>
-                <el-radio-button label="vol">成交量</el-radio-button>
-                <el-radio-button label="amt">成交额</el-radio-button>
-              </el-radio-group>
-            </el-form-item>
-            <el-form-item v-if="subMode==='ma'" label="均线"><el-input v-model="ma" placeholder="5,10,20" /></el-form-item>
-            <el-form-item label="后复权"><el-switch v-model="useHfq" @change="onHfqChange" /></el-form-item>
-            <el-form-item label="评分线"><el-switch v-model="showScore" @change="onToggleScore" /></el-form-item>
-            <el-form-item>
-              <el-button type="primary" size="small" :loading="loading" @click="fetchStock">查询</el-button>
-            </el-form-item>
-          </el-form>
-        </div>
-        <el-button slot="reference" size="small">设置</el-button>
-      </el-popover>
-    </div>
+    <!-- 移动端：按钮并入标题栏右侧 -->
 
     <el-row :gutter="12" style="height:100%">
       <el-col v-if="!isMobile" :xs="24" :sm="7" :md="6" style="height:100%">
@@ -52,10 +26,18 @@
         <el-card style="height:100%;display:flex;flex-direction:column">
           <div slot="header" style="display:flex;align-items:center;justify-content:space-between">
             <div>
-              单股K线 <span v-if="$route.query && $route.query.name" style="color:#6b7280;font-weight:normal">（{{$route.query.name}} {{$route.query.code||''}}）</span>
+              {{ currentName || '单股K线' }} <span v-if="code" style="color:#6b7280;font-weight:normal">（{{code}}）</span>
             </div>
-            <div v-if="$route.query && $route.query.from==='selection'">
-              <el-button size="mini" @click="$router.back()">返回</el-button>
+            <div style="display:flex; gap:8px; align-items:center">
+              <template v-if="isMobile">
+                <el-button size="mini" type="primary" plain class="toolbar-btn" @click="showDrawer=true">
+                  <i class="el-icon-menu" style="margin-right:4px"></i> 股票
+                </el-button>
+                <el-button size="mini" type="primary" plain class="toolbar-btn" @click="showSettingDrawer=true">
+                  <i class="el-icon-setting" style="margin-right:4px"></i> 设置
+                </el-button>
+              </template>
+              <el-button v-else size="mini" v-if="$route.query && $route.query.from==='selection'" @click="$router.back()">返回</el-button>
             </div>
           </div>
           <div v-if="!isMobile" style="padding:8px 0">
@@ -83,7 +65,7 @@
       </el-col>
     </el-row>
 
-    <!-- 移动端抽屉列表 -->
+    <!-- 移动端抽屉：股票列表 -->
     <el-drawer :visible.sync="showDrawer" title="股票列表" size="80%" :append-to-body="true" custom-class="stock-drawer" :destroy-on-close="true">
       <div style="padding:0 8px 8px 8px">
         <div style="display:flex;padding-bottom:8px">
@@ -96,6 +78,36 @@
         </el-table>
       </div>
     </el-drawer>
+
+    <!-- 移动端抽屉：设置 -->
+    <el-drawer :visible.sync="showSettingDrawer" title="图表设置" size="90%" :append-to-body="true" :destroy-on-close="true" custom-class="sysbt-drawer">
+      <div class="sysbt-drawer-body">
+        <div class="sysbt-section">
+          <div class="sysbt-sec-title">基础参数</div>
+          <el-form label-position="top" class="sysbt-form">
+            <div class="sysbt-grid">
+              <el-form-item label="时间区间" class="sysbt-grid-span">
+                <el-date-picker v-model="stockRange" type="daterange" :unlink-panels="true" value-format="yyyy-MM-dd" range-separator="至" start-placeholder="开始日期" end-placeholder="结束日期" :picker-options="pickerOptions" />
+              </el-form-item>
+              <el-form-item label="显示">
+                <el-radio-group v-model="subMode" @change="onSubModeChange">
+                  <el-radio-button label="ma">均线</el-radio-button>
+                  <el-radio-button label="vol">成交量</el-radio-button>
+                  <el-radio-button label="amt">成交额</el-radio-button>
+                </el-radio-group>
+              </el-form-item>
+              <el-form-item v-if="subMode==='ma'" label="均线"><el-input v-model="ma" placeholder="5,10,20" @change="onMAChange" /></el-form-item>
+              <el-form-item label="后复权"><el-switch v-model="useHfq" @change="onHfqChange" /></el-form-item>
+              <el-form-item label="评分线"><el-switch v-model="showScore" @change="onToggleScore" /></el-form-item>
+            </div>
+          </el-form>
+        </div>
+        <div class="sysbt-drawer-actions">
+          <el-button size="mini" @click="showSettingDrawer=false">关闭</el-button>
+          <el-button size="mini" type="primary" :loading="loading" @click="()=>{ showSettingDrawer=false; fetchStock() }">查询</el-button>
+        </div>
+      </div>
+    </el-drawer>
   </div>
   </template>
 
@@ -104,7 +116,7 @@ import axios from 'axios'
 import * as echarts from 'echarts'
 export default {
   name: 'DailyStock',
-  data(){ return { code:'', options:[], searching:false, stockRange:[], ma:'5,10,20', subMode:'ma', useHfq:false, showScore:true, stockData:[], pickerOptions:{}, loading:false, keyword:'', list:[], tableHeight:360, isMobile:false, showDrawer:false, _chart:null, chartHeight:380 } },
+  data(){ return { code:'', currentName:'', options:[], searching:false, stockRange:[], ma:'5,10,20', subMode:'ma', useHfq:false, showScore:true, stockData:[], pickerOptions:{}, loading:false, keyword:'', list:[], tableHeight:360, isMobile:false, showDrawer:false, showSettingDrawer:false, _chart:null, chartHeight:380 } },
   computed: {
     chartStyle(){
       // 确保容器有明确高度，ECharts 才能渲染
@@ -130,6 +142,7 @@ export default {
       const q = this.$route && this.$route.query ? this.$route.query : {}
       if(q.code){
         this.code = q.code
+        this.currentName = q.name || this.currentName
         this.fetchStock()
         // 同步填充左侧列表，但避免覆盖当前选中
         this.searchList(q.code, true)
@@ -165,7 +178,9 @@ export default {
             this.list = res.data.data || []
             if(this.list.length){
               if(!noAutoSelect){
-                this.code = this.list[0].stock_code
+                const first = this.list[0]
+                this.code = first.stock_code
+                this.currentName = first.stock_name || this.currentName
                 this.fetchStock()
               }
             }
@@ -176,7 +191,7 @@ export default {
         .catch(()=> this.$message.error('搜索失败'))
         .finally(()=> this.loading = false)
     },
-    handleSelect(row){ if(!row || !row.stock_code) return; this.code = row.stock_code; this.fetchStock() },
+    handleSelect(row){ if(!row || !row.stock_code) return; this.code = row.stock_code; this.currentName = row.stock_name || this.currentName; this.fetchStock() },
     fetchStock(){
       if(!this.code || !this.stockRange || this.stockRange.length!==2){ this.$message.error('缺少参数'); return }
       const [start, end] = this.stockRange
@@ -201,18 +216,24 @@ export default {
       const x=this.stockData.map(x=>x.trade_date)
       const kdata=this.stockData.map(x=>[x.open,x.close,x.low,x.high])
       const series=[ { type:'candlestick', data:kdata, xAxisIndex:0, yAxisIndex:0, name:this.code, itemStyle:{ color:'#ec0000', color0:'#00da3c' } } ]
-      // 主图评分线（副坐标）
+      // 主图评分线（副坐标）+ 面积着色（>0 绿色，<0 红色）
       if(this.showScore){
         const score = this.stockData.map(x=>x.final_score)
-        series.push({ type:'line', data:score, name:'评分', xAxisIndex:0, yAxisIndex:1, smooth:true, lineStyle:{ width:1.2, color:'#7c3aed' }, symbol:'none' })
+        // 评分主线
+        series.push({ type:'line', data:score, name:'评分', xAxisIndex:0, yAxisIndex:1, smooth:true, lineStyle:{ width:1.2, color:'#7c3aed' }, symbol:'none', z:3 })
+        // 面积着色：使用 stack 到 0 的方式，确保严格以 0 为基线
+        const scorePos = score.map(v=>{ const n=Number(v); return isNaN(n) ? 0 : (n>0 ? n : 0) })
+        const scoreNeg = score.map(v=>{ const n=Number(v); return isNaN(n) ? 0 : (n<0 ? n : 0) })
+        series.push({ type:'line', data:scorePos, name:'_score_pos', xAxisIndex:0, yAxisIndex:1, stack:'scoreFill', smooth:false, connectNulls:false, symbol:'none', lineStyle:{ width:0 }, areaStyle:{ color:{ type:'linear', x:0,y:0,x2:0,y2:1, colorStops:[{offset:0,color:'rgba(16,185,129,0.25)'},{offset:1,color:'rgba(16,185,129,0.00)'}] } }, z:1, tooltip:{show:false}, silent:true })
+        series.push({ type:'line', data:scoreNeg, name:'_score_neg', xAxisIndex:0, yAxisIndex:1, stack:'scoreFill', smooth:false, connectNulls:false, symbol:'none', lineStyle:{ width:0 }, areaStyle:{ color:{ type:'linear', x:0,y:0,x2:0,y2:1, colorStops:[{offset:0,color:'rgba(239,68,68,0.22)'},{offset:1,color:'rgba(239,68,68,0.00)'}] } }, z:1, tooltip:{show:false}, silent:true })
       }
       // 副图三选一
       if(this.subMode==='ma'){
-        (this.ma||'').split(',').forEach(s=>{ const key='ma'+(s||'').trim(); if(key && this.stockData.length && this.stockData[0][key]!==undefined){ series.push({ type:'line', data:this.stockData.map(x=>x[key]), xAxisIndex:1, yAxisIndex:2, name:key.toUpperCase(), smooth:true }) } })
+        (this.ma||'').split(',').forEach(s=>{ const key='ma'+(s||'').trim(); if(key && this.stockData.length && this.stockData[0][key]!==undefined){ series.push({ type:'line', data:this.stockData.map(x=>x[key]), xAxisIndex:1, yAxisIndex:2, name:key.toUpperCase(), smooth:true, showSymbol:false, symbol:'none' }) } })
       } else if(this.subMode==='vol'){
         series.push({ type:'bar', data:this.stockData.map(x=>x.volume), name:'成交量', xAxisIndex:1, yAxisIndex:2, opacity:0.3 })
       } else if(this.subMode==='amt'){
-        series.push({ type:'line', data:this.stockData.map(x=>x.turnover), name:'成交额', xAxisIndex:1, yAxisIndex:2, smooth:true })
+        series.push({ type:'line', data:this.stockData.map(x=>x.turnover), name:'成交额', xAxisIndex:1, yAxisIndex:2, smooth:true, showSymbol:false, symbol:'none' })
       }
       // 动态计算副图坐标轴与尺寸（均线需要更合理的缩放区间）
       let subYAxisName = this.subMode==='ma' ? 'MA' : (this.subMode==='vol' ? '量' : '额')
@@ -262,4 +283,12 @@ export default {
 
 <style scoped>
 .mobile-stock-page .el-card__body{ padding:8px }
+.sysbt-drawer >>> .el-drawer__body{ padding:0; background:#f9fbff }
+.sysbt-drawer-body{ padding:12px }
+.sysbt-section{ background:#fff; border:1px solid #e6ebf2; border-radius:6px; padding:10px 12px; box-shadow:0 1px 2px rgba(0,0,0,0.03) }
+.sysbt-sec-title{ font-size:13px; color:#374151; font-weight:600; margin-bottom:8px }
+.sysbt-grid{ display:grid; grid-template-columns:1fr 1fr; gap:8px 12px }
+.sysbt-grid-span{ grid-column:1 / span 2 }
+.sysbt-drawer-actions{ display:flex; gap:8px; justify-content:flex-end; margin-top:6px }
+.toolbar-btn{ height:28px; padding: 0 10px }
 </style>

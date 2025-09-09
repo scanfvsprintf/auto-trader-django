@@ -8,7 +8,8 @@ import DailyCsi from '../views/DailyCsi.vue'
 import DailyStock from '../views/DailyStock.vue'
 import DailyBackfill from '../views/DailyBackfill.vue'
 import Factors from '../views/Factors.vue'
-import System from '../views/System.vue'
+import SystemSchema from '../views/System.vue'
+import SystemBacktest from '../views/SystemBacktest.vue'
 
 Vue.use(Router)
 
@@ -27,7 +28,8 @@ const router = new Router({
         { path: 'backfill', component: DailyBackfill }
       ]},
       { path: 'factors', component: Factors },
-      { path: 'system', component: System }
+      { path: 'system', component: SystemSchema },
+      { path: 'backtest', component: SystemBacktest }
     ]}
   ]
 })
@@ -35,7 +37,7 @@ const router = new Router({
 router.beforeEach((to, from, next) => {
   if (to.path !== '/login' && !isAuthed()) { next('/login'); return }
   // 简单基于用户名的只读权限示例：xiangmei 视为只读
-  if (to.path === '/selection' || to.path === '/factors' || to.path === '/system') {
+  if (to.path === '/selection' || to.path === '/factors' || to.path === '/system' || to.path === '/backtest') {
     const u = localStorage.getItem('authedUser') || ''
     // 在页面内部据此控制按钮的显示与禁用
     window.__READ_ONLY__ = (u === 'xiangmei')

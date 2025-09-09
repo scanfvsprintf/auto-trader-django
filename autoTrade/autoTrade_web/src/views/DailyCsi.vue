@@ -17,7 +17,7 @@
         </el-form-item>
         <el-form-item>
           <el-button type="primary" :loading="loading" @click="fetchCSI">查询</el-button>
-          <el-button :loading="loadingRemote" @click="fetchCSIRemote">补获取</el-button>
+          <el-button :loading="loadingRemote" @click="onConfirmFetch">补获取</el-button>
         </el-form-item>
       </el-form>
       <div ref="csiChart" style="width:100%;height:420px"></div>
@@ -54,6 +54,13 @@ export default {
         .then(res=>{ if(res.data.code===0){ this.csiData=res.data.data||[]; this.drawCSI() } else this.$message.error(res.data.msg) })
         .catch(()=> this.$message.error('查询失败'))
         .finally(()=> this.loading=false)
+    },
+    onConfirmFetch(){
+      if (!this.csiRange || this.csiRange.length!==2) { this.$message.error('请选择时间区间'); return }
+      const [s,e] = this.csiRange
+      this.$confirm(`将从远程数据源补获取 ${s} ~ ${e} 的沪深300数据，可能刷新/覆盖本地记录。\n该操作对库有写入，请谨慎执行。是否继续？`, '二次确认', {
+        type:'warning', confirmButtonText:'继续', cancelButtonText:'取消', dangerouslyUseHTMLString:false
+      }).then(()=>{ this.fetchCSIRemote() }).catch(()=>{})
     },
     fetchCSIRemote(){
       if (!this.csiRange || this.csiRange.length!==2) { this.$message.error('请选择时间区间'); return }

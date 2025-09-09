@@ -595,8 +595,167 @@ def system_schema(request):
 
 @require_http_methods(["GET"])
 def system_backtest_results(request):
+    """
+    回测结果查询（普通回测优先）：
+    - 参数：schema（必填，backtest_* 为普通回测），start/end（可选），rf（年化无风险利率，默认0.02）
+    - 返回：资金曲线、M值、Sharpe(逐日累计)、以及汇总指标（年化收益、最大回撤、Sharpe）
+    """
     schema = request.GET.get('schema')
     if not schema:
         return err('缺少参数: schema')
-    return ok({"schema": schema, "mode": "auto-detect", "rows": []})
+    rf_annual = request.GET.get('rf')
+    try:
+        rf_annual = float(rf_annual) if rf_annual is not None else 0.02
+    except Exception:
+        rf_annual = 0.02
+
+    # 仅处理普通回测
+    if not schema.startswith('backtest_'):
+        return ok({"mode": "unsupported", "schema": schema})
+
+    # 校验schema 名称
+    import re
+    if not re.match(r'^[a-z_][a-z0-9_]*$', schema or ''):
+        return err('非法的 schema 名称')
+
+    # 先取该schema中可用日期范围
+    try:
+        with connection.cursor() as cur:
+            cur.execute(f'SELECT MIN(trade_date), MAX(trade_date) FROM {schema}.tb_trade_manager_backtest_daily_log')
+            row = cur.fetchone()
+            if not row or not row[0] or not row[1]:
+                return ok({"schema": schema, "mode": "normal", "dates": [], "equity": [], "m_value": [], "csi300": [], "sharpe": [], "summary": {"annualized": 0, "max_drawdown": 0, "sharpe": 0}, "range": None})
+            min_date, max_date = row[0], row[1]
+    except Exception as e:
+        return err(f"读取回测日期范围失败: {e}")
+
+    # 解析 start/end，默认全区间
+    start_str = request.GET.get('start')
+    end_str = request.GET.get('end')
+    try:
+        s = datetime.strptime(start_str, '%Y-%m-%d').date() if start_str else min_date
+    except Exception:
+        s = min_date
+    try:
+        e = datetime.strptime(end_str, '%Y-%m-%d').date() if end_str else max_date
+    except Exception:
+        e = max_date
+    if s > e:
+        s, e = e, s
+
+    # 查询资金与M值
+    with connection.cursor() as cur:
+        cur.execute(
+            f"""
+            SELECT trade_date, total_assets, market_m_value
+            FROM {schema}.tb_trade_manager_backtest_daily_log
+            WHERE trade_date >= %s AND trade_date <= %s
+            ORDER BY trade_date
+            """,
+            [s, e]
+        )
+        rows = cur.fetchall()
+
+    if not rows:
+        return ok({"schema": schema, "mode": "normal", "dates": [], "equity": [], "m_value": [], "csi300": [], "sharpe": [], "summary": {"annualized": 0, "max_drawdown": 0, "sharpe": 0}, "range": {"min": min_date.isoformat(), "max": max_date.isoformat()}})
+
+    # 计算指标
+    dates = []
+    equity = []
+    m_values = []
+    for d, ta, mv in rows:
+        dates.append(d.isoformat())
+        try:
+            equity.append(float(ta))
+        except Exception:
+            equity.append(None)
+        try:
+            m_values.append(float(mv) if mv is not None else None)
+        except Exception:
+            m_values.append(None)
+
+    # 获取沪深300收盘价序列（用于前端对齐为同起点对照）
+    csi_map = {}
+    try:
+        csi_qs = (
+            IndexQuotesCsi300.objects
+            .filter(trade_date__gte=s, trade_date__lte=e)
+            .order_by('trade_date')
+            .values('trade_date', 'close')
+        )
+        for r in csi_qs:
+            td = r['trade_date']
+            try:
+                csi_map[td.isoformat()] = float(r['close']) if r['close'] is not None else None
+            except Exception:
+                csi_map[td.isoformat()] = None
+    except Exception:
+        csi_map = {}
+    csi_series = [csi_map.get(d) for d in dates]
+
+    # 日收益率
+    import math
+    daily_returns = []
+    for i in range(1, len(equity)):
+        prev = equity[i-1]
+        curr = equity[i]
+        if prev and prev != 0 and curr is not None:
+            daily_returns.append((curr / prev) - 1.0)
+        else:
+            daily_returns.append(0.0)
+
+    # 累计Sharpe（从区间起始滚动到当日），rf按252交易日折算
+    sharpe_series = []
+    rf_daily = (rf_annual or 0.0) / 252.0
+    import statistics
+    for i in range(len(daily_returns)):
+        sub = daily_returns[:i+1]
+        if len(sub) < 2 or all(abs(x - rf_daily) < 1e-12 for x in sub):
+            sharpe_series.append(0.0)
+            continue
+        mean_excess = statistics.fmean([x - rf_daily for x in sub])
+        std = statistics.pstdev(sub)
+        sharpe = (math.sqrt(252.0) * mean_excess / std) if std > 0 else 0.0
+        sharpe_series.append(sharpe)
+    # 对齐长度（与dates一致，首日无收益设0）
+    sharpe_series = [0.0] + sharpe_series
+
+    # 汇总：年化、最大回撤、Sharpe（区间整体）
+    n = len(equity)
+    if n >= 2 and equity[0] and equity[-1]:
+        ann = (equity[-1] / equity[0]) ** (252.0 / (n - 1)) - 1.0
+    else:
+        ann = 0.0
+    # 最大回撤
+    peak = -float('inf')
+    max_dd = 0.0
+    for val in equity:
+        if val is None:
+            continue
+        peak = max(peak, val)
+        if peak > 0:
+            dd = (val / peak) - 1.0
+            max_dd = min(max_dd, dd)
+    # 区间Sharpe
+    if len(daily_returns) >= 2:
+        mean_excess = statistics.fmean([x - rf_daily for x in daily_returns])
+        std = statistics.pstdev(daily_returns)
+        sharpe_all = (math.sqrt(252.0) * mean_excess / std) if std > 0 else 0.0
+    else:
+        sharpe_all = 0.0
+
+    return ok({
+        "schema": schema,
+        "mode": "normal",
+        "start": s.isoformat(),
+        "end": e.isoformat(),
+        "range": {"min": min_date.isoformat(), "max": max_date.isoformat()},
+        "dates": dates,
+        "equity": equity,
+        "m_value": m_values,
+        "csi300": csi_series,
+        "sharpe": sharpe_series,
+        "summary": {"annualized": ann, "max_drawdown": max_dd, "sharpe": sharpe_all},
+        "rf": rf_annual
+    })
 

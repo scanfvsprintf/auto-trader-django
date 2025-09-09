@@ -1,15 +1,13 @@
 <template>
   <div class="selection-root" v-loading="loading" element-loading-text="加载中...">
     <div class="selection-toolbar-static">
-      <el-form inline>
+      <el-form inline class="selection-toolbar-form">
         <el-form-item label="日期">
           <el-date-picker v-model="queryDate" type="date" value-format="yyyy-MM-dd" placeholder="选择日期"></el-date-picker>
         </el-form-item>
-        <el-form-item>
-          <el-button type="primary" :loading="loading" @click="fetchPlans">查询</el-button>
-        </el-form-item>
-        <el-form-item>
-          <el-button @click="openRun">手动发起选股</el-button>
+        <el-form-item class="toolbar-actions">
+          <el-button type="primary" plain size="mini" :loading="loading" @click="fetchPlans">查询</el-button>
+          <el-button type="primary" plain size="mini" @click="showRunDrawer=true">手动发起选股</el-button>
         </el-form-item>
       </el-form>
     </div>
@@ -64,44 +62,42 @@
       </div>
     </el-drawer>
 
-    <el-dialog :visible.sync="runVisible" title="手动发起选股">
-      <el-form label-width="110px">
-        <el-form-item label="模式">
-          <el-radio-group v-model="runMode" size="mini">
-            <el-radio label="single">单日</el-radio>
-            <el-radio label="range">日期区间回补</el-radio>
-          </el-radio-group>
-        </el-form-item>
-        <template v-if="runMode==='single'">
-          <el-form-item label="日期">
-            <el-date-picker v-model="runDate" type="date" value-format="yyyy-MM-dd" placeholder="选择日期"></el-date-picker>
-          </el-form-item>
-          <el-form-item label="是否补推邮件">
-            <el-switch v-model="sendMail" />
-          </el-form-item>
-        </template>
-        <template v-else>
-          <el-form-item label="日期区间">
-            <el-date-picker
-              v-model="runRange"
-              type="daterange"
-              range-separator="至"
-              start-placeholder="开始日期"
-              end-placeholder="结束日期"
-              value-format="yyyy-MM-dd"
-              :unlink-panels="true"
-            />
-          </el-form-item>
-          <div style="margin: 0 0 8px 110px; color: #666; font-size: 12px;">
-            说明：按区间内的交易日逐日回补，只生成评分与次日预案。
-          </div>
-        </template>
-      </el-form>
-      <span slot="footer">
-        <el-button @click="runVisible=false">取消</el-button>
-        <el-button type="primary" :loading="runLoading" @click="doRun">确定</el-button>
-      </span>
-    </el-dialog>
+    <!-- 手动发起选股：抽屉样式（与系统/日线一致的美化风格） -->
+    <el-drawer :visible.sync="showRunDrawer" title="手动发起选股" size="90%" :append-to-body="true" :destroy-on-close="true" custom-class="sysbt-drawer">
+      <div class="sysbt-drawer-body">
+        <div class="sysbt-section">
+          <div class="sysbt-sec-title">参数</div>
+          <el-form label-position="top" class="sysbt-form">
+            <div class="sysbt-grid">
+              <el-form-item label="模式">
+                <el-radio-group v-model="runMode" size="mini">
+                  <el-radio label="single">单日</el-radio>
+                  <el-radio label="range">日期区间回补</el-radio>
+                </el-radio-group>
+              </el-form-item>
+              <template v-if="runMode==='single'">
+                <el-form-item label="日期" class="sysbt-grid-span">
+                  <el-date-picker v-model="runDate" type="date" value-format="yyyy-MM-dd" placeholder="选择日期"></el-date-picker>
+                </el-form-item>
+                <el-form-item label="是否补推邮件">
+                  <el-switch v-model="sendMail" />
+                </el-form-item>
+              </template>
+              <template v-else>
+                <el-form-item label="日期区间" class="sysbt-grid-span">
+                  <el-date-picker v-model="runRange" type="daterange" range-separator="至" start-placeholder="开始日期" end-placeholder="结束日期" value-format="yyyy-MM-dd" :unlink-panels="true" />
+                </el-form-item>
+                <div class="sysbt-help sysbt-grid-span">按区间内的交易日逐日回补，只生成评分与次日预案。</div>
+              </template>
+            </div>
+          </el-form>
+        </div>
+        <div class="sysbt-drawer-actions">
+          <el-button size="mini" @click="showRunDrawer=false">取消</el-button>
+          <el-button size="mini" type="primary" :loading="runLoading" @click="doRun">确定</el-button>
+        </div>
+      </div>
+    </el-drawer>
   </div>
   </template>
 
@@ -118,7 +114,7 @@ export default {
       factors: [],
       loadingFactors: false,
       factorTitle: '',
-      runVisible: false,
+      showRunDrawer: false,
       runMode: 'single',
       runDate: '',
       runRange: [],
@@ -174,7 +170,7 @@ export default {
         .catch(()=> this.$message.error('查询因子失败'))
         .finally(()=> this.loadingFactors = false)
     },
-    openRun(){ this.runVisible = true },
+    openRun(){ this.showRunDrawer = true },
     doRun(){
       if (this.runMode==='single'){
         if (!this.runDate) { this.$message.error('请选择日期'); return }
@@ -182,7 +178,7 @@ export default {
         axios.post('/webManager/selection/run', { date: this.runDate, send_mail: this.sendMail })
           .then(res => { if (res.data.code===0) this.$message.success('发起成功'); else this.$message.error(res.data.msg) })
           .catch(()=> this.$message.error('发起失败'))
-          .finally(()=> { this.runLoading=false; this.runVisible=false })
+          .finally(()=> { this.runLoading=false; this.showRunDrawer=false })
       } else {
         if (!this.runRange || this.runRange.length!==2){ this.$message.error('请选择日期区间'); return }
         const [start, end] = this.runRange
@@ -197,7 +193,7 @@ export default {
             }
           })
           .catch(()=> this.$message.error('回补失败'))
-          .finally(()=> { this.runLoading=false; this.runVisible=false })
+          .finally(()=> { this.runLoading=false; this.showRunDrawer=false })
       }
     },
     goKline(row){
@@ -227,6 +223,10 @@ export default {
 <style scoped>
 .selection-root{ display:flex; flex-direction:column; height:100%; background:#ffffff }
 .selection-toolbar-static{ flex:0 0 auto; background:#ffffff; padding:12px 12px; margin:0 -8px; border-bottom:1px solid #e6ebf2 }
+.selection-toolbar-form .el-form-item{ margin-right:8px; margin-bottom:0 }
+.selection-toolbar-form .toolbar-actions .el-button + .el-button{ margin-left:8px }
+.selection-toolbar-form .el-input__inner, .selection-toolbar-form .el-date-editor{ height:28px; line-height:28px }
+.selection-toolbar-form .el-button{ height:28px; padding: 0 10px }
 .selection-content{ flex:1 1 auto; position: relative; z-index: 1; padding:12px 8px 8px }
 .scroll-area{ height:100%; overflow:auto }
 .factor-drawer{ padding:12px }
@@ -245,6 +245,16 @@ export default {
 .mobile-card-title{ font-weight:600; color:#374151 }
 .mobile-card-code{ color:#6b7280; font-weight:400; margin-left:6px; font-size:12px }
 .mobile-card-meta{ display:flex; gap:14px; color:#4b5563; font-size:12px; margin-top:2px }
+
+/* 复用系统抽屉美化样式 */
+.sysbt-drawer >>> .el-drawer__body{ padding:0; background:#f9fbff }
+.sysbt-drawer-body{ padding:12px }
+.sysbt-section{ background:#fff; border:1px solid #e6ebf2; border-radius:6px; padding:10px 12px; box-shadow:0 1px 2px rgba(0,0,0,0.03) }
+.sysbt-sec-title{ font-size:13px; color:#374151; font-weight:600; margin-bottom:8px }
+.sysbt-grid{ display:grid; grid-template-columns:1fr 1fr; gap:8px 12px }
+.sysbt-grid-span{ grid-column:1 / span 2 }
+.sysbt-help{ color:#6b7280; font-size:12px }
+.sysbt-drawer-actions{ display:flex; gap:8px; justify-content:flex-end; margin-top:10px }
 </style>
 
 

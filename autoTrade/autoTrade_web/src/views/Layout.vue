@@ -2,7 +2,10 @@
   <div class="layout">
     <!-- 顶部栏（横屏与PC显示；竖屏移动端隐藏以给内容让路） -->
     <div class="layout-header" v-if="!isPortraitMobile">
-      <div>量化交易管理端</div>
+      <div class="brand-header">
+        <span class="brand-logo fc">FC</span>
+        <span class="brand-title">浮城</span>
+      </div>
       <div>
         <el-button size="mini" @click="doLogout">退出</el-button>
       </div>
@@ -24,6 +27,7 @@
           </el-submenu>
           <el-menu-item index="/factors">因子管理</el-menu-item>
           <el-menu-item index="/system">系统管理</el-menu-item>
+          <el-menu-item index="/backtest">回测管理</el-menu-item>
         </el-menu>
       </div>
       <div class="layout-content" :class="{ 'is-selection': isSelection }">
@@ -52,6 +56,7 @@
           </el-popover>
 
           <div class="bottom-item" :class="{active: activeBottom === '/factors'}" @click="$router.push('/factors')">因子管理</div>
+          <div class="bottom-item" :class="{active: activeBottom === '/backtest'}" @click="$router.push('/backtest')">回测管理</div>
           <div class="bottom-item" :class="{active: activeBottom === '/system'}" @click="$router.push('/system')">系统管理</div>
         </div>
       </div>
@@ -97,7 +102,10 @@ export default {
   </script>
 <style scoped>
 .layout{ height:100vh; display:flex; flex-direction:column }
-.layout-header{ height:44px; display:flex; align-items:center; justify-content:space-between; padding:0 12px; border-bottom:1px solid #e6ebf2; background:#f7f9fe }
+.layout-header{ height:48px; display:flex; align-items:center; justify-content:space-between; padding:0 12px; border-bottom:1px solid #e6ebf2; background:#f7f9fe }
+.brand-header{ display:flex; align-items:center; gap:10px }
+.brand-logo{ display:inline-flex; align-items:center; justify-content:center; width:28px; height:28px; border-radius:8px; color:#1F2937; font-size:12px; font-weight:800; letter-spacing:1px; background:rgba(255,255,255,0.85); border:1px solid rgba(17,24,39,0.08) }
+.brand-title{ font-size:18px; color:#1F2937; font-weight:800; letter-spacing:0.3em }
 .layout-body{ flex:1; display:flex; min-height:0 }
 .layout-sider{ width:200px; border-right:1px solid #e6ebf2; background:#fbfdff }
 .layout-content{ flex:1; padding:10px; overflow:auto }
