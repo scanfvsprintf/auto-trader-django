@@ -6,8 +6,10 @@
           <el-date-picker v-model="queryDate" type="date" value-format="yyyy-MM-dd" placeholder="选择日期"></el-date-picker>
         </el-form-item>
         <el-form-item class="toolbar-actions">
-          <el-button type="primary" plain size="mini" :loading="loading" @click="fetchPlans">查询</el-button>
-          <el-button type="primary" plain size="mini" @click="showRunDrawer=true">手动发起选股</el-button>
+          <div class="toolbar-actions-row">
+            <el-button type="primary" plain size="mini" :loading="loading" @click="fetchPlans">查询</el-button>
+            <el-button type="primary" plain size="mini" @click="showRunDrawer=true">手动发起选股</el-button>
+          </div>
         </el-form-item>
       </el-form>
     </div>
@@ -224,7 +226,7 @@ export default {
 .selection-root{ display:flex; flex-direction:column; height:100%; background:#ffffff }
 .selection-toolbar-static{ flex:0 0 auto; background:#ffffff; padding:12px 12px; margin:0 -8px; border-bottom:1px solid #e6ebf2 }
 .selection-toolbar-form .el-form-item{ margin-right:8px; margin-bottom:0 }
-.selection-toolbar-form .toolbar-actions .el-button + .el-button{ margin-left:8px }
+.selection-toolbar-form .toolbar-actions .toolbar-actions-row{ display:flex; flex-wrap:nowrap; gap:8px }
 .selection-toolbar-form .el-input__inner, .selection-toolbar-form .el-date-editor{ height:28px; line-height:28px }
 .selection-toolbar-form .el-button{ height:28px; padding: 0 10px }
 .selection-content{ flex:1 1 auto; position: relative; z-index: 1; padding:12px 8px 8px }
@@ -255,6 +257,9 @@ export default {
 .sysbt-grid-span{ grid-column:1 / span 2 }
 .sysbt-help{ color:#6b7280; font-size:12px }
 .sysbt-drawer-actions{ display:flex; gap:8px; justify-content:flex-end; margin-top:10px }
+@media (max-width: 480px){
+  .selection-toolbar-static{ padding:10px 8px }
+}
 </style>
 
 

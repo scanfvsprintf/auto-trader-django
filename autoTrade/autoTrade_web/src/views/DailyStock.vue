@@ -214,26 +214,27 @@ export default {
       const chart=echarts.init(el, null, { renderer:'canvas', devicePixelRatio:(window.devicePixelRatio||1) })
       this._chart = chart
       const x=this.stockData.map(x=>x.trade_date)
-      const kdata=this.stockData.map(x=>[x.open,x.close,x.low,x.high])
-      const series=[ { type:'candlestick', data:kdata, xAxisIndex:0, yAxisIndex:0, name:this.code, itemStyle:{ color:'#ec0000', color0:'#00da3c' } } ]
+      const kdata=this.stockData.map(x=>[x.trade_date,x.open,x.close,x.low,x.high])
+      const toPoints = (ys)=> ys.map((v,i)=> [x[i], v])
+      const series=[ { type:'candlestick', data:kdata, xAxisIndex:0, yAxisIndex:0, name:this.code, encode:{ x:0, y:[1,2,3,4] }, itemStyle:{ color:'#ec0000', color0:'#00da3c' } } ]
       // 主图评分线（副坐标）+ 面积着色（>0 绿色，<0 红色）
       if(this.showScore){
         const score = this.stockData.map(x=>x.final_score)
         // 评分主线
-        series.push({ type:'line', data:score, name:'评分', xAxisIndex:0, yAxisIndex:1, smooth:true, lineStyle:{ width:1.2, color:'#7c3aed' }, symbol:'none', z:3 })
+        series.push({ type:'line', data:toPoints(score), name:'评分', xAxisIndex:0, yAxisIndex:1, smooth:true, lineStyle:{ width:1.2, color:'#7c3aed' }, symbol:'none', z:3, encode:{ x:0, y:1 }, showSymbol:false })
         // 面积着色：使用 stack 到 0 的方式，确保严格以 0 为基线
         const scorePos = score.map(v=>{ const n=Number(v); return isNaN(n) ? 0 : (n>0 ? n : 0) })
         const scoreNeg = score.map(v=>{ const n=Number(v); return isNaN(n) ? 0 : (n<0 ? n : 0) })
-        series.push({ type:'line', data:scorePos, name:'_score_pos', xAxisIndex:0, yAxisIndex:1, stack:'scoreFill', smooth:false, connectNulls:false, symbol:'none', lineStyle:{ width:0 }, areaStyle:{ color:{ type:'linear', x:0,y:0,x2:0,y2:1, colorStops:[{offset:0,color:'rgba(16,185,129,0.25)'},{offset:1,color:'rgba(16,185,129,0.00)'}] } }, z:1, tooltip:{show:false}, silent:true })
-        series.push({ type:'line', data:scoreNeg, name:'_score_neg', xAxisIndex:0, yAxisIndex:1, stack:'scoreFill', smooth:false, connectNulls:false, symbol:'none', lineStyle:{ width:0 }, areaStyle:{ color:{ type:'linear', x:0,y:0,x2:0,y2:1, colorStops:[{offset:0,color:'rgba(239,68,68,0.22)'},{offset:1,color:'rgba(239,68,68,0.00)'}] } }, z:1, tooltip:{show:false}, silent:true })
+        series.push({ type:'line', data:toPoints(scorePos), name:'_score_pos', xAxisIndex:0, yAxisIndex:1, stack:'scoreFill', smooth:false, connectNulls:false, symbol:'none', lineStyle:{ width:0 }, areaStyle:{ color:{ type:'linear', x:0,y:0,x2:0,y2:1, colorStops:[{offset:0,color:'rgba(16,185,129,0.25)'},{offset:1,color:'rgba(16,185,129,0.00)'}] } }, z:1, tooltip:{show:false}, silent:true, encode:{ x:0, y:1 } })
+        series.push({ type:'line', data:toPoints(scoreNeg), name:'_score_neg', xAxisIndex:0, yAxisIndex:1, stack:'scoreFill', smooth:false, connectNulls:false, symbol:'none', lineStyle:{ width:0 }, areaStyle:{ color:{ type:'linear', x:0,y:0,x2:0,y2:1, colorStops:[{offset:0,color:'rgba(239,68,68,0.22)'},{offset:1,color:'rgba(239,68,68,0.00)'}] } }, z:1, tooltip:{show:false}, silent:true, encode:{ x:0, y:1 } })
       }
       // 副图三选一
       if(this.subMode==='ma'){
-        (this.ma||'').split(',').forEach(s=>{ const key='ma'+(s||'').trim(); if(key && this.stockData.length && this.stockData[0][key]!==undefined){ series.push({ type:'line', data:this.stockData.map(x=>x[key]), xAxisIndex:1, yAxisIndex:2, name:key.toUpperCase(), smooth:true, showSymbol:false, symbol:'none' }) } })
+        (this.ma||'').split(',').forEach(s=>{ const key='ma'+(s||'').trim(); if(key && this.stockData.length && this.stockData[0][key]!==undefined){ series.push({ type:'line', data:toPoints(this.stockData.map(x=>x[key])), xAxisIndex:1, yAxisIndex:2, name:key.toUpperCase(), smooth:true, showSymbol:false, symbol:'none', encode:{ x:0, y:1 } }) } })
       } else if(this.subMode==='vol'){
-        series.push({ type:'bar', data:this.stockData.map(x=>x.volume), name:'成交量', xAxisIndex:1, yAxisIndex:2, opacity:0.3 })
+        series.push({ type:'bar', data:toPoints(this.stockData.map(x=>x.volume)), name:'成交量', xAxisIndex:1, yAxisIndex:2, opacity:0.3, encode:{ x:0, y:1 } })
       } else if(this.subMode==='amt'){
-        series.push({ type:'line', data:this.stockData.map(x=>x.turnover), name:'成交额', xAxisIndex:1, yAxisIndex:2, smooth:true, showSymbol:false, symbol:'none' })
+        series.push({ type:'line', data:toPoints(this.stockData.map(x=>x.turnover)), name:'成交额', xAxisIndex:1, yAxisIndex:2, smooth:true, showSymbol:false, symbol:'none', encode:{ x:0, y:1 } })
       }
       // 动态计算副图坐标轴与尺寸（均线需要更合理的缩放区间）
       let subYAxisName = this.subMode==='ma' ? 'MA' : (this.subMode==='vol' ? '量' : '额')
@@ -251,7 +252,7 @@ export default {
           subYAxis.scale = true
         }
       }
-      const grids = [ { left:'3%', right:'3%', top:'10%', height: this.subMode==='ma' ? '56%' : '58%', containLabel:true }, { left:'3%', right:'3%', top: this.subMode==='ma' ? '76%' : '80%', height: this.subMode==='ma' ? '22%' : '18%', containLabel:true } ]
+      const grids = [ { left: this.isMobile? 54 : '3%', right: this.isMobile? 54 : '3%', top:'10%', height: this.subMode==='ma' ? '56%' : '58%', containLabel:true }, { left: this.isMobile? 54 : '3%', right: this.isMobile? 54 : '3%', top: this.subMode==='ma' ? '76%' : '80%', height: this.subMode==='ma' ? '22%' : '18%', containLabel:true } ]
 
       // 动态控制横轴标签密度，避免重叠（移动端更稀疏）
       const labelInterval = x.length > (this.isMobile? 40 : 60) ? Math.ceil(x.length / (this.isMobile? 10 : 12)) : 'auto'
@@ -265,12 +266,12 @@ export default {
         tooltip:{trigger:'axis'}, 
         grid: grids, 
         xAxis:[ 
-          { type:'category', data:x, axisLabel:{ color:'#6b7280', hideOverlap:true, interval: labelInterval, rotate: this.isMobile?30:0, fontSize: this.isMobile?10:12 } }, 
-          { type:'category', data:x, gridIndex:1, axisLabel:{ color:'#6b7280', hideOverlap:true, interval: labelInterval, rotate: this.isMobile?30:0, fontSize: this.isMobile?10:12 } } 
+          { type:'time', boundaryGap:false, axisLabel:{ color:'#6b7280', hideOverlap:true, interval: labelInterval, rotate: this.isMobile?30:0, fontSize: this.isMobile?10:12 } }, 
+          { type:'time', gridIndex:1, boundaryGap:false, axisLabel:{ color:'#6b7280', hideOverlap:true, interval: labelInterval, rotate: this.isMobile?30:0, fontSize: this.isMobile?10:12 } } 
         ], 
         yAxis:[ 
-          { type:'value', name:'价格', nameLocation:'middle', nameGap: this.isMobile?28:36, scale:true, axisLabel:{ formatter:v=>Number(v).toFixed(2), color:'#6b7280', margin: this.isMobile?4:6, fontSize: this.isMobile?10:12 }, gridIndex:0 }, 
-          { type:'value', name:'评分', position:'right', gridIndex:0, min:-1, max:1, axisLine:{ show:true, lineStyle:{ color:'#8b5cf6' } }, axisLabel:{ color:'#8b5cf6', formatter:v=>Number(v).toFixed(1), margin: this.isMobile?4:6, fontSize: this.isMobile?10:12 }, splitLine:{ show:false }, nameTextStyle:{ color:'#8b5cf6' } }, 
+          { type:'value', name:'价格', nameLocation:'middle', nameGap: this.isMobile?28:36, scale:true, axisLabel:{ formatter:v=>Number(v).toFixed(2), color:'#6b7280', margin: this.isMobile?6:8, fontSize: this.isMobile?10:12 }, gridIndex:0 }, 
+          { type:'value', name:'评分', position:'right', gridIndex:0, min:-1, max:1, axisLine:{ show:true, lineStyle:{ color:'#8b5cf6' } }, axisLabel:{ color:'#8b5cf6', formatter:v=>Number(v).toFixed(1), margin: this.isMobile?6:8, fontSize: this.isMobile?10:12 }, splitLine:{ show:false }, nameTextStyle:{ color:'#8b5cf6' } }, 
           subYAxis 
         ], 
         series 

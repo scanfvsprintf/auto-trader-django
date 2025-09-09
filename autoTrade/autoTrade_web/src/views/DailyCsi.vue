@@ -30,7 +30,7 @@ import axios from 'axios'
 import * as echarts from 'echarts'
 export default {
   name: 'DailyCsi',
-  data(){ return { csiRange: [], csiData: [], pickerOptions: {}, loading:false, loadingRemote:false } },
+  data(){ return { csiRange: [], csiData: [], pickerOptions: {}, loading:false, loadingRemote:false, isMobile:false } },
   created(){
     const end = new Date(); const start = new Date(); start.setMonth(start.getMonth()-1)
     const fmt = d => `${d.getFullYear()}-${('0'+(d.getMonth()+1)).slice(-2)}-${('0'+d.getDate()).slice(-2)}`
@@ -44,6 +44,7 @@ export default {
       ]
     }
     this.$nextTick(this.fetchCSI)
+    try{ const w=window.innerWidth||1024; this.isMobile = w <= 768 }catch(e){ this.isMobile=false }
   },
   methods: {
     fetchCSI(){
@@ -74,9 +75,8 @@ export default {
     drawCSI(){
       const el = this.$refs.csiChart; if(!el) return
       const chart = echarts.init(el, null, { renderer: 'canvas', devicePixelRatio: (window.devicePixelRatio || 1) })
-      const x = this.csiData.map(x=>x.trade_date)
-      const kdata = this.csiData.map(x=>[x.open,x.close,x.low,x.high])
-      const m = this.csiData.map(x=>x.m_value)
+      const kdata = this.csiData.map(x=>[x.trade_date, x.open,x.close,x.low,x.high])
+      const m = this.csiData.map(x=>[x.trade_date, x.m_value])
       chart.setOption({
         textStyle:{
           color:'#374151',
@@ -84,15 +84,16 @@ export default {
           fontFamily:'-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif'
         },
         tooltip:{ trigger:'axis' },
-        grid:{ left:'3%', right:'3%', top:'8%', bottom:'8%' },
-        xAxis:{ type:'category', data:x, axisLine:{ onZero:false }, axisLabel:{ color:'#6b7280' } },
+        grid:{ left: this.isMobile? 48 : '6%', right: this.isMobile? 48 : '6%', top: this.isMobile? 16: '8%', bottom: this.isMobile? 40 : '8%', containLabel:true },
+        xAxis:{ type:'time', axisLine:{ onZero:false }, boundaryGap:false, axisLabel:{ color:'#6b7280', hideOverlap:true, rotate: this.isMobile? 30:0, fontSize: this.isMobile? 10:12 } },
         yAxis:[
-          { type:'value', name:'价格', scale:true, axisLabel:{ color:'#6b7280' } },
-          { type:'value', name:'M值', min:-1, max:1, axisLabel:{ formatter:v=>Number(v).toFixed(1), color:'#6b7280' } }
+          { type:'value', name:'价格', scale:true, axisLabel:{ color:'#6b7280', margin: this.isMobile? 6:8 } },
+          { type:'value', name:'M值', min:-1, max:1, axisLabel:{ formatter:v=>Number(v).toFixed(1), color:'#6b7280', margin: this.isMobile? 6:8 } }
         ],
+        dataZoom:[ { type:'inside', xAxisIndex:[0,0] }, { type:'slider', xAxisIndex:[0,0], height:14, bottom:6 } ],
         series:[
-          { type:'candlestick', data:kdata, name:'CSI300', yAxisIndex:0, itemStyle:{ color:'#ec0000', color0:'#00da3c' } },
-          { type:'line', data:m, name:'M值', yAxisIndex:1, smooth:true }
+          { type:'candlestick', data:kdata, name:'CSI300', yAxisIndex:0, encode:{ x:0, y:[1,2,3,4] }, itemStyle:{ color:'#ec0000', color0:'#00da3c' } },
+          { type:'line', data:m, name:'M值', yAxisIndex:1, smooth:true, encode:{ x:0, y:1 }, showSymbol:false }
         ]
       })
     }
