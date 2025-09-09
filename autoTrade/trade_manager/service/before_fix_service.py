@@ -408,10 +408,13 @@ class BeforeFixService:
                 )
                 .order_by('stock_code_id', '-trade_date')
                 .distinct('stock_code_id')
-                .values('stock_code_id', 'norm_score', 'raw_value')
+                .values('stock_code_id', 'trade_date', 'norm_score', 'raw_value')
             )
             score_map = {}
             for row in latest_score_rows:
+                # 仅当评分日期等于 T-1 时才应用，避免停牌期间对同一评分反复累乘
+                if row.get('trade_date') != self.t_minus_1_day:
+                    continue
                 val = row.get('norm_score')
                 if val is None:
                     val = row.get('raw_value')
