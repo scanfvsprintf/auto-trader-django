@@ -48,7 +48,7 @@ class Command(BaseCommand):
             'objective': 'regression_l1', # 使用L1损失 (MAE)，对异常值更鲁棒
             'boosting_type': 'gbdt',
             'metric': 'rmse',
-            'n_estimators': 2000, # 减少迭代次数，因为数据集更大
+            'n_estimators': 70000, # 减少迭代次数，因为数据集更大
             'learning_rate': 0.001,
             'n_jobs': -1,
             'seed': 42,
@@ -59,6 +59,7 @@ class Command(BaseCommand):
             'colsample_bytree': 0.7,
             'reg_alpha': 0.2,
             'reg_lambda': 0.2,
+            'num_leaves': 978, 'learning_rate': 0.01, 'subsample': 0.741886904800338, 'colsample_bytree': 0.6802622809997809, 'reg_alpha': 1.306972432246392, 'reg_lambda': 0.06447061402735922, 'min_child_samples': 100
         }
 
         # 3. 使用 Optuna 进行超参数优化和验证
@@ -72,42 +73,43 @@ class Command(BaseCommand):
         y_tuning = y.iloc[-tuning_data_size:]
         self.stdout.write(f"为加速调优，仅使用后 {tuning_data_size} 条数据进行参数搜索。")
 
-        def objective(trial):
-            params_to_tune = {
-                'num_leaves': trial.suggest_int('num_leaves', 20, 150),
-                'learning_rate': trial.suggest_float('learning_rate', 0.01, 0.1, log=True),
-                'subsample': trial.suggest_float('subsample', 0.6, 1.0),
-                'colsample_bytree': trial.suggest_float('colsample_bytree', 0.6, 1.0),
-                'reg_alpha': trial.suggest_float('reg_alpha', 1e-2, 10.0, log=True),
-                'reg_lambda': trial.suggest_float('reg_lambda', 1e-2, 10.0, log=True),
-            }
-            current_params = lgbm_params.copy()
-            current_params.update(params_to_tune)
+        # def objective(trial):
+        #     params_to_tune = {
+        #         'num_leaves': trial.suggest_int('num_leaves', 100, 1000),
+        #         'learning_rate': trial.suggest_float('learning_rate', 0.005, 0.05, log=True),
+        #         'subsample': trial.suggest_float('subsample', 0.6, 1.0),
+        #         'colsample_bytree': trial.suggest_float('colsample_bytree', 0.6, 1.0),
+        #         'reg_alpha': trial.suggest_float('reg_alpha', 1e-1, 1000.0, log=True),
+        #         'reg_lambda': trial.suggest_float('reg_lambda', 1e-2, 1000.0, log=True),
+        #         'min_child_samples': trial.suggest_int('min_child_samples', 100, 500)
+        #     }
+        #     current_params = lgbm_params.copy()
+        #     current_params.update(params_to_tune)
             
-            tscv = TimeSeriesSplit(n_splits=5)
-            rmses = []
-            for train_index, val_index in tscv.split(X_tuning):
-                X_train_fold, X_val_fold = X_tuning.iloc[train_index], X_tuning.iloc[val_index]
-                y_train_fold, y_val_fold = y_tuning.iloc[train_index], y_tuning.iloc[val_index]
+        #     tscv = TimeSeriesSplit(n_splits=5)
+        #     rmses = []
+        #     for train_index, val_index in tscv.split(X_tuning):
+        #         X_train_fold, X_val_fold = X_tuning.iloc[train_index], X_tuning.iloc[val_index]
+        #         y_train_fold, y_val_fold = y_tuning.iloc[train_index], y_tuning.iloc[val_index]
                 
-                model = lgb.LGBMRegressor(**current_params)
-                model.fit(X_train_fold, y_train_fold,
-                          eval_set=[(X_val_fold, y_val_fold)],
-                          callbacks=[lgb.early_stopping(50, verbose=False)])
+        #         model = lgb.LGBMRegressor(**current_params)
+        #         model.fit(X_train_fold, y_train_fold,
+        #                   eval_set=[(X_val_fold, y_val_fold)],
+        #                   callbacks=[lgb.early_stopping(50, verbose=False)])
                 
-                val_preds = model.predict(X_val_fold)
-                rmse = np.sqrt(mean_squared_error(y_val_fold, val_preds))
-                rmses.append(rmse)
-            return np.mean(rmses)
+        #         val_preds = model.predict(X_val_fold)
+        #         rmse = np.sqrt(mean_squared_error(y_val_fold, val_preds))
+        #         rmses.append(rmse)
+        #     return np.mean(rmses)
 
-        self.stdout.write("开始参数搜索 (n_trials=30)...")
-        study = optuna.create_study(direction='minimize')
-        study.optimize(objective, n_trials=30) # 减少尝试次数以适应大数据集
+        # self.stdout.write("开始参数搜索 (n_trials=30)...")
+        # study = optuna.create_study(direction='minimize')
+        # study.optimize(objective, n_trials=10) # 减少尝试次数以适应大数据集
         
         best_params = lgbm_params.copy()
-        best_params.update(study.best_params)
-        self.stdout.write(self.style.SUCCESS(f"\n搜索完成！最佳验证集 RMSE: {study.best_value:.4f}"))
-        self.stdout.write(self.style.SUCCESS(f"找到的最佳参数: {study.best_params}"))
+        # best_params.update(study.best_params)
+        # self.stdout.write(self.style.SUCCESS(f"\n搜索完成！最佳验证集 RMSE: {study.best_value:.4f}"))
+        # self.stdout.write(self.style.SUCCESS(f"找到的最佳参数: {study.best_params}"))
 
         # 步骤 4/4: 使用最佳参数在全部数据上训练最终模型并保存
         self.stdout.write("\n步骤 4/4: 使用最佳参数在全部数据上训练最终模型并保存...")
@@ -149,7 +151,7 @@ class Command(BaseCommand):
                 model_config = json.load(f)
             
             model_config['feature_importance'] = feature_importance_df.to_dict('records')
-            model_config['best_params'] = {k: v for k, v in study.best_params.items()}
+            #model_config['best_params'] = {k: v for k, v in study.best_params.items()}
             
             with open(self.MODEL_CONFIG_FILE, 'w') as f:
                 json.dump(model_config, f, indent=4)

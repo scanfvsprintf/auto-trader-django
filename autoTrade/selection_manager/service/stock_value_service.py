@@ -57,6 +57,7 @@ class VectorizedFactorEngine:
             'dynamic_Old_I': self._calc_old_i,
             'dynamic_Old_M': self._calc_old_m,
             'avg_amount_5d': self._calc_avg_amount_5d,
+            'dynamic_TD_COUNT': self._calc_td_count
         }
         all_factors = {}
         for factor_name in self.feature_names:
@@ -201,7 +202,38 @@ class VectorizedFactorEngine:
     def _calc_avg_amount_5d(self, period=5):
         """计算N日平均成交额"""
         return self.amount.rolling(window=period).mean().iloc[-1]
-
+    def _calc_td_count(self, lookback=4):
+        """
+        计算“神奇N转”的连续计数器。
+        正值表示上涨计数，负值表示下跌计数。
+        当趋势中断时，计数器归零。
+        :param lookback: int, 比较的周期，默认为4，即TD Sequential的经典设置。
+        :return: pd.Series, 因子值序列。
+        """
+        close = self.df['close']
+        
+        # 1. 定义基础条件
+        is_up_streak = (close > close.shift(lookback))
+        is_down_streak = (close < close.shift(lookback))
+        # 2. 计算连续计数
+        # 使用 groupby 和 cumsum 的技巧来计算连续满足条件的次数
+        # 当条件从 True 变为 False 或反之时，(condition != condition.shift()).cumsum() 会产生一个新的组号
+        
+        # 计算上涨连续计数
+        up_groups = (is_up_streak != is_up_streak.shift()).cumsum()
+        up_counts = is_up_streak.groupby(up_groups).cumsum()
+        # 只保留上涨期间的计数，其他时间为0
+        up_counts[~is_up_streak] = 0
+        # 计算下跌连续计数
+        down_groups = (is_down_streak != is_down_streak.shift()).cumsum()
+        down_counts = is_down_streak.groupby(down_groups).cumsum()
+        # 只保留下跌期间的计数，其他时间为0
+        down_counts[~is_down_streak] = 0
+        # 3. 合并为最终因子
+        # 下跌计数为负，上涨计数为正
+        td_count_factor = up_counts - down_counts
+        
+        return td_count_factor.iloc[-1]
 # ==============================================================================
 #  主服务 (Main Service)
 # ==============================================================================
@@ -283,7 +315,7 @@ class StockValueService:
         logger.info("启动向量化因子计算引擎...")
         features_to_calc = [
             f for f in self._feature_names 
-            if f not in ['market_m_value', 'm_value_lag1', 'm_value_diff1', 'm_value_ma5']
+            if f not in ['market_m_value', 'm_value_lag1', 'm_value_diff1', 'm_value_ma5','avg_amount_5d''dynamic_TD_COUNT']
         ]
         logger.info("开始进行股票筛选（ST、低流动性）...")
         # 筛选条件1：过滤低流动性股票

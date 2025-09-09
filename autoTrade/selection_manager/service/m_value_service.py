@@ -56,7 +56,9 @@ class FactorCalculator:
             'dynamic_Old_D': self._calc_old_d,
             'dynamic_Old_I': self._calc_old_i,
             'dynamic_Old_M': self._calc_old_m,
-            'avg_amount_5d': self._calc_avg_amount_5d
+            'avg_amount_5d': self._calc_avg_amount_5d,
+            'dynamic_TD_COUNT': self._calc_td_count
+            
         }
 
         for factor_name in feature_names:
@@ -233,6 +235,39 @@ class FactorCalculator:
     def _calc_avg_amount_5d(self, period=5):
         """计算N日平均成交额"""
         return self.df['amount'].rolling(window=period).mean().rename('avg_amount_5d')
+    
+    def _calc_td_count(self, lookback=4):
+        """
+        计算“神奇N转”的连续计数器。
+        正值表示上涨计数，负值表示下跌计数。
+        当趋势中断时，计数器归零。
+        :param lookback: int, 比较的周期，默认为4，即TD Sequential的经典设置。
+        :return: pd.Series, 因子值序列。
+        """
+        close = self.df['close']
+        
+        # 1. 定义基础条件
+        is_up_streak = (close > close.shift(lookback))
+        is_down_streak = (close < close.shift(lookback))
+        # 2. 计算连续计数
+        # 使用 groupby 和 cumsum 的技巧来计算连续满足条件的次数
+        # 当条件从 True 变为 False 或反之时，(condition != condition.shift()).cumsum() 会产生一个新的组号
+        
+        # 计算上涨连续计数
+        up_groups = (is_up_streak != is_up_streak.shift()).cumsum()
+        up_counts = is_up_streak.groupby(up_groups).cumsum()
+        # 只保留上涨期间的计数，其他时间为0
+        up_counts[~is_up_streak] = 0
+        # 计算下跌连续计数
+        down_groups = (is_down_streak != is_down_streak.shift()).cumsum()
+        down_counts = is_down_streak.groupby(down_groups).cumsum()
+        # 只保留下跌期间的计数，其他时间为0
+        down_counts[~is_down_streak] = 0
+        # 3. 合并为最终因子
+        # 下跌计数为负，上涨计数为正
+        td_count_factor = up_counts - down_counts
+        
+        return td_count_factor.rename('dynamic_TD_COUNT')
 
 # ==============================================================================
 #  重构后的 M 值预测服务 (Refactored M-Value Prediction Service)

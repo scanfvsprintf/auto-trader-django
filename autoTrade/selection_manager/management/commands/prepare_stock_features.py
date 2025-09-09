@@ -101,6 +101,14 @@ class Command(BaseCommand):
             # 从M值模型配置中获取所有需要计算的因子名称
             feature_names = self._get_feature_names()
 
+            # 从M值模型配置中获取所有需要计算的因子名称
+            feature_names_from_m_model = self._get_feature_names()
+            # --- 新增: 定义个股模型特有的新因子 ---
+            stock_specific_new_features = ['avg_amount_5d','dynamic_TD_COUNT']
+            
+            # --- 合并成这次任务需要计算的所有个股因子 ---
+            feature_names = feature_names_from_m_model + stock_specific_new_features
+
             # --- [改造] 步骤 2: 分批生成特征和标签，并保存为临时文件 ---
             self.stdout.write(f"步骤 2/5: 开始分批处理 {len(all_stock_codes)} 只股票，每批 {BATCH_SIZE} 只...")
             
@@ -168,8 +176,7 @@ class Command(BaseCommand):
                 'market_m_value', 
                 'm_value_lag1', 
                 'm_value_diff1', 
-                'm_value_ma5',
-                'avg_amount_5d'
+                'm_value_ma5'
             ]
             for name in new_feature_names:
                 if name not in feature_names:
@@ -196,7 +203,7 @@ class Command(BaseCommand):
             # --- [新增] 清理步骤 ---
             # 无论成功与否，都尝试删除临时目录
             if self.TEMP_DATA_DIR.exists():
-                shutil.rmtree(self.TEMP_DATA_DIR)
+                #shutil.rmtree(self.TEMP_DATA_DIR)
                 self.stdout.write(self.style.SUCCESS(f"临时目录已清理: {self.TEMP_DATA_DIR}"))
         
         self.stdout.write(self.style.SUCCESS("===== 数据准备流程结束 ====="))
