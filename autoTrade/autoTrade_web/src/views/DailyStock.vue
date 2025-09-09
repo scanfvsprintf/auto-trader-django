@@ -104,7 +104,7 @@ import axios from 'axios'
 import * as echarts from 'echarts'
 export default {
   name: 'DailyStock',
-  data(){ return { code:'', options:[], searching:false, stockRange:[], ma:'5,10,20', subMode:'ma', useHfq:false, showScore:false, stockData:[], pickerOptions:{}, loading:false, keyword:'', list:[], tableHeight:360, isMobile:false, showDrawer:false, _chart:null, chartHeight:380 } },
+  data(){ return { code:'', options:[], searching:false, stockRange:[], ma:'5,10,20', subMode:'ma', useHfq:false, showScore:true, stockData:[], pickerOptions:{}, loading:false, keyword:'', list:[], tableHeight:360, isMobile:false, showDrawer:false, _chart:null, chartHeight:380 } },
   computed: {
     chartStyle(){
       // 确保容器有明确高度，ECharts 才能渲染
@@ -232,8 +232,8 @@ export default {
       }
       const grids = [ { left:'3%', right:'3%', top:'10%', height: this.subMode==='ma' ? '56%' : '58%', containLabel:true }, { left:'3%', right:'3%', top: this.subMode==='ma' ? '76%' : '80%', height: this.subMode==='ma' ? '22%' : '18%', containLabel:true } ]
 
-      // 动态控制横轴标签密度，避免重叠
-      const labelInterval = x.length > 60 ? Math.ceil(x.length / 12) : 'auto'
+      // 动态控制横轴标签密度，避免重叠（移动端更稀疏）
+      const labelInterval = x.length > (this.isMobile? 40 : 60) ? Math.ceil(x.length / (this.isMobile? 10 : 12)) : 'auto'
 
       chart.setOption({ 
         textStyle:{
@@ -244,12 +244,12 @@ export default {
         tooltip:{trigger:'axis'}, 
         grid: grids, 
         xAxis:[ 
-          { type:'category', data:x, axisLabel:{ color:'#6b7280', hideOverlap:true, interval: labelInterval, rotate: this.isMobile?35:0 } }, 
-          { type:'category', data:x, gridIndex:1, axisLabel:{ color:'#6b7280', hideOverlap:true, interval: labelInterval, rotate: this.isMobile?35:0 } } 
+          { type:'category', data:x, axisLabel:{ color:'#6b7280', hideOverlap:true, interval: labelInterval, rotate: this.isMobile?30:0, fontSize: this.isMobile?10:12 } }, 
+          { type:'category', data:x, gridIndex:1, axisLabel:{ color:'#6b7280', hideOverlap:true, interval: labelInterval, rotate: this.isMobile?30:0, fontSize: this.isMobile?10:12 } } 
         ], 
         yAxis:[ 
-          { type:'value', name:'价格', nameLocation:'middle', nameGap:36, scale:true, axisLabel:{ formatter:v=>Number(v).toFixed(2), color:'#6b7280', margin: 6 }, gridIndex:0 }, 
-          { type:'value', name:'评分', position:'right', alignTicks:true, axisLabel:{ color:'#8b5cf6' }, splitLine:{ show:false }, gridIndex:0 }, 
+          { type:'value', name:'价格', nameLocation:'middle', nameGap: this.isMobile?28:36, scale:true, axisLabel:{ formatter:v=>Number(v).toFixed(2), color:'#6b7280', margin: this.isMobile?4:6, fontSize: this.isMobile?10:12 }, gridIndex:0 }, 
+          { type:'value', name:'评分', position:'right', gridIndex:0, min:-1, max:1, axisLine:{ show:true, lineStyle:{ color:'#8b5cf6' } }, axisLabel:{ color:'#8b5cf6', formatter:v=>Number(v).toFixed(1), margin: this.isMobile?4:6, fontSize: this.isMobile?10:12 }, splitLine:{ show:false }, nameTextStyle:{ color:'#8b5cf6' } }, 
           subYAxis 
         ], 
         series 
