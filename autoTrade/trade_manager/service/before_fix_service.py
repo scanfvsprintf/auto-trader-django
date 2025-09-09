@@ -432,25 +432,55 @@ class BeforeFixService:
                 except Exception:
                     continue
 
-                if score_dec < Decimal('-0.2'):
-                    # 直接抛出：止盈=0，止损=999999
+                entry = pos.entry_price
+                d_tp = pos.current_take_profit - entry
+                d_sl = pos.current_stop_loss - entry
+
+                # 熔断：评分<-0.5 直接抛出
+                if score_dec < Decimal('-0.5'):
                     pos.current_take_profit = Decimal('0.00')
                     pos.current_stop_loss = Decimal('999999.00')
                     updates.append(pos)
                     logger.warning(
-                        f"评分风控调整：{pos.stock_code_id} 评分={score_dec} < -0.2，设置紧急退出风控(TP=0, SL=999999)。"
+                        f"评分风控调整：{pos.stock_code_id} 评分={score_dec} < -0.5，熔断触发，设置紧急退出风控(TP=0, SL=999999)。"
                     )
+                # 负分：缩小幅度，比例 = max(0, 1 + 2*score)
                 elif score_dec < Decimal('0'):
-                    # 向成本价靠拢50%
-                    new_tp = (pos.entry_price + (pos.current_take_profit - pos.entry_price) * Decimal('0.5')).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
-                    new_sl = (pos.entry_price + (pos.current_stop_loss - pos.entry_price) * Decimal('0.5')).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
-                    # 仅当发生变化时更新
+                    factor = (Decimal('1.0') + Decimal('2.0') * score_dec)
+                    if factor < Decimal('0'):
+                        factor = Decimal('0')
+                    new_tp = (entry + d_tp * factor).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+                    new_sl = (entry + d_sl * factor).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+                    # 不变式守护
+                    if new_sl >= new_tp:
+                        # 轻量守护，尽量保持与entry的相对次序
+                        new_sl = min(new_sl, entry - Decimal('0.01'))
+                        new_tp = max(new_tp, entry + Decimal('0.01'))
                     if new_tp != pos.current_take_profit or new_sl != pos.current_stop_loss:
                         pos.current_take_profit = new_tp
                         pos.current_stop_loss = new_sl
                         updates.append(pos)
                         logger.info(
-                            f"评分风控调整：{pos.stock_code_id} 评分={score_dec} < 0，将TP/SL向成本价收敛50% -> TP={new_tp}, SL={new_sl}。"
+                            f"评分风控调整：{pos.stock_code_id} 评分={score_dec} < 0，按系数{factor:.3f}向成本价收敛 -> TP={new_tp}, SL={new_sl}。"
+                        )
+                # 奖励：评分>0.2 扩大幅度，放大 = 1 + min(0.5, (score-0.2)*2)
+                elif score_dec > Decimal('0.2'):
+                    expand = Decimal('1.0') + min(Decimal('0.5'), (score_dec - Decimal('0.2')) * Decimal('2.0'))
+                    # 保障上限1.5
+                    if expand > Decimal('1.5'):
+                        expand = Decimal('1.5')
+                    new_tp = (entry + d_tp * expand).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+                    new_sl = (entry + d_sl * expand).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+                    # 不变式守护
+                    if new_sl >= new_tp:
+                        new_sl = min(new_sl, entry - Decimal('0.01'))
+                        new_tp = max(new_tp, entry + Decimal('0.01'))
+                    if new_tp != pos.current_take_profit or new_sl != pos.current_stop_loss:
+                        pos.current_take_profit = new_tp
+                        pos.current_stop_loss = new_sl
+                        updates.append(pos)
+                        logger.info(
+                            f"评分风控调整：{pos.stock_code_id} 评分={score_dec} > 0.2，按系数{expand:.3f}扩大区间 -> TP={new_tp}, SL={new_sl}。"
                         )
 
             if updates:
