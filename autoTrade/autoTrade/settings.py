@@ -48,7 +48,8 @@ INSTALLED_APPS = [
     'selection_manager',
     'trade_manager',
     'common',
-    'web_manager'
+    'web_manager',
+    'ai_manager'
 ]
 
 MIDDLEWARE = [

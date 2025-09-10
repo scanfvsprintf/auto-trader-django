@@ -21,6 +21,15 @@ urlpatterns = [
     # 系统管理
     path('system/schema', views.system_schema),
     path('system/backtest/results', views.system_backtest_results),
+    # AI配置管理
+    path('ai/source/config', views.ai_source_config),
+    path('ai/model/config', views.ai_model_config),
+    path('ai/generate/text', views.ai_generate_text),
+    path('ai/test/connection', views.ai_test_connection),
+    path('ai/available/models', views.ai_available_models),
+    # AI评测功能
+    path('ai/evaluate/csi300', views.ai_evaluate_csi300),
+    path('ai/evaluate/stock', views.ai_evaluate_stock),
 ]
 
 

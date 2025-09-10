@@ -12,6 +12,8 @@ from .system_log import SystemLog
 from .corporate_action import CorporateAction
 from .backtest_logs import BacktestDailyLog,BacktestOperationLog
 from .index_quotes_csi300 import IndexQuotesCsi300
+from .ai_source_config import AiSourceConfig
+from .ai_model_config import AiModelConfig
 
 __all__ = [
     'StockInfo',
@@ -27,5 +29,7 @@ __all__ = [
     'BacktestDailyLog',
     'BacktestOperationLog',
     "MDistributionBacktestLog",
-    'IndexQuotesCsi300'
+    'IndexQuotesCsi300',
+    'AiSourceConfig',
+    'AiModelConfig'
 ]

@@ -26,7 +26,11 @@
             <el-menu-item index="/daily/backfill">日线补拉</el-menu-item>
           </el-submenu>
           <el-menu-item index="/factors">因子管理</el-menu-item>
-          <el-menu-item index="/system">系统管理</el-menu-item>
+          <el-submenu index="/system">
+            <template slot="title">系统管理</template>
+            <el-menu-item index="/system/schema">Schema 管理</el-menu-item>
+            <el-menu-item index="/ai-config">AI 模型配置</el-menu-item>
+          </el-submenu>
           <el-menu-item index="/backtest">回测管理</el-menu-item>
         </el-menu>
       </div>
@@ -56,8 +60,18 @@
           </el-popover>
 
           <div class="bottom-item" :class="{active: activeBottom === '/factors'}" @click="$router.push('/factors')">因子管理</div>
+          
+          <el-popover placement="top" width="220" v-model="showSystemPop" popper-class="bottom-system-pop" :append-to-body="true" trigger="manual">
+            <div class="system-pop">
+              <div class="system-item" @click="navigate('/system/schema')">Schema 管理</div>
+              <div class="system-item" @click="navigate('/ai-config')">AI 模型配置</div>
+            </div>
+            <div slot="reference" class="bottom-item" :class="{active: activeBottom.indexOf('/system')===0 || activeBottom === '/ai-config'}" @click="toggleSystem">
+              <span>系统管理</span>
+            </div>
+          </el-popover>
+          
           <div class="bottom-item" :class="{active: activeBottom === '/backtest'}" @click="$router.push('/backtest')">回测管理</div>
-          <div class="bottom-item" :class="{active: activeBottom === '/system'}" @click="$router.push('/system')">系统管理</div>
         </div>
       </div>
     </div>
@@ -68,17 +82,20 @@
 export default {
   name: 'Layout',
   data(){
-    return { isMobile: false, isPortrait: true, showDailyPop: false }
+    return { isMobile: false, isPortrait: true, showDailyPop: false, showSystemPop: false }
   },
   computed: {
     isPortraitMobile(){ return this.isMobile && this.isPortrait },
     isSelection(){ const p=this.$route && this.$route.path ? this.$route.path : ''; return p==='/selection' },
     activeBottom(){
-      // 底部菜单的高亮：/daily/* 统一高亮对应子项
+      // 底部菜单的高亮：/daily/* 和 /system/* 统一高亮对应子项
       const p = this.$route && this.$route.path ? this.$route.path : '/selection'
       if(p.startsWith('/daily/')){
         if(p.startsWith('/daily/stock')) return '/daily/stock'
         return '/daily/csi'
+      }
+      if(p.startsWith('/system/') || p === '/ai-config'){
+        return '/system'
       }
       return p
     }
@@ -96,7 +113,8 @@ export default {
       }catch(e){ this.isMobile=false; this.isPortrait=true }
     },
     toggleDaily(){ this.showDailyPop = !this.showDailyPop },
-    navigate(path){ this.showDailyPop=false; this.$router.push(path) }
+    toggleSystem(){ this.showSystemPop = !this.showSystemPop },
+    navigate(path){ this.showDailyPop=false; this.showSystemPop=false; this.$router.push(path) }
   }
 }
   </script>
@@ -124,11 +142,17 @@ export default {
 
 /* 弹出层样式，模拟公众号底部二级菜单 */
 .bottom-daily-pop{ padding:6px 0; z-index: 5000; }
+.bottom-system-pop{ padding:6px 0; z-index: 5000; }
 /* 隐藏弹出层尖角，使按钮文字保持居中视觉 */
 .bottom-daily-pop[x-placement^="top"] .popper__arrow { display:none }
 .bottom-daily-pop .popper__arrow { display:none }
+.bottom-system-pop[x-placement^="top"] .popper__arrow { display:none }
+.bottom-system-pop .popper__arrow { display:none }
 .daily-pop{ display:flex; flex-direction:column }
+.system-pop{ display:flex; flex-direction:column }
 .daily-item{ padding:8px 12px; font-size:13px; color:#374151; }
 .daily-item:hover{ background:#f3f6ff; color:#1d4ed8; cursor:pointer }
+.system-item{ padding:8px 12px; font-size:13px; color:#374151; }
+.system-item:hover{ background:#f3f6ff; color:#1d4ed8; cursor:pointer }
 </style>
 

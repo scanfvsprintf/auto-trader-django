@@ -8,10 +8,12 @@ from decimal import Decimal
 
 from common.models import (
     DailyTradingPlan, StockInfo, DailyFactorValues, FactorDefinitions,
-    DailyQuotes, IndexQuotesCsi300, StrategyParameters
+    DailyQuotes, IndexQuotesCsi300, StrategyParameters, AiSourceConfig, AiModelConfig
 )
 from data_manager.service.stock_service import StockService
 from selection_manager.service.selection_service import SelectionService
+from ai_manager.service.config_manager import AiConfigManager
+from ai_manager.service.ai_service import AiService, AiServiceException
 
 
 def ok(data=None):
@@ -758,4 +760,497 @@ def system_backtest_results(request):
         "summary": {"annualized": ann, "max_drawdown": max_dd, "sharpe": sharpe_all},
         "rf": rf_annual
     })
+
+
+# ----------------------- AI配置管理 -----------------------
+@require_http_methods(["GET", "POST", "PUT", "DELETE"])
+def ai_source_config(request):
+    """
+    AI源配置管理API
+    GET: 获取所有AI源配置
+    POST: 创建新的AI源配置
+    PUT: 更新AI源配置
+    DELETE: 删除AI源配置
+    """
+    if request.method == 'GET':
+        try:
+            sources = AiConfigManager.get_active_sources()
+            return ok(sources)
+        except Exception as e:
+            return err(f"获取AI源配置失败: {str(e)}")
+    
+    try:
+        import json
+        payload = json.loads(request.body.decode('utf-8') or '{}')
+    except Exception:
+        payload = {}
+    
+    if request.method == 'POST':
+        # 创建AI源配置
+        name = payload.get('name')
+        url = payload.get('url')
+        api_key = payload.get('api_key')
+        description = payload.get('description', '')
+        is_active = payload.get('is_active', True)
+        
+        if not name or not url or not api_key:
+            return err("缺少必要参数: name, url, api_key")
+        
+        try:
+            source = AiConfigManager.create_source_config(
+                name=name,
+                url=url,
+                api_key=api_key,
+                description=description,
+                is_active=is_active
+            )
+            return ok({"id": source.id, "message": "AI源配置创建成功"})
+        except Exception as e:
+            return err(f"创建AI源配置失败: {str(e)}")
+    
+    if request.method == 'PUT':
+        # 更新AI源配置
+        source_id = payload.get('id')
+        if not source_id:
+            return err("缺少参数: id")
+        
+        try:
+            source = AiConfigManager.update_source_config(
+                source_id=source_id,
+                name=payload.get('name'),
+                url=payload.get('url'),
+                api_key=payload.get('api_key'),
+                description=payload.get('description'),
+                is_active=payload.get('is_active')
+            )
+            if source:
+                return ok({"message": "AI源配置更新成功"})
+            else:
+                return err("AI源配置不存在")
+        except Exception as e:
+            return err(f"更新AI源配置失败: {str(e)}")
+    
+    if request.method == 'DELETE':
+        # 删除AI源配置
+        source_id = request.GET.get('id')
+        if not source_id:
+            return err("缺少参数: id")
+        
+        try:
+            success = AiConfigManager.delete_source_config(int(source_id))
+            if success:
+                return ok({"message": "AI源配置删除成功"})
+            else:
+                return err("AI源配置不存在")
+        except Exception as e:
+            return err(f"删除AI源配置失败: {str(e)}")
+
+
+@require_http_methods(["GET", "POST", "PUT", "DELETE"])
+def ai_model_config(request):
+    """
+    AI模型配置管理API
+    GET: 获取所有AI模型配置
+    POST: 创建新的AI模型配置
+    PUT: 更新AI模型配置
+    DELETE: 删除AI模型配置
+    """
+    if request.method == 'GET':
+        try:
+            models = AiConfigManager.get_active_models()
+            return ok(models)
+        except Exception as e:
+            return err(f"获取AI模型配置失败: {str(e)}")
+    
+    try:
+        import json
+        payload = json.loads(request.body.decode('utf-8') or '{}')
+    except Exception:
+        payload = {}
+    
+    if request.method == 'POST':
+        # 创建AI模型配置
+        name = payload.get('name')
+        model_type = payload.get('model_type', 1)
+        source_id = payload.get('source_id')
+        model_id = payload.get('model_id')
+        max_tokens = payload.get('max_tokens', 1000)
+        temperature = payload.get('temperature', 0.7)
+        description = payload.get('description', '')
+        is_active = payload.get('is_active', True)
+        
+        if not name or not source_id or not model_id:
+            return err("缺少必要参数: name, source_id, model_id")
+        
+        try:
+            model = AiConfigManager.create_model_config(
+                name=name,
+                model_type=model_type,
+                source_id=source_id,
+                model_id=model_id,
+                max_tokens=max_tokens,
+                temperature=temperature,
+                description=description,
+                is_active=is_active
+            )
+            return ok({"id": model.id, "message": "AI模型配置创建成功"})
+        except Exception as e:
+            return err(f"创建AI模型配置失败: {str(e)}")
+    
+    if request.method == 'PUT':
+        # 更新AI模型配置
+        model_id = payload.get('id')
+        if not model_id:
+            return err("缺少参数: id")
+        
+        try:
+            model = AiConfigManager.update_model_config(
+                model_id=model_id,
+                name=payload.get('name'),
+                model_type=payload.get('model_type'),
+                source_id=payload.get('source_id'),
+                model_id_str=payload.get('model_id'),
+                max_tokens=payload.get('max_tokens'),
+                temperature=payload.get('temperature'),
+                description=payload.get('description'),
+                is_active=payload.get('is_active')
+            )
+            if model:
+                return ok({"message": "AI模型配置更新成功"})
+            else:
+                return err("AI模型配置不存在")
+        except Exception as e:
+            return err(f"更新AI模型配置失败: {str(e)}")
+    
+    if request.method == 'DELETE':
+        # 删除AI模型配置
+        model_id = request.GET.get('id')
+        if not model_id:
+            return err("缺少参数: id")
+        
+        try:
+            success = AiConfigManager.delete_model_config(int(model_id))
+            if success:
+                return ok({"message": "AI模型配置删除成功"})
+            else:
+                return err("AI模型配置不存在")
+        except Exception as e:
+            return err(f"删除AI模型配置失败: {str(e)}")
+
+
+@require_http_methods(["POST"])
+def ai_generate_text(request):
+    """
+    AI文本生成API
+    POST: 使用配置的AI模型生成文本
+    """
+    try:
+        import json
+        payload = json.loads(request.body.decode('utf-8') or '{}')
+    except Exception:
+        payload = {}
+    
+    prompt = payload.get('prompt')
+    model_name = payload.get('model_name')
+    temperature = payload.get('temperature')
+    max_tokens = payload.get('max_tokens')
+    
+    if not prompt:
+        return err("缺少参数: prompt")
+    
+    try:
+        service = AiService(model_name)
+        result = service.generate_text(
+            prompt=prompt,
+            temperature=temperature,
+            max_tokens=max_tokens
+        )
+        return ok({"result": result})
+    except AiServiceException as e:
+        return err(f"AI服务错误: {str(e)}")
+    except Exception as e:
+        return err(f"AI文本生成失败: {str(e)}")
+
+
+@require_http_methods(["GET"])
+def ai_test_connection(request):
+    """
+    AI服务连接测试API
+    GET: 测试指定AI模型的连接状态
+    """
+    model_name = request.GET.get('model_name')
+    
+    try:
+        service = AiService(model_name)
+        is_connected = service.test_connection()
+        return ok({"connected": is_connected})
+    except Exception as e:
+        return err(f"连接测试失败: {str(e)}")
+
+
+@require_http_methods(["GET"])
+def ai_available_models(request):
+    """
+    获取可用AI模型列表API
+    GET: 返回所有可用的AI模型信息
+    """
+    try:
+        service = AiService()
+        models = service.get_available_models()
+        return ok(models)
+    except Exception as e:
+        return err(f"获取模型列表失败: {str(e)}")
+
+
+@require_http_methods(["POST"])
+def ai_evaluate_csi300(request):
+    """AI评测沪深300指数走势"""
+    try:
+        import json
+        payload = json.loads(request.body.decode('utf-8') or '{}')
+    except Exception:
+        payload = {}
+    
+    model_id = payload.get('model_id')
+    if not model_id:
+        return err("缺少参数: model_id")
+    
+    try:
+        from ai_manager.service.ai_service import AiService
+        from ai_manager.service.config_manager import AiConfigManager
+        from datetime import datetime, timedelta
+        from common.models import IndexQuotesCsi300
+        
+        # 获取半年内的沪深300数据
+        end_date = datetime.now().date()
+        start_date = end_date - timedelta(days=180)  # 约半年
+        
+        # 查询数据
+        qs = IndexQuotesCsi300.objects.filter(
+            trade_date__gte=start_date, 
+            trade_date__lte=end_date
+        ).order_by('trade_date')
+        
+        if not qs.exists():
+            return err("没有找到沪深300历史数据")
+        
+        # 构建数据格式
+        market_data = {}
+        for record in qs:
+            date_str = record.trade_date.strftime('%Y-%m-%d')
+            market_data[date_str] = {
+                'high': float(record.high),
+                'low': float(record.low),
+                'open': float(record.open),
+                'close': float(record.close),
+                'volume': float(record.volume),
+                'amount': float(record.amount)
+            }
+        
+        # 构建提示词
+        prompt = f"""
+你是一位专业的金融分析师，现在需要分析沪深300指数的历史数据并预测后续走势。
+
+历史数据（按日期从远到近排列）：
+{json.dumps(market_data, ensure_ascii=False, indent=2)}
+
+请基于以上历史数据，分析沪深300指数的后续走势，并按照以下JSON格式输出结果：
+示例:
+{{
+    "综合看涨分数": 85,
+    "趋势动能看涨分数": 78,
+    "均值回归看涨分数": 92,
+    "质量波动看涨分数": 88,
+    "总结": "基于技术分析，沪深300指数呈现强劲上升趋势，成交量放大，建议关注后续突破机会。"
+}}
+
+评分标准：
+- 分数范围：-100到+100
+- 正数表示看涨，负数表示看跌
+- 综合看涨分数：整体市场趋势的综合评估
+- 趋势动能看涨分数：基于价格趋势和动量的评估，考虑均线斜率，均线排列，ADX等
+- 均值回归看涨分数：基于价格偏离均值的回归可能性评估，考虑乖离率，RSI等
+- 质量波动看涨分数：基于成交量和价格波动的质量评估，考虑回撤，收益率标准差等
+- 综合看涨分数：基于三个维度的综合评估
+- 总结：200字以内的分析总结
+
+请严格按照JSON格式输出，不要包含任何其他文字。
+"""
+        
+        # 调用AI服务
+        ai_service = AiService()
+        result = ai_service.generate_text(prompt, model_id=model_id)
+        
+        if not result:
+            return err("AI分析失败，请稍后重试")
+        
+        # 解析AI返回的JSON结果
+        try:
+            # 清理AI返回的文本，提取JSON部分
+            result_text = result.strip()
+            if result_text.startswith('```json'):
+                result_text = result_text[7:]
+            if result_text.endswith('```'):
+                result_text = result_text[:-3]
+            
+            ai_result = json.loads(result_text)
+            
+            # 验证结果格式
+            required_fields = ['综合看涨分数', '趋势动能看涨分数', '均值回归看涨分数', '质量波动看涨分数', '总结']
+            for field in required_fields:
+                if field not in ai_result:
+                    return err(f"AI返回结果缺少字段: {field}")
+            
+            # 验证分数范围
+            score_fields = ['综合看涨分数', '趋势动能看涨分数', '均值回归看涨分数', '质量波动看涨分数']
+            for field in score_fields:
+                score = ai_result[field]
+                if not isinstance(score, (int, float)) or score < -100 or score > 100:
+                    return err(f"分数 {field} 超出范围(-100到+100): {score}")
+            
+            return ok({
+                'analysis_result': ai_result,
+                'data_period': {
+                    'start_date': start_date.strftime('%Y-%m-%d'),
+                    'end_date': end_date.strftime('%Y-%m-%d'),
+                    'data_count': len(market_data)
+                }
+            })
+            
+        except json.JSONDecodeError as e:
+            return err(f"AI返回结果格式错误: {str(e)}")
+        
+    except Exception as e:
+        return err(f"AI评测失败: {str(e)}")
+
+
+@require_http_methods(["POST"])
+def ai_evaluate_stock(request):
+    """AI评测个股走势"""
+    try:
+        import json
+        payload = json.loads(request.body.decode('utf-8') or '{}')
+    except Exception:
+        payload = {}
+    
+    model_id = payload.get('model_id')
+    stock_code = payload.get('stock_code')
+    stock_name = payload.get('stock_name')
+    
+    if not model_id:
+        return err("缺少参数: model_id")
+    if not stock_code:
+        return err("缺少参数: stock_code")
+    
+    try:
+        from ai_manager.service.ai_service import AiService
+        from ai_manager.service.config_manager import AiConfigManager
+        from datetime import datetime, timedelta
+        from common.models import DailyQuotes
+        
+        # 获取半年内的个股数据
+        end_date = datetime.now().date()
+        start_date = end_date - timedelta(days=180)  # 约半年
+        
+        # 查询数据
+        qs = DailyQuotes.objects.filter(
+            stock_code=stock_code,
+            trade_date__gte=start_date, 
+            trade_date__lte=end_date
+        ).order_by('trade_date')
+        
+        if not qs.exists():
+            return err(f"没有找到股票 {stock_code} 的历史数据")
+        
+        # 构建数据格式
+        market_data = {}
+        for record in qs:
+            date_str = record.trade_date.strftime('%Y-%m-%d')
+            market_data[date_str] = {
+                'high': float(record.high),
+                'low': float(record.low),
+                'open': float(record.open),
+                'close': float(record.close),
+                'hfq_close': float(record.hfq_close),
+                'volume': float(record.volume),
+                'amount': float(record.turnover)
+            }
+        
+        # 构建AI提示词
+        stock_display_name = f"{stock_name}({stock_code})" if stock_name else stock_code
+        prompt = f"""你是一位专业的金融分析师，现在需要分析一只股票的未来走势。
+
+股票信息：{stock_display_name}
+
+历史数据（最近180个交易日，按日期从远到近排列）：
+{json.dumps(market_data, ensure_ascii=False, indent=2)}
+
+数据字段说明：
+- high/low/open/close: 不复权价格
+- hfq_close: 后复权收盘价（已考虑分红送股影响，更适合技术分析）
+- volume: 成交量（股）
+- amount: 成交额（元）
+
+请基于以上历史数据，从技术分析角度分析该股票的未来走势。请严格按照以下JSON格式输出分析结果：
+
+{{
+    "综合看涨分数": 数值(-100到+100),
+    "趋势动能看涨分数": 数值(-100到+100),
+    "均值回归看涨分数": 数值(-100到+100),
+    "质量波动看涨分数": 数值(-100到+100),
+    "总结": "200字以内的分析总结"
+}}
+
+评分标准：
+- 分数范围：-100到+100
+- 正数表示看涨，负数表示看跌
+- 综合看涨分数：整体的综合评估
+- 趋势动能看涨分数：基于价格趋势和动量的评估，考虑均线斜率，均线排列，ADX等
+- 均值回归看涨分数：基于价格偏离均值的回归可能性评估，考虑乖离率，RSI等
+- 质量波动看涨分数：基于成交量和价格波动的质量评估，考虑回撤，收益率标准差等
+- 综合看涨分数：基于三个维度的综合评估
+- 总结：200字以内的分析总结
+
+请确保输出的是有效的JSON格式，不要包含任何其他文字。"""
+
+        # 调用AI服务
+        ai_service = AiService()
+        ai_response = ai_service.generate_text(prompt, model_id=model_id)
+        
+        # 解析AI返回的JSON
+        import re
+        # 提取JSON部分
+        json_match = re.search(r'\{.*\}', ai_response, re.DOTALL)
+        if not json_match:
+            return err("AI返回结果格式错误：未找到有效的JSON")
+        
+        ai_result = json.loads(json_match.group())
+        
+        # 验证必需字段
+        required_fields = ['综合看涨分数', '趋势动能看涨分数', '均值回归看涨分数', '质量波动看涨分数', '总结']
+        for field in required_fields:
+            if field not in ai_result:
+                return err(f"AI返回结果缺少字段: {field}")
+        
+        # 验证分数范围
+        score_fields = ['综合看涨分数', '趋势动能看涨分数', '均值回归看涨分数', '质量波动看涨分数']
+        for field in score_fields:
+            score = ai_result[field]
+            if not isinstance(score, (int, float)) or score < -100 or score > 100:
+                return err(f"分数 {field} 超出范围(-100到+100): {score}")
+        
+        return ok({
+            'analysis_result': ai_result,
+            'data_period': {
+                'start_date': start_date.strftime('%Y-%m-%d'),
+                'end_date': end_date.strftime('%Y-%m-%d'),
+                'data_count': len(market_data)
+            }
+        })
+        
+    except json.JSONDecodeError as e:
+        return err(f"AI返回结果格式错误: {str(e)}")
+    
+    except Exception as e:
+        return err(f"AI评测失败: {str(e)}")
 
