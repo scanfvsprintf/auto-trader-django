@@ -3,13 +3,16 @@
 📂 ./
     📄 .env
     📄 .env.example
+    📄 AI_CONFIG_MOBILE_SUMMARY.md
     📄 M值关系分析.py
     📄 M值分析报告.txt
+    📄 SYSTEM_MENU_REFACTOR_SUMMARY.md
     📄 backtest.sh
     📄 backtest_m.sh
     📄 config.json
     📄 m_value_csi300.csv
     📄 manage.py
+    📄 npm.sh
     📄 requirements.txt
     📄 restart.sh
     📄 trade_report.html
@@ -26,12 +29,62 @@
     📄 测试akshare.py
     📄 测试easytrader.py
     📄 资金变化图.png
+    📂 ai_manager/
+        📄 MOBILE_OPTIMIZATION.md
+        📄 README.md
+        📄 __init__.py
+        📄 admin.py
+        📄 apps.py
+        📄 models.py
+        📄 tests.py
+        📄 views.py
+        📂 service/
+            📄 __init__.py
+            📄 ai_service.py
+            📄 config_manager.py
     📂 autoTrade/
         📄 __init__.py
         📄 asgi.py
         📄 settings.py
         📄 urls.py
         📄 wsgi.py
+    📂 autoTrade_web/
+        📄 index.html
+        📄 package-lock.json
+        📄 package.json
+        📄 vite.config.js
+        📂 .vite/
+            📂 deps/
+                📄 _metadata.json
+                📄 chunk-V4OQ3NZ2.js
+                📄 chunk-V4OQ3NZ2.js.map
+                📄 element-ui.js
+                📄 element-ui.js.map
+                📄 package.json
+                📄 vue-router.js
+                📄 vue-router.js.map
+                📄 vue.js
+                📄 vue.js.map
+        📂 src/
+            📄 App.vue
+            📄 main.js
+            📂 router/
+                📄 index.js
+            📂 styles/
+                📄 theme.css
+            📂 views/
+                📄 AiConfig.vue
+                📄 Daily.vue
+                📄 DailyBackfill.vue
+                📄 DailyCsi.vue
+                📄 DailyStock.vue
+                📄 Factors.vue
+                📄 Layout.vue
+                📄 Login.vue
+                📄 Schema.vue
+                📄 Selection.vue
+                📄 System.vue
+                📄 SystemBacktest.vue
     📂 common/
         📄 __init__.py
         📄 admin.py
@@ -41,6 +94,8 @@
         📄 views.py
         📂 models/
             📄 __init__.py
+            📄 ai_model_config.py
+            📄 ai_source_config.py
             📄 backtest_logs.py
             📄 corporate_action.py
             📄 daily_factor_values.py
@@ -145,6 +200,14 @@
             📄 simulate_trade_handler.py
             📄 simulate_trade_old.py
             📄 trade_handler.py
+    📂 web_manager/
+        📄 __init__.py
+        📄 admin.py
+        📄 apps.py
+        📄 models.py
+        📄 tests.py
+        📄 urls.py
+        📄 views.py
 
 ========================
 
@@ -996,6 +1059,715 @@ if __name__ == '__main__':
 
 ####文件结束####
 
+####ai_manager\__init__.py####
+
+####文件结束####
+
+####ai_manager\admin.py####
+from django.contrib import admin
+
+# Register your models here.
+
+####文件结束####
+
+####ai_manager\apps.py####
+from django.apps import AppConfig
+
+
+class AiManagerConfig(AppConfig):
+    default_auto_field = 'django.db.models.BigAutoField'
+    name = 'ai_manager'
+
+####文件结束####
+
+####ai_manager\models.py####
+from django.db import models
+
+# Create your models here.
+
+####文件结束####
+
+####ai_manager\tests.py####
+from django.test import TestCase
+
+# Create your tests here.
+
+####文件结束####
+
+####ai_manager\views.py####
+from django.shortcuts import render
+
+# Create your views here.
+
+####文件结束####
+
+####ai_manager\service\__init__.py####
+from .ai_service import AiService, AiServiceException, generate_ai_text, get_ai_models
+from .config_manager import AiConfigManager
+
+__all__ = [
+    'AiService',
+    'AiServiceException', 
+    'generate_ai_text',
+    'get_ai_models',
+    'AiConfigManager'
+]
+
+####文件结束####
+
+####ai_manager\service\ai_service.py####
+import requests
+import json
+import logging
+from typing import Dict, Any, Optional, List
+from django.conf import settings
+from common.models import AiModelConfig, AiSourceConfig
+
+logger = logging.getLogger(__name__)
+
+
+class AiServiceException(Exception):
+    """AI服务异常类"""
+    pass
+
+
+class AiService:
+    """
+    AI服务接口类
+    提供标准化的AI模型调用接口
+    """
+    
+    def __init__(self, model_name: str = None):
+        """
+        初始化AI服务
+        
+        Args:
+            model_name: 模型名称，如果为None则使用默认模型
+        """
+        self.model_name = model_name
+        self.model_config = None
+        self.source_config = None
+        self._load_model_config()
+    
+    def _load_model_config(self):
+        """加载模型配置"""
+        try:
+            if self.model_name:
+                self.model_config = AiModelConfig.objects.get(
+                    name=self.model_name, 
+                    is_active=True
+                )
+            else:
+                # 使用默认的第一个活跃模型
+                self.model_config = AiModelConfig.objects.filter(
+                    is_active=True,
+                    model_type=1  # 文本模型
+                ).first()
+            
+            if not self.model_config:
+                raise AiServiceException("未找到可用的AI模型配置")
+            
+            self.source_config = self.model_config.source
+            if not self.source_config or not self.source_config.is_active:
+                raise AiServiceException("AI源配置无效或已禁用")
+                
+        except AiModelConfig.DoesNotExist:
+            raise AiServiceException(f"未找到模型配置: {self.model_name}")
+        except Exception as e:
+            logger.error(f"加载模型配置失败: {str(e)}")
+            raise AiServiceException(f"加载模型配置失败: {str(e)}")
+    
+    def generate_text(self, prompt: str, **kwargs) -> str:
+        """
+        生成文本内容
+        
+        Args:
+            prompt: 输入提示词
+            **kwargs: 其他参数，如temperature, max_tokens等
+            
+        Returns:
+            str: 生成的文本内容
+            
+        Raises:
+            AiServiceException: AI服务调用异常
+        """
+        try:
+            # 构建请求参数
+            request_data = self._build_request_data(prompt, **kwargs)
+            
+            # 发送请求
+            response = self._send_request(request_data)
+            
+            # 解析响应
+            return self._parse_response(response)
+            
+        except Exception as e:
+            logger.error(f"AI文本生成失败: {str(e)}")
+            raise AiServiceException(f"AI文本生成失败: {str(e)}")
+    
+    def _build_request_data(self, prompt: str, **kwargs) -> Dict[str, Any]:
+        """构建请求数据"""
+        # 使用模型配置的默认参数，允许kwargs覆盖
+        temperature = kwargs.get('temperature', self.model_config.temperature)
+        max_tokens = kwargs.get('max_tokens', self.model_config.max_tokens)
+        
+        # 根据不同的AI服务提供商构建不同的请求格式
+        if 'openai' in self.source_config.url.lower() or 'openrouter' in self.source_config.url.lower():
+            return {
+                "model": self.model_config.model_id,
+                "messages": [
+                    {"role": "user", "content": prompt}
+                ],
+                "temperature": temperature,
+                "max_tokens": max_tokens
+            }
+        elif 'claude' in self.source_config.url.lower():
+            return {
+                "model": self.model_config.model_id,
+                "prompt": prompt,
+                "temperature": temperature,
+                "max_tokens_to_sample": max_tokens
+            }
+        else:
+            # 默认使用OpenAI格式
+            return {
+                "model": self.model_config.model_id,
+                "messages": [
+                    {"role": "user", "content": prompt}
+                ],
+                "temperature": temperature,
+                "max_tokens": max_tokens
+            }
+    
+    def _send_request(self, request_data: Dict[str, Any]) -> requests.Response:
+        """发送HTTP请求"""
+        headers = {
+            'Content-Type': 'application/json',
+            'Authorization': f'Bearer {self.source_config.api_key}'
+        }
+        
+        try:
+            response = requests.post(
+                self.source_config.url,
+                headers=headers,
+                json=request_data,
+                timeout=300
+            )
+            response.raise_for_status()
+            return response
+            
+        except requests.exceptions.RequestException as e:
+            logger.error(f"HTTP请求失败: {str(e)}")
+            raise AiServiceException(f"HTTP请求失败: {str(e)}")
+    
+    def _parse_response(self, response: requests.Response) -> str:
+        """解析响应数据"""
+        try:
+            data = response.json()
+            
+            # 根据不同的AI服务提供商解析不同的响应格式
+            if 'openai' in self.source_config.url.lower() or 'openrouter' in self.source_config.url.lower():
+                if 'choices' in data and len(data['choices']) > 0:
+                    return data['choices'][0]['message']['content']
+                else:
+                    raise AiServiceException("响应格式错误：缺少choices字段")
+            
+            elif 'claude' in self.source_config.url.lower():
+                if 'completion' in data:
+                    return data['completion']
+                else:
+                    raise AiServiceException("响应格式错误：缺少completion字段")
+            
+            else:
+                # 默认尝试解析OpenAI格式
+                if 'choices' in data and len(data['choices']) > 0:
+                    return data['choices'][0]['message']['content']
+                else:
+                    raise AiServiceException("无法解析响应格式")
+                    
+        except json.JSONDecodeError as e:
+            logger.error(f"JSON解析失败: {str(e)}")
+            raise AiServiceException(f"JSON解析失败: {str(e)}")
+    
+    def get_available_models(self) -> List[Dict[str, Any]]:
+        """获取可用的模型列表"""
+        models = AiModelConfig.objects.filter(is_active=True)
+        return [
+            {
+                'id': model.id,
+                'name': model.name,
+                'model_type': model.get_model_type_display(),
+                'source_name': model.source.name,
+                'model_id': model.model_id,
+                'max_tokens': model.max_tokens,
+                'temperature': model.temperature
+            }
+            for model in models
+        ]
+    
+    def test_connection(self) -> bool:
+        """测试AI服务连接"""
+        try:
+            test_prompt = "Hello, this is a test message."
+            self.generate_text(test_prompt, max_tokens=10)
+            return True
+        except Exception as e:
+            logger.error(f"AI服务连接测试失败: {str(e)}")
+            return False
+
+
+# 便捷函数
+def generate_ai_text(prompt: str, model_name: str = None, **kwargs) -> str:
+    """
+    便捷函数：生成AI文本
+    
+    Args:
+        prompt: 输入提示词
+        model_name: 模型名称，可选
+        **kwargs: 其他参数
+        
+    Returns:
+        str: 生成的文本内容
+    """
+    service = AiService(model_name)
+    return service.generate_text(prompt, **kwargs)
+
+
+def get_ai_models() -> List[Dict[str, Any]]:
+    """
+    便捷函数：获取可用模型列表
+    
+    Returns:
+        List[Dict]: 模型列表
+    """
+    service = AiService()
+    return service.get_available_models()
+
+####文件结束####
+
+####ai_manager\service\config_manager.py####
+import logging
+from typing import Dict, Any, List, Optional
+from django.core.exceptions import ValidationError
+from common.models import AiSourceConfig, AiModelConfig
+
+logger = logging.getLogger(__name__)
+
+
+class AiConfigManager:
+    """
+    AI配置管理工具类
+    提供AI资源和模型配置的增删查改功能
+    """
+    
+    # ==================== AI源配置管理 ====================
+    
+    @staticmethod
+    def create_source_config(
+        name: str,
+        url: str,
+        api_key: str,
+        description: str = None,
+        is_active: bool = True
+    ) -> AiSourceConfig:
+        """
+        创建AI源配置
+        
+        Args:
+            name: 资源名称
+            url: 资源URL
+            api_key: API密钥
+            description: 描述
+            is_active: 是否启用
+            
+        Returns:
+            AiSourceConfig: 创建的配置对象
+            
+        Raises:
+            ValidationError: 数据验证失败
+        """
+        try:
+            source_config = AiSourceConfig(
+                name=name,
+                url=url,
+                api_key=api_key,
+                description=description,
+                is_active=is_active
+            )
+            source_config.full_clean()
+            source_config.save()
+            
+            logger.info(f"成功创建AI源配置: {name}")
+            return source_config
+            
+        except Exception as e:
+            logger.error(f"创建AI源配置失败: {str(e)}")
+            raise ValidationError(f"创建AI源配置失败: {str(e)}")
+    
+    @staticmethod
+    def get_source_config(source_id: int = None, name: str = None) -> Optional[AiSourceConfig]:
+        """
+        获取AI源配置
+        
+        Args:
+            source_id: 源ID
+            name: 源名称
+            
+        Returns:
+            AiSourceConfig: 配置对象，如果不存在返回None
+        """
+        try:
+            if source_id:
+                return AiSourceConfig.objects.get(id=source_id)
+            elif name:
+                return AiSourceConfig.objects.get(name=name)
+            else:
+                return None
+        except AiSourceConfig.DoesNotExist:
+            return None
+        except Exception as e:
+            logger.error(f"获取AI源配置失败: {str(e)}")
+            return None
+    
+    @staticmethod
+    def list_source_configs(active_only: bool = False) -> List[AiSourceConfig]:
+        """
+        列出所有AI源配置
+        
+        Args:
+            active_only: 是否只返回启用的配置
+            
+        Returns:
+            List[AiSourceConfig]: 配置列表
+        """
+        try:
+            queryset = AiSourceConfig.objects.all()
+            if active_only:
+                queryset = queryset.filter(is_active=True)
+            return list(queryset.order_by('-created_at'))
+        except Exception as e:
+            logger.error(f"列出AI源配置失败: {str(e)}")
+            return []
+    
+    @staticmethod
+    def update_source_config(
+        source_id: int,
+        name: str = None,
+        url: str = None,
+        api_key: str = None,
+        description: str = None,
+        is_active: bool = None
+    ) -> Optional[AiSourceConfig]:
+        """
+        更新AI源配置
+        
+        Args:
+            source_id: 源ID
+            name: 资源名称
+            url: 资源URL
+            api_key: API密钥
+            description: 描述
+            is_active: 是否启用
+            
+        Returns:
+            AiSourceConfig: 更新后的配置对象，如果不存在返回None
+        """
+        try:
+            source_config = AiSourceConfig.objects.get(id=source_id)
+            
+            if name is not None:
+                source_config.name = name
+            if url is not None:
+                source_config.url = url
+            if api_key is not None:
+                source_config.api_key = api_key
+            if description is not None:
+                source_config.description = description
+            if is_active is not None:
+                source_config.is_active = is_active
+            
+            source_config.full_clean()
+            source_config.save()
+            
+            logger.info(f"成功更新AI源配置: {source_config.name}")
+            return source_config
+            
+        except AiSourceConfig.DoesNotExist:
+            logger.warning(f"AI源配置不存在: {source_id}")
+            return None
+        except Exception as e:
+            logger.error(f"更新AI源配置失败: {str(e)}")
+            raise ValidationError(f"更新AI源配置失败: {str(e)}")
+    
+    @staticmethod
+    def delete_source_config(source_id: int) -> bool:
+        """
+        删除AI源配置
+        
+        Args:
+            source_id: 源ID
+            
+        Returns:
+            bool: 删除是否成功
+        """
+        try:
+            source_config = AiSourceConfig.objects.get(id=source_id)
+            
+            # 检查是否有关联的模型配置
+            related_models = AiModelConfig.objects.filter(source=source_config)
+            if related_models.exists():
+                raise ValidationError(f"无法删除AI源配置，存在关联的模型配置: {related_models.count()}个")
+            
+            source_config.delete()
+            logger.info(f"成功删除AI源配置: {source_config.name}")
+            return True
+            
+        except AiSourceConfig.DoesNotExist:
+            logger.warning(f"AI源配置不存在: {source_id}")
+            return False
+        except Exception as e:
+            logger.error(f"删除AI源配置失败: {str(e)}")
+            raise ValidationError(f"删除AI源配置失败: {str(e)}")
+    
+    # ==================== AI模型配置管理 ====================
+    
+    @staticmethod
+    def create_model_config(
+        name: str,
+        model_type: int,
+        source_id: int,
+        model_id: str,
+        max_tokens: int = 1000,
+        temperature: float = 0.7,
+        description: str = None,
+        is_active: bool = True
+    ) -> AiModelConfig:
+        """
+        创建AI模型配置
+        
+        Args:
+            name: 模型名称
+            model_type: 模型类型（1-文本模型，2-生图模型）
+            source_id: 关联的源ID
+            model_id: 模型ID
+            max_tokens: 最大Token数
+            temperature: 温度参数
+            description: 描述
+            is_active: 是否启用
+            
+        Returns:
+            AiModelConfig: 创建的配置对象
+            
+        Raises:
+            ValidationError: 数据验证失败
+        """
+        try:
+            # 验证源配置是否存在
+            source_config = AiSourceConfig.objects.get(id=source_id)
+            if not source_config.is_active:
+                raise ValidationError("关联的AI源配置已禁用")
+            
+            model_config = AiModelConfig(
+                name=name,
+                model_type=model_type,
+                source=source_config,
+                model_id=model_id,
+                max_tokens=max_tokens,
+                temperature=temperature,
+                description=description,
+                is_active=is_active
+            )
+            model_config.full_clean()
+            model_config.save()
+            
+            logger.info(f"成功创建AI模型配置: {name}")
+            return model_config
+            
+        except AiSourceConfig.DoesNotExist:
+            raise ValidationError(f"AI源配置不存在: {source_id}")
+        except Exception as e:
+            logger.error(f"创建AI模型配置失败: {str(e)}")
+            raise ValidationError(f"创建AI模型配置失败: {str(e)}")
+    
+    @staticmethod
+    def get_model_config(model_id: int = None, name: str = None) -> Optional[AiModelConfig]:
+        """
+        获取AI模型配置
+        
+        Args:
+            model_id: 模型ID
+            name: 模型名称
+            
+        Returns:
+            AiModelConfig: 配置对象，如果不存在返回None
+        """
+        try:
+            if model_id:
+                return AiModelConfig.objects.get(id=model_id)
+            elif name:
+                return AiModelConfig.objects.get(name=name)
+            else:
+                return None
+        except AiModelConfig.DoesNotExist:
+            return None
+        except Exception as e:
+            logger.error(f"获取AI模型配置失败: {str(e)}")
+            return None
+    
+    @staticmethod
+    def list_model_configs(active_only: bool = False, model_type: int = None) -> List[AiModelConfig]:
+        """
+        列出所有AI模型配置
+        
+        Args:
+            active_only: 是否只返回启用的配置
+            model_type: 模型类型过滤
+            
+        Returns:
+            List[AiModelConfig]: 配置列表
+        """
+        try:
+            queryset = AiModelConfig.objects.select_related('source')
+            if active_only:
+                queryset = queryset.filter(is_active=True)
+            if model_type is not None:
+                queryset = queryset.filter(model_type=model_type)
+            return list(queryset.order_by('-created_at'))
+        except Exception as e:
+            logger.error(f"列出AI模型配置失败: {str(e)}")
+            return []
+    
+    @staticmethod
+    def update_model_config(
+        model_id: int,
+        name: str = None,
+        model_type: int = None,
+        source_id: int = None,
+        model_id_str: str = None,
+        max_tokens: int = None,
+        temperature: float = None,
+        description: str = None,
+        is_active: bool = None
+    ) -> Optional[AiModelConfig]:
+        """
+        更新AI模型配置
+        
+        Args:
+            model_id: 模型ID
+            name: 模型名称
+            model_type: 模型类型
+            source_id: 关联的源ID
+            model_id_str: 模型ID字符串
+            max_tokens: 最大Token数
+            temperature: 温度参数
+            description: 描述
+            is_active: 是否启用
+            
+        Returns:
+            AiModelConfig: 更新后的配置对象，如果不存在返回None
+        """
+        try:
+            model_config = AiModelConfig.objects.get(id=model_id)
+            
+            if name is not None:
+                model_config.name = name
+            if model_type is not None:
+                model_config.model_type = model_type
+            if source_id is not None:
+                source_config = AiSourceConfig.objects.get(id=source_id)
+                model_config.source = source_config
+            if model_id_str is not None:
+                model_config.model_id = model_id_str
+            if max_tokens is not None:
+                model_config.max_tokens = max_tokens
+            if temperature is not None:
+                model_config.temperature = temperature
+            if description is not None:
+                model_config.description = description
+            if is_active is not None:
+                model_config.is_active = is_active
+            
+            model_config.full_clean()
+            model_config.save()
+            
+            logger.info(f"成功更新AI模型配置: {model_config.name}")
+            return model_config
+            
+        except AiModelConfig.DoesNotExist:
+            logger.warning(f"AI模型配置不存在: {model_id}")
+            return None
+        except Exception as e:
+            logger.error(f"更新AI模型配置失败: {str(e)}")
+            raise ValidationError(f"更新AI模型配置失败: {str(e)}")
+    
+    @staticmethod
+    def delete_model_config(model_id: int) -> bool:
+        """
+        删除AI模型配置
+        
+        Args:
+            model_id: 模型ID
+            
+        Returns:
+            bool: 删除是否成功
+        """
+        try:
+            model_config = AiModelConfig.objects.get(id=model_id)
+            model_config.delete()
+            logger.info(f"成功删除AI模型配置: {model_config.name}")
+            return True
+            
+        except AiModelConfig.DoesNotExist:
+            logger.warning(f"AI模型配置不存在: {model_id}")
+            return False
+        except Exception as e:
+            logger.error(f"删除AI模型配置失败: {str(e)}")
+            raise ValidationError(f"删除AI模型配置失败: {str(e)}")
+    
+    # ==================== 便捷方法 ====================
+    
+    @staticmethod
+    def get_active_sources() -> List[Dict[str, Any]]:
+        """获取所有启用的AI源配置"""
+        sources = AiConfigManager.list_source_configs(active_only=True)
+        return [
+            {
+                'id': source.id,
+                'name': source.name,
+                'url': source.url,
+                'api_key': source.api_key,
+                'description': source.description,
+                'is_active': source.is_active,
+                'created_at': source.created_at.isoformat(),
+                'updated_at': source.updated_at.isoformat()
+            }
+            for source in sources
+        ]
+    
+    @staticmethod
+    def get_active_models(model_type: int = 1) -> List[Dict[str, Any]]:
+        """获取所有启用的AI模型配置"""
+        models = AiConfigManager.list_model_configs(active_only=True, model_type=model_type)
+        return [
+            {
+                'id': model.id,
+                'name': model.name,
+                'model_type': model.model_type,
+                'source_id': model.source.id,
+                'source_name': model.source.name,
+                'model_id': model.model_id,
+                'max_tokens': model.max_tokens,
+                'temperature': model.temperature,
+                'description': model.description,
+                'is_active': model.is_active,
+                'created_at': model.created_at.isoformat(),
+                'updated_at': model.updated_at.isoformat()
+            }
+            for model in models
+        ]
+
+####文件结束####
+
 ####autoTrade\__init__.py####
 
 ####文件结束####
@@ -1070,7 +1842,9 @@ INSTALLED_APPS = [
     'data_manager',
     'selection_manager',
     'trade_manager',
-    'common'
+    'common',
+    'web_manager',
+    'ai_manager'
 ]
 
 MIDDLEWARE = [
@@ -1285,7 +2059,8 @@ urlpatterns = [
     path('admin/', admin.site.urls),
     path('dataManager/', include('data_manager.urls')),
     path('selectionManager/', include('selection_manager.urls')),
-    path('tradeManager/', include('trade_manager.urls'))
+    path('tradeManager/', include('trade_manager.urls')),
+    path('webManager/', include('web_manager.urls'))
 ]
 
 ####文件结束####
@@ -1539,6 +2314,8 @@ from .system_log import SystemLog
 from .corporate_action import CorporateAction
 from .backtest_logs import BacktestDailyLog,BacktestOperationLog
 from .index_quotes_csi300 import IndexQuotesCsi300
+from .ai_source_config import AiSourceConfig
+from .ai_model_config import AiModelConfig
 
 __all__ = [
     'StockInfo',
@@ -1554,8 +2331,212 @@ __all__ = [
     'BacktestDailyLog',
     'BacktestOperationLog',
     "MDistributionBacktestLog",
-    'IndexQuotesCsi300'
+    'IndexQuotesCsi300',
+    'AiSourceConfig',
+    'AiModelConfig'
 ]
+
+####文件结束####
+
+####common\models\ai_model_config.py####
+from django.db import models
+from django.core.exceptions import ValidationError
+from .ai_source_config import AiSourceConfig
+
+
+class AiModelConfig(models.Model):
+    """
+    AI模型配置表
+    用于存储具体的AI模型配置信息
+    """
+    
+    MODEL_TYPE_CHOICES = [
+        (1, '文本模型'),
+        (2, '生图模型'),
+    ]
+    
+    name = models.CharField(
+        max_length=100,
+        unique=True,
+        verbose_name="模型名称",
+        help_text="AI模型的名称，如gpt-3.5-turbo、claude-3等"
+    )
+    
+    model_type = models.IntegerField(
+        choices=MODEL_TYPE_CHOICES,
+        default=1,
+        verbose_name="模型类型",
+        help_text="模型类型：1-文本模型，2-生图模型"
+    )
+    
+    source = models.ForeignKey(
+        AiSourceConfig,
+        on_delete=models.CASCADE,
+        related_name='models',
+        verbose_name="资源名称",
+        help_text="关联的AI资源配置"
+    )
+    
+    model_id = models.CharField(
+        max_length=200,
+        verbose_name="模型ID",
+        help_text="在AI服务中的具体模型标识符"
+    )
+    
+    is_active = models.BooleanField(
+        default=True,
+        verbose_name="是否启用",
+        help_text="是否启用此AI模型"
+    )
+    
+    max_tokens = models.IntegerField(
+        default=1000,
+        verbose_name="最大Token数",
+        help_text="模型单次请求的最大Token数量"
+    )
+    
+    temperature = models.FloatField(
+        default=0.7,
+        verbose_name="温度参数",
+        help_text="控制模型输出的随机性，范围0-2"
+    )
+    
+    created_at = models.DateTimeField(
+        auto_now_add=True,
+        verbose_name="创建时间"
+    )
+    
+    updated_at = models.DateTimeField(
+        auto_now=True,
+        verbose_name="更新时间"
+    )
+    
+    description = models.TextField(
+        blank=True,
+        null=True,
+        verbose_name="描述",
+        help_text="AI模型的详细描述"
+    )
+    
+    class Meta:
+        db_table = 'tb_ai_model_config'
+        verbose_name = "AI模型配置"
+        verbose_name_plural = "AI模型配置"
+        ordering = ['-created_at']
+    
+    def __str__(self):
+        return f"{self.name} ({self.get_model_type_display()})"
+    
+    def clean(self):
+        """验证模型数据"""
+        super().clean()
+        
+        # 验证温度参数范围
+        if not (0 <= self.temperature <= 2):
+            raise ValidationError({'temperature': '温度参数必须在0-2之间'})
+        
+        # 验证最大Token数
+        if self.max_tokens <= 0:
+            raise ValidationError({'max_tokens': '最大Token数必须大于0'})
+        
+        # 验证模型ID
+        if not self.model_id or len(self.model_id.strip()) < 1:
+            raise ValidationError({'model_id': '模型ID不能为空'})
+    
+    def save(self, *args, **kwargs):
+        """保存前进行数据清理"""
+        self.full_clean()
+        super().save(*args, **kwargs)
+    
+    @property
+    def source_name(self):
+        """获取关联的源名称"""
+        return self.source.name if self.source else None
+
+####文件结束####
+
+####common\models\ai_source_config.py####
+from django.db import models
+from django.core.validators import URLValidator
+from django.core.exceptions import ValidationError
+
+
+class AiSourceConfig(models.Model):
+    """
+    AI资源配置表
+    用于存储各种AI服务提供商的配置信息
+    """
+    
+    name = models.CharField(
+        max_length=100, 
+        unique=True, 
+        verbose_name="资源名称",
+        help_text="AI资源的名称，如OpenAI、Claude等"
+    )
+    
+    url = models.URLField(
+        max_length=500,
+        verbose_name="资源URL",
+        help_text="AI服务的API端点URL"
+    )
+    
+    api_key = models.CharField(
+        max_length=500,
+        verbose_name="API密钥",
+        help_text="访问AI服务的API密钥"
+    )
+    
+    is_active = models.BooleanField(
+        default=True,
+        verbose_name="是否启用",
+        help_text="是否启用此AI资源"
+    )
+    
+    created_at = models.DateTimeField(
+        auto_now_add=True,
+        verbose_name="创建时间"
+    )
+    
+    updated_at = models.DateTimeField(
+        auto_now=True,
+        verbose_name="更新时间"
+    )
+    
+    description = models.TextField(
+        blank=True,
+        null=True,
+        verbose_name="描述",
+        help_text="AI资源的详细描述"
+    )
+    
+    class Meta:
+        db_table = 'tb_ai_source_config'
+        verbose_name = "AI资源配置"
+        verbose_name_plural = "AI资源配置"
+        ordering = ['-created_at']
+    
+    def __str__(self):
+        return f"{self.name} ({'启用' if self.is_active else '禁用'})"
+    
+    def clean(self):
+        """验证模型数据"""
+        super().clean()
+        
+        # 验证URL格式
+        validator = URLValidator()
+        try:
+            validator(self.url)
+        except ValidationError:
+            raise ValidationError({'url': '请输入有效的URL格式'})
+        
+        # 验证API密钥格式
+        if not self.api_key or len(self.api_key.strip()) < 10:
+            raise ValidationError({'api_key': 'API密钥长度不能少于10个字符'})
+    
+    def save(self, *args, **kwargs):
+        """保存前进行数据清理"""
+        self.full_clean()
+        super().save(*args, **kwargs)
 
 ####文件结束####
 
@@ -1793,7 +2774,13 @@ class MDistributionBacktestLog(models.Model):
         decimal_places=4,
         help_text="该笔交易的实际收益率 ( (exit_price / entry_price) - 1 )"
     )
-
+    final_score = models.DecimalField(
+        max_digits=18,
+        decimal_places=10,
+        null=True,  # 允许为空，以兼容旧数据
+        blank=True,
+        help_text="买入决策时，个股的选股模型最终得分"
+    )
     one_stratage_mode = models.CharField(
         max_length=10,
         null=True,
@@ -7075,7 +8062,8 @@ from common.models import (
     DailyTradingPlan,
     Position,
     DailyQuotes,
-    SystemLog
+    SystemLog,
+    DailyFactorValues
 )
 
 # 配置日志记录器
@@ -7194,7 +8182,9 @@ class BeforeFixService:
         # a. 获取T日所有除权除息信息
         events_on_t_day = CorporateAction.objects.filter(ex_dividend_date=self.t_day)
         if not events_on_t_day.exists():
-            logger.debug(f"T日 ({self.t_day}) 无除权除息事件，无需校准。")
+            logger.debug(f"T日 ({self.t_day}) 无除权除息事件，无需校准除权，但继续执行评分风控调整。")
+            # 无除权事件也要执行评分驱动的风控校准
+            self.apply_score_based_risk_adjustments()
             return
 
         # 按股票代码分组事件
@@ -7207,6 +8197,8 @@ class BeforeFixService:
         if not affected_codes:
             logger.info("T日只有配股事件，常规校准流程跳过。")
             self._handle_rights_issue_special_case() # 仍然要处理配股的特殊情况
+            # 无常规校准时，仍继续执行评分风控调整
+            self.apply_score_based_risk_adjustments()
             return
         logger.info(f"T日共有 {len(affected_codes)} 只股票发生股权事件。")
 
@@ -7254,6 +8246,9 @@ class BeforeFixService:
 
         # e. 配股事件特殊处理
         self._handle_rights_issue_special_case()
+
+        # f. 无论是否存在除权事件，均执行评分驱动的风控校准
+        self.apply_score_based_risk_adjustments()
 
         logger.info(f"[{self.MODULE_NAME}] 任务成功完成。共处理 {len(self.adjustment_ratios)} 只股票的常规校准。")
 
@@ -7435,6 +8430,118 @@ class BeforeFixService:
         if plans_to_update:
             DailyTradingPlan.objects.bulk_update(plans_to_update, ['miop', 'maop'])
             logger.info(f"[回测工具] 成功更新 {len(plans_to_update)} 条交易预案，以模拟一字板无法买入。")
+
+    def apply_score_based_risk_adjustments(self):
+        """
+        基于昨日选股结果(针对T日的预案)对当前持仓执行评分驱动的风控校准：
+        - 若评分 < -0.2：直接“抛出”风控（止盈=0，止损=999999）。
+        - 若 -0.2 <= 评分 < 0：将止盈/止损分别向成本价靠拢50%。
+        说明：使用 `DailyTradingPlan(plan_date=T日)` 的 `final_score` 作为昨日选股后的评分。
+        """
+        try:
+            open_positions = list(
+                Position.objects.filter(status=Position.StatusChoices.OPEN)
+            )
+            if not open_positions:
+                logger.info("评分风控调整：当前无持仓，跳过。")
+                return
+
+            stock_codes = [pos.stock_code_id for pos in open_positions]
+            # 单次查询：使用 PostgreSQL DISTINCT ON 取每只股票在 T 日之前最近一次评分
+            latest_score_rows = (
+                DailyFactorValues.objects
+                .filter(
+                    factor_code_id='ML_STOCK_SCORE',
+                    trade_date__lt=self.t_day,
+                    stock_code_id__in=stock_codes
+                )
+                .order_by('stock_code_id', '-trade_date')
+                .distinct('stock_code_id')
+                .values('stock_code_id', 'trade_date', 'norm_score', 'raw_value')
+            )
+            score_map = {}
+            for row in latest_score_rows:
+                # 仅当评分日期等于 T-1 时才应用，避免停牌期间对同一评分反复累乘
+                if row.get('trade_date') != self.t_minus_1_day:
+                    continue
+                val = row.get('norm_score')
+                if val is None:
+                    val = row.get('raw_value')
+                score_map[row['stock_code_id']] = val
+
+            if not score_map:
+                logger.info("评分风控调整：无历史评分，跳过。")
+                return
+
+            updates = []
+            for pos in open_positions:
+                score = score_map.get(pos.stock_code_id)
+                if score is None:
+                    continue
+                # 统一转为Decimal进行比较
+                try:
+                    score_dec = Decimal(str(score))
+                except Exception:
+                    continue
+
+                entry = pos.entry_price
+                d_tp = pos.current_take_profit - entry
+                d_sl = pos.current_stop_loss - entry
+
+                # 熔断：评分<-0.5 直接抛出
+                if score_dec < Decimal('-0.5'):
+                    pos.current_take_profit = Decimal('0.00')
+                    pos.current_stop_loss = Decimal('999999.00')
+                    updates.append(pos)
+                    logger.warning(
+                        f"评分风控调整：{pos.stock_code_id} 评分={score_dec} < -0.5，熔断触发，设置紧急退出风控(TP=0, SL=999999)。"
+                    )
+                # 负分：缩小幅度，比例 = max(0, 1 + 2*score)
+                elif score_dec < Decimal('0'):
+                    factor = (Decimal('1.0') + Decimal('2.0') * score_dec)
+                    if factor < Decimal('0'):
+                        factor = Decimal('0')
+                    new_tp = (entry + d_tp * factor).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+                    new_sl = (entry + d_sl * factor).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+                    # 不变式守护
+                    if new_sl >= new_tp:
+                        # 轻量守护，尽量保持与entry的相对次序
+                        new_sl = min(new_sl, entry - Decimal('0.01'))
+                        new_tp = max(new_tp, entry + Decimal('0.01'))
+                    if new_tp != pos.current_take_profit or new_sl != pos.current_stop_loss:
+                        pos.current_take_profit = new_tp
+                        pos.current_stop_loss = new_sl
+                        updates.append(pos)
+                        logger.info(
+                            f"评分风控调整：{pos.stock_code_id} 评分={score_dec} < 0，按系数{factor:.3f}向成本价收敛 -> TP={new_tp}, SL={new_sl}。"
+                        )
+                # 奖励：评分>0.2 扩大幅度，放大 = 1 + min(0.5, (score-0.2)*2)
+                elif score_dec > Decimal('0.2'):
+                    expand = Decimal('1.0') + min(Decimal('0.5'), (score_dec - Decimal('0.2')) * Decimal('2.0'))
+                    # 保障上限1.5
+                    if expand > Decimal('1.5'):
+                        expand = Decimal('1.5')
+                    new_tp = (entry + d_tp * expand).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+                    new_sl = (entry + d_sl * expand).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+                    # 不变式守护
+                    if new_sl >= new_tp:
+                        new_sl = min(new_sl, entry - Decimal('0.01'))
+                        new_tp = max(new_tp, entry + Decimal('0.01'))
+                    if new_tp != pos.current_take_profit or new_sl != pos.current_stop_loss:
+                        pos.current_take_profit = new_tp
+                        pos.current_stop_loss = new_sl
+                        updates.append(pos)
+                        logger.info(
+                            f"评分风控调整：{pos.stock_code_id} 评分={score_dec} > 0.2，按系数{expand:.3f}扩大区间 -> TP={new_tp}, SL={new_sl}。"
+                        )
+
+            if updates:
+                Position.objects.bulk_update(updates, ['current_take_profit', 'current_stop_loss'])
+                logger.info(f"评分风控调整：已更新 {len(updates)} 条持仓的风控价格。")
+            else:
+                logger.info("评分风控调整：无需更新任何持仓。")
+        except Exception as e:
+            logger.error(f"评分风控调整失败: {e}", exc_info=True)
 ####文件结束####
 
 ####trade_manager\service\db_utils.py####
@@ -8905,6 +10012,7 @@ class MDistributionBacktestService:
             stock_name=plan_obj.stock_code.stock_name,
             m_value_at_plan=Decimal(str(m_value)),
             strategy_dna=plan_obj.strategy_dna,
+            final_score=plan_obj.final_score,
             entry_date=entry_date,
             entry_price=entry_price,
             exit_date=exit_info['date'],
@@ -8973,7 +10081,7 @@ matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 from datetime import date, timedelta,datetime
 from django.db.models import Q
-
+import seaborn as sns  
 from common.models.backtest_logs import MDistributionBacktestLog
 from data_manager.service.email_handler import EmailHandler
 
@@ -9089,8 +10197,131 @@ class MDistributionReporter:
         plt.close(fig_exp)
 
         return win_rate_b64, exp_return_b64
-
-    def _format_html_content(self, all_analysis_results: dict, plot1_b64: str, plot2_b64: str) -> str:
+    # ===================== 新增二维分析方法 =====================
+    def _analyze_2d_distribution(self, df: pd.DataFrame) -> dict:
+        """
+        对 M动态策略 的数据进行二维 M值 x 选股得分 的分析。
+        返回一个字典，包含用于表格和热力图的多个DataFrame。
+        """
+        if df.empty or 'final_score' not in df.columns:
+            return {}
+        df = df.copy()
+        df.dropna(subset=['final_score', 'm_value_at_plan'], inplace=True)
+        df['final_score'] = df['final_score'].astype(float)
+        df['m_value_at_plan'] = df['m_value_at_plan'].astype(float)
+        # 定义计算函数
+        def calculate_metrics(group):
+            win_trades = (group['exit_reason'] == 'TAKE_PROFIT').sum()
+            total_trades = len(group)
+            win_rate = win_trades / total_trades if total_trades > 0 else 0
+            
+            avg_tp = np.nan_to_num(group.loc[group['exit_reason'] == 'TAKE_PROFIT', 'preset_take_profit_rate'].astype(float).mean())
+            avg_sl = np.nan_to_num(group.loc[group['exit_reason'] == 'STOP_LOSS', 'preset_stop_loss_rate'].astype(float).mean())
+            expected_return = win_rate * avg_tp - (1 - win_rate) * avg_sl
+            
+            return pd.Series({'win_rate': win_rate, 'expected_return': expected_return})
+        # --- 为HTML表格进行分析 (0.1步长) ---
+        m_bins_table = np.arange(-1.0, 1.1, 0.1)
+        score_bins_table = np.arange(-1.0, 1.1, 0.1)
+        df['m_bin'] = pd.cut(df['m_value_at_plan'], bins=m_bins_table, right=False)
+        df['score_bin'] = pd.cut(df['final_score'], bins=score_bins_table, right=False)
+        
+        table_grouped = df.groupby(['m_bin', 'score_bin'], observed=False).apply(calculate_metrics, include_groups=False).reset_index()
+        
+        # --- 为热力图进行分析 (评分使用0.01步长) ---
+        score_bins_heatmap = np.arange(-1.0, 1.01, 0.01) # 步长为0.01
+        df['score_bin_fine'] = pd.cut(df['final_score'], bins=score_bins_heatmap, right=False)
+        
+        heatmap_grouped = df.groupby(['m_bin', 'score_bin_fine'], observed=False).apply(calculate_metrics, include_groups=False).reset_index()
+        
+        # 创建Pivot Tables
+        res = {
+            'table_win_rate': table_grouped.pivot_table(index='m_bin', columns='score_bin', values='win_rate'),
+            'table_return': table_grouped.pivot_table(index='m_bin', columns='score_bin', values='expected_return'),
+            'heatmap_win_rate': heatmap_grouped.pivot_table(index='m_bin', columns='score_bin_fine', values='win_rate'),
+            'heatmap_return': heatmap_grouped.pivot_table(index='m_bin', columns='score_bin_fine', values='expected_return')
+        }
+        
+        # 填充NaN值为-999，以便在热力图和表格中清晰区分无数据区域
+        for key in res:
+            res[key].fillna(-999, inplace=True)
+            
+        return res
+    # ===================== 新增热力图生成方法 =====================
+    def _generate_heatmaps_base64(self, win_rate_df: pd.DataFrame, return_df: pd.DataFrame) -> tuple[str, str]:
+        """为胜率和收益率生成两个热力图"""
+        if win_rate_df.empty or return_df.empty:
+            return "", ""
+        try:
+            plt.rcParams['font.sans-serif'] = ['SimHei', 'Microsoft YaHei']
+            plt.rcParams['axes.unicode_minus'] = False
+        except Exception:
+            pass
+        # --- 胜率热力图 ---
+        fig1, ax1 = plt.subplots(figsize=(20, 8))
+        sns.heatmap(
+            win_rate_df.replace(-999, np.nan), ax=ax1, cmap="viridis", annot=False, # 数据量大，关闭 annot
+            fmt=".1%", cbar_kws={'label': 'win rate'}
+        )
+        ax1.set_title('win_rate (M vs score)', fontsize=16)
+        ax1.set_xlabel('score (0.01)')
+        ax1.set_ylabel('M (0.1)')
+        # 简化X轴标签，每10个显示一个
+        tick_labels = [f"{x.left:.2f}" for x in win_rate_df.columns]
+        ax1.set_xticks(np.arange(len(tick_labels))[::10] + 0.5)
+        ax1.set_xticklabels(tick_labels[::10], rotation=45, ha='right')
+        plt.tight_layout()
+        buf1 = io.BytesIO()
+        fig1.savefig(buf1, format='png', dpi=100)
+        win_rate_b64 = base64.b64encode(buf1.getvalue()).decode('utf-8')
+        plt.close(fig1)
+        # --- 期望收益热力图 ---
+        fig2, ax2 = plt.subplots(figsize=(20, 8))
+        sns.heatmap(
+            return_df.replace(-999, np.nan), ax=ax2, cmap="icefire", center=0, annot=False,
+            fmt=".2%", cbar_kws={'label': 'yield rate'}
+        )
+        ax2.set_title('yield rate (M vs score)', fontsize=16)
+        ax2.set_xlabel('score (.01)')
+        ax2.set_ylabel('M (0.1)')
+        ax2.set_xticks(np.arange(len(tick_labels))[::10] + 0.5)
+        ax2.set_xticklabels(tick_labels[::10], rotation=45, ha='right')
+        plt.tight_layout()
+        buf2 = io.BytesIO()
+        fig2.savefig(buf2, format='png', dpi=100)
+        return_b64 = base64.b64encode(buf2.getvalue()).decode('utf-8')
+        plt.close(fig2)
+        return win_rate_b64, return_b64
+    def _format_2d_table_to_html(self, df_pivot: pd.DataFrame, value_format: str) -> str:
+        """
+        一个辅助函数，将丑陋的pivot_table格式化为美观的HTML表格。
+        """
+        if df_pivot.empty:
+            return "<p>无数据</p>"
+        # 1. 将行索引 'm_bin' 变为一个普通的列
+        df_flat = df_pivot.reset_index()
+        
+        # 2. 格式化列名 (将Interval对象转为字符串)
+        df_flat.columns = [
+            f"[{col.left:.1f}, {col.right:.1f})" if isinstance(col, pd.Interval) else col
+            for col in df_flat.columns
+        ]
+        # 3. 格式化第一列（原来的行索引）的显示值
+        m_bin_col_name = df_flat.columns[0]
+        df_flat[m_bin_col_name] = df_flat[m_bin_col_name].apply(
+             lambda x: f"[{x.left:.1f}, {x.right:.1f})" if isinstance(x, pd.Interval) else x
+        )
+        # 4. 格式化所有数据单元格（应用百分比格式并处理N/A）
+        for col in df_flat.columns[1:]: # 跳过第一列
+            df_flat[col] = df_flat[col].apply(
+                lambda x: value_format.format(x) if isinstance(x, (float, int)) and x != -999 else "N/A"
+            )
+        # 5. 重命名左上角的单元格，使其更具说明性
+        df_flat.rename(columns={m_bin_col_name: 'M值 \\ 得分'}, inplace=True)
+        # 6. 转换为HTML，这次使用 index=False，因为索引已经被移到列中了
+        return df_flat.to_html(classes='styled-table styled-table-2d', border=0, na_rep='-', index=False)
+    def _format_html_content(self, all_analysis_results: dict, plot1_b64: str, plot2_b64: str,
+                             two_dim_tables: dict, heatmap1_b64: str, heatmap2_b64: str) -> str:
         """将所有内容整合成HTML邮件"""
         
         # --- 生成所有表格 ---
@@ -9112,7 +10343,24 @@ class MDistributionReporter:
             }, inplace=True)
             
             tables_html += df_display.to_html(index=False, classes='styled-table', border=0)
-
+        # ===================== 新增二维表格HTML生成 =====================
+        tables_2d_html = "<h2>M动态策略 - 二维统计表</h2>"
+        if two_dim_tables:
+            # 胜率二维表
+            tables_2d_html += "<h3>胜率 (M值 vs 选股得分)</h3>"
+            tables_2d_html += self._format_2d_table_to_html(
+                two_dim_tables['table_win_rate'],
+                value_format="{:.1%}"
+            )
+            # 收益率二维表
+            tables_2d_html += "<h3>期望收益率 (M值 vs 选股得分)</h3>"
+            tables_2d_html += self._format_2d_table_to_html(
+                two_dim_tables['table_return'],
+                value_format="{:.2%}"
+            )
+        else:
+            tables_2d_html += "<p>M动态策略无数据，无法生成二维表。</p>"
+        # =============================================================
         # --- 最终HTML模板 ---
         html = f"""
         <!DOCTYPE html>
@@ -9145,7 +10393,18 @@ class MDistributionReporter:
                 <h3>各策略期望收益率 vs M值</h3>
                 <img src="data:image/png;base64,{plot2_b64}" alt="Expected Return Plot">
             </div>
-            
+            <!-- ===================== 新增二维热力图 ===================== -->
+            <h2>热力图分析 (M动态策略)</h2>
+            <div class="plot-container">
+                <h3>胜率热力图</h3>
+                <img src="data:image/png;base64,{heatmap1_b64}" alt="Win Rate Heatmap">
+            </div>
+            <div class="plot-container">
+                <h3>期望收益率热力图</h3>
+                <img src="data:image/png;base64,{heatmap2_b64}" alt="Expected Return Heatmap">
+            </div>
+            <!-- ======================================================== -->
+            {tables_2d_html} <!-- 新增的二维表格 -->
             {tables_html}
         </body>
         </html>
@@ -9183,7 +10442,25 @@ class MDistributionReporter:
 
             # 4. 生成图表和HTML
             plot1_b64, plot2_b64 = self._generate_combined_plots_base64(all_analysis_results)
-            html_content = self._format_html_content(all_analysis_results, plot1_b64, plot2_b64)
+            # --- 新增：二维分析 (只针对M动态策略) ---
+            m_dynamic_df = self._fetch_data_for_strategy(Q(one_stratage_mode__isnull=True))
+            two_dim_analysis_results = self._analyze_2d_distribution(m_dynamic_df)
+            
+            # --- 新增：生成热力图 ---
+            heatmap_win_rate_b64, heatmap_return_b64 = "", ""
+            if two_dim_analysis_results:
+                heatmap_win_rate_b64, heatmap_return_b64 = self._generate_heatmaps_base64(
+                    two_dim_analysis_results['heatmap_win_rate'],
+                    two_dim_analysis_results['heatmap_return']
+                )
+            html_content = self._format_html_content(
+                all_analysis_results,
+                plot1_b64,
+                plot2_b64,
+                two_dim_analysis_results,
+                heatmap_win_rate_b64,
+                heatmap_return_b64
+            )
             
             subject = f"M值胜率分布回测报告 (多策略版) - {datetime.now().strftime('%Y-%m-%d')}"
             
@@ -11129,4 +12406,1338 @@ class ITradeHandler(ABC):
                  抛出异常或通过其他方式通知失败，以便上层决定是否重试。
         """
         pass
+####文件结束####
+
+####web_manager\__init__.py####
+
+####文件结束####
+
+####web_manager\admin.py####
+from django.contrib import admin
+
+# Register your models here.
+
+####文件结束####
+
+####web_manager\apps.py####
+from django.apps import AppConfig
+
+
+class WebManagerConfig(AppConfig):
+    default_auto_field = 'django.db.models.BigAutoField'
+    name = 'web_manager'
+
+####文件结束####
+
+####web_manager\models.py####
+from django.db import models
+
+# Create your models here.
+
+####文件结束####
+
+####web_manager\tests.py####
+from django.test import TestCase
+
+# Create your tests here.
+
+####文件结束####
+
+####web_manager\urls.py####
+from django.urls import path
+from . import views
+
+urlpatterns = [
+    # 选股管理
+    path('selection/plans', views.selection_plans),
+    path('selection/factors', views.selection_factors),
+    path('selection/run', views.selection_run),
+    path('selection/run_range', views.selection_run_range),
+    # 通用-股票搜索
+    path('stock/search', views.stock_search),
+    # 日线管理
+    path('daily/csi300', views.daily_csi300),
+    path('daily/csi300/fetch', views.daily_csi300_fetch),
+    path('daily/stock', views.daily_stock),
+    path('daily/fetch', views.daily_fetch),
+    path('daily/m_value', views.daily_m_value),
+    # 因子管理
+    path('factors/params', views.factors_params),
+    path('factors/definitions', views.factors_definitions),
+    # 系统管理
+    path('system/schema', views.system_schema),
+    path('system/backtest/results', views.system_backtest_results),
+    # AI配置管理
+    path('ai/source/config', views.ai_source_config),
+    path('ai/model/config', views.ai_model_config),
+    path('ai/generate/text', views.ai_generate_text),
+    path('ai/test/connection', views.ai_test_connection),
+    path('ai/available/models', views.ai_available_models),
+    # AI评测功能
+    path('ai/evaluate/csi300', views.ai_evaluate_csi300),
+    path('ai/evaluate/stock', views.ai_evaluate_stock),
+]
+
+
+
+####文件结束####
+
+####web_manager\views.py####
+from django.http import JsonResponse
+from django.views.decorators.http import require_http_methods
+from django.db import models
+from django.db import connection
+from django.db.models import F
+from datetime import datetime, timedelta
+from decimal import Decimal
+
+from common.models import (
+    DailyTradingPlan, StockInfo, DailyFactorValues, FactorDefinitions,
+    DailyQuotes, IndexQuotesCsi300, StrategyParameters, AiSourceConfig, AiModelConfig
+)
+from data_manager.service.stock_service import StockService
+from selection_manager.service.selection_service import SelectionService
+from ai_manager.service.config_manager import AiConfigManager
+from ai_manager.service.ai_service import AiService, AiServiceException
+
+
+def ok(data=None):
+    return JsonResponse({"code": 0, "msg": "ok", "data": data}, safe=False)
+
+def err(msg, code=1):
+    return JsonResponse({"code": code, "msg": msg, "data": None}, status=200)
+# ----------------------- 通用：股票搜索 -----------------------
+@require_http_methods(["GET"])
+def stock_search(request):
+    """
+    模糊搜索股票：支持代码或名称 contains。
+    参数: q  结果最多返回 20 条
+    """
+    q = request.GET.get('q', '').strip()
+    if not q:
+        return ok([])
+    qs = StockInfo.objects.filter(models.Q(stock_code__icontains=q) | models.Q(stock_name__icontains=q)).values('stock_code', 'stock_name')[:20]
+    return ok(list(qs))
+
+
+# ----------------------- 选股管理 -----------------------
+@require_http_methods(["GET"])
+def selection_plans(request):
+    """
+    查询选股预案：
+    - 输入 date（YYYY-MM-DD）。若当日无预案，则在 [date-30天, date] 内回溯最近一个有预案的交易日并返回。
+    - 输出结构统一为 { date: 实际返回日期, rows: [...] }
+    """
+    plan_date_str = request.GET.get('date')
+    if not plan_date_str:
+        return err("缺少参数: date")
+    try:
+        plan_date = datetime.strptime(plan_date_str, '%Y-%m-%d').date()
+    except Exception:
+        return err("参数 date 格式应为 YYYY-MM-DD")
+
+    # 首先尝试当日
+    base_qs = DailyTradingPlan.objects.filter(plan_date=plan_date)
+    actual_date = plan_date
+    if not base_qs.exists():
+        # 回溯最近交易日，最多30天
+        start_date = plan_date - timedelta(days=30)
+        nearest = (
+            DailyTradingPlan.objects
+            .filter(plan_date__lte=plan_date, plan_date__gte=start_date)
+            .order_by('-plan_date')
+            .values_list('plan_date', flat=True)
+            .first()
+        )
+        if nearest:
+            actual_date = nearest
+            base_qs = DailyTradingPlan.objects.filter(plan_date=actual_date)
+        else:
+            return ok({"date": plan_date_str, "rows": []})
+
+    qs = (
+        base_qs
+        .select_related('stock_code')
+        .order_by('rank')
+        .values(
+            'rank', 'miop', 'maop', 'final_score',
+            'stock_code_id',
+            stock_name=F('stock_code__stock_name')
+        )
+    )
+    rows = []
+    for row in qs:
+        rows.append({
+            'rank': row['rank'],
+            'miop': row['miop'],
+            'maop': row['maop'],
+            'final_score': row['final_score'],
+            'stock_code': row['stock_code_id'],
+            'stock_name': row['stock_name'],
+        })
+    return ok({"date": actual_date.isoformat(), "rows": rows})
+
+
+@require_http_methods(["GET"])
+def selection_factors(request):
+    date_str = request.GET.get('date')
+    stock_code = request.GET.get('stock')
+    if not date_str or not stock_code:
+        return err("缺少参数: date 或 stock")
+    try:
+        plan_date = datetime.strptime(date_str, '%Y-%m-%d').date()
+    except Exception:
+        return err("参数 date 格式应为 YYYY-MM-DD")
+
+    # 因子取上一个交易日（严格小于计划日的最近交易日）
+    prev_trade_date = (
+        DailyQuotes.objects
+        .filter(trade_date__lt=plan_date)
+        .order_by('-trade_date')
+        .values_list('trade_date', flat=True)
+        .first()
+    )
+    if not prev_trade_date:
+        return ok([])
+
+    qs = (
+        DailyFactorValues.objects
+        .filter(stock_code_id=stock_code, trade_date=prev_trade_date)
+        .select_related('factor_code')
+        .values(
+            'raw_value', 'norm_score',
+            'factor_code_id',
+            factor_name=F('factor_code__factor_name')
+        ).order_by('factor_code_id')
+    )
+    data = []
+    for row in qs:
+        raw_val = row['raw_value']
+        norm_val = row['norm_score']
+        try:
+            raw_val = float(raw_val) if raw_val is not None else None
+        except Exception:
+            pass
+        try:
+            norm_val = float(norm_val) if norm_val is not None else None
+        except Exception:
+            pass
+        data.append({
+            'factor_code': row['factor_code_id'],
+            'factor_name': row['factor_name'] or row['factor_code_id'],
+            'raw_value': raw_val,
+            'norm_score': norm_val,
+        })
+    return ok(data)
+
+
+@require_http_methods(["POST"])
+def selection_run(request):
+    try:
+        import json
+        payload = json.loads(request.body.decode('utf-8') or '{}')
+    except Exception:
+        payload = {}
+    date_str = payload.get('date')
+    send_mail = bool(payload.get('send_mail', False))
+    if not date_str:
+        return err("缺少参数: date")
+    try:
+        t1 = datetime.strptime(date_str, '%Y-%m-%d').date()
+    except Exception:
+        return err("参数 date 格式应为 YYYY-MM-DD")
+
+    svc = SelectionService(trade_date=t1, mode='realtime')
+    svc.run_selection()
+    return ok({"executed": True, "send_mail": send_mail})
+
+
+@require_http_methods(["POST"])
+def selection_run_range(request):
+    """
+    在日期区间内回补选股/评分：
+    - 参数：start, end（YYYY-MM-DD）
+    - 逻辑：
+      1) 找出区间内的交易日（来自 tb_daily_quotes 的 distinct trade_date）。
+      2) 预加载滚动窗口所需的行情面板（open/high/low/close/volume/turnover）。
+      3) 对每个交易日，构造 SelectionService(trade_date=该日, mode='backtest', preloaded_panels=窗口切片)，仅执行选股与保存结果；
+         注意 SelectionService 内部会将 ML_STOCK_SCORE 存为当日，并把交易预案写入 T+1。
+    """
+    try:
+        import json
+        payload = json.loads(request.body.decode('utf-8') or '{}')
+    except Exception:
+        payload = {}
+    start = payload.get('start')
+    end = payload.get('end')
+    if not start or not end:
+        return err("缺少参数: start 或 end")
+
+    try:
+        from datetime import date, timedelta
+        s = datetime.strptime(start, '%Y-%m-%d').date()
+        e = datetime.strptime(end, '%Y-%m-%d').date()
+    except Exception:
+        return err("参数 start/end 格式应为 YYYY-MM-DD")
+
+    if s > e:
+        s, e = e, s
+
+    # 1) 找出该区间内的交易日
+    trading_days_qs = (
+        DailyQuotes.objects
+        .filter(trade_date__gte=s, trade_date__lte=e)
+        .order_by('trade_date')
+        .values_list('trade_date', flat=True)
+        .distinct()
+    )
+    trading_days = list(trading_days_qs)
+    if not trading_days:
+        return ok({"executed": False, "msg": "区间内无交易日"})
+
+    # 2) 预加载滚动窗口数据（一次查全量，后续按天切片），向量化效率更高
+    lookback_window_size = 250
+    extra_buffer_days = 20
+    preload_start = trading_days[0] - timedelta(days=lookback_window_size + extra_buffer_days)
+
+    quotes_qs = DailyQuotes.objects.filter(
+        trade_date__gte=preload_start,
+        trade_date__lte=trading_days[-1]
+    ).values('trade_date', 'stock_code_id', 'open', 'high', 'low', 'close', 'volume', 'turnover')
+
+    import pandas as pd
+    df = pd.DataFrame.from_records(quotes_qs)
+    if df.empty:
+        return ok({"executed": False, "msg": "预加载行情为空"})
+    # 转数值
+    for col in ['open', 'high', 'low', 'close', 'volume', 'turnover']:
+        df[col] = pd.to_numeric(df[col], errors='coerce')
+
+    # 构建全量面板
+    panels_all = {}
+    for col in ['open', 'high', 'low', 'close', 'volume', 'turnover']:
+        panel = df.pivot(index='trade_date', columns='stock_code_id', values=col)
+        panels_all[col] = panel
+
+    executed_days = 0
+    for td in trading_days:
+        # 3) 为当前交易日构造滚动窗口切片（按 index 过滤日期）
+        window_start = td - timedelta(days=lookback_window_size)
+        sliced = {}
+        for k, panel in panels_all.items():
+            try:
+                sliced[k] = panel.loc[(panel.index >= window_start) & (panel.index <= td)]
+            except Exception:
+                sliced[k] = panel
+        try:
+            svc = SelectionService(trade_date=td, mode='backtest', preloaded_panels=sliced)
+            svc.run_selection()
+            executed_days += 1
+        except Exception as ex:
+            # 不中断整体流程
+            continue
+
+    return ok({"executed": True, "days": executed_days})
+
+
+# ----------------------- 日线管理 -----------------------
+@require_http_methods(["GET"])
+def daily_csi300(request):
+    start = request.GET.get('start')
+    end = request.GET.get('end')
+    with_m = request.GET.get('with_m', '0') == '1'
+    if not start or not end:
+        return err("缺少参数: start 或 end")
+    try:
+        s = datetime.strptime(start, '%Y-%m-%d').date()
+        e = datetime.strptime(end, '%Y-%m-%d').date()
+    except Exception:
+        return err("参数 start/end 格式应为 YYYY-MM-DD")
+    qs = IndexQuotesCsi300.objects.filter(trade_date__gte=s, trade_date__lte=e).order_by('trade_date')
+    data = list(qs.values('trade_date', 'open', 'high', 'low', 'close', 'volume', 'amount'))
+    if with_m:
+        m_qs = DailyFactorValues.objects.filter(
+            stock_code_id='_MARKET_REGIME_INDICATOR_',
+            factor_code_id='dynamic_M_VALUE',
+            trade_date__gte=s, trade_date__lte=e
+        ).order_by('trade_date').values('trade_date', 'raw_value')
+        m_map = {x['trade_date']: x['raw_value'] for x in m_qs}
+        for row in data:
+            row['m_value'] = m_map.get(row['trade_date'])
+    return ok(data)
+
+
+@require_http_methods(["POST"])
+def daily_csi300_fetch(request):
+    try:
+        import json
+        payload = json.loads(request.body.decode('utf-8') or '{}')
+    except Exception:
+        payload = {}
+    start = payload.get('start')
+    end = payload.get('end')
+    if not start or not end:
+        return err("缺少参数: start 或 end")
+    svc = StockService()
+    svc.update_csi300_index_data(start, end)
+    return ok({"fetched": True})
+
+
+@require_http_methods(["GET"])
+def daily_stock(request):
+    code = request.GET.get('code')
+    start = request.GET.get('start')
+    end = request.GET.get('end')
+    ma = request.GET.get('ma', '')
+    with_vol = request.GET.get('with_vol', '0') == '1'
+    with_amt = request.GET.get('with_amt', '0') == '1'
+    with_m = request.GET.get('with_m', '0') == '1'
+    hfq = request.GET.get('hfq', '0') == '1'
+    if not code or not start or not end:
+        return err("缺少参数: code/start/end")
+    try:
+        s = datetime.strptime(start, '%Y-%m-%d').date()
+        e = datetime.strptime(end, '%Y-%m-%d').date()
+    except Exception:
+        return err("参数 start/end 格式应为 YYYY-MM-DD")
+    qs = DailyQuotes.objects.filter(stock_code_id=code, trade_date__gte=s, trade_date__lte=e).order_by('trade_date')
+    fields = ['trade_date', 'open', 'high', 'low', 'close', 'adjust_factor']
+    if with_vol:
+        fields.append('volume')
+    if with_amt:
+        fields.append('turnover')
+    raw_rows = list(qs.values(*fields))
+    # 转换数值为基础类型，避免前端图表无法渲染
+    data = []
+    for r in raw_rows:
+        factor = float(r.get('adjust_factor') or 1)
+        o = float(r['open'])
+        h = float(r['high'])
+        l = float(r['low'])
+        c = float(r['close'])
+        if hfq:
+            o, h, l, c = o*factor, h*factor, l*factor, c*factor
+        item = {
+            'trade_date': r['trade_date'],
+            'open': o,
+            'high': h,
+            'low': l,
+            'close': c,
+        }
+        if with_vol:
+            item['volume'] = int(r.get('volume') or 0)
+        if with_amt:
+            v = r.get('turnover')
+            item['turnover'] = float(v) if v is not None else None
+        data.append(item)
+    if ma and data:
+        try:
+            ma_list = [int(x) for x in ma.split(',') if x.strip()]
+            closes = [d['close'] for d in data]
+            for m in ma_list:
+                ma_vals = []
+                for i in range(len(closes)):
+                    if i + 1 < m:
+                        ma_vals.append(None)
+                    else:
+                        window = closes[i + 1 - m:i + 1]
+                        ma_vals.append(sum(window) / m)
+                key = f'ma{m}'
+                for i in range(len(data)):
+                    data[i][key] = ma_vals[i]
+        except Exception:
+            pass
+    # 评分线（final_score）改为从因子表取 ML_STOCK_SCORE，按当日对齐
+    if data:
+        try:
+            score_qs = (
+                DailyFactorValues.objects
+                .filter(
+                    stock_code_id=code,
+                    factor_code_id='ML_STOCK_SCORE',
+                    trade_date__gte=s, trade_date__lte=e
+                )
+                .values('trade_date', 'norm_score', 'raw_value')
+            )
+            score_map = {}
+            for row in score_qs:
+                val = row.get('norm_score')
+                if val is None:
+                    val = row.get('raw_value')
+                try:
+                    score_map[row['trade_date']] = float(val) if val is not None else None
+                except Exception:
+                    score_map[row['trade_date']] = None
+
+            for item in data:
+                item['final_score'] = score_map.get(item['trade_date'])
+        except Exception:
+            for item in data:
+                item['final_score'] = item.get('final_score', None)
+    if with_m:
+        pass
+    return ok(data)
+
+
+@require_http_methods(["POST"])
+def daily_fetch(request):
+    try:
+        import json
+        payload = json.loads(request.body.decode('utf-8') or '{}')
+    except Exception:
+        payload = {}
+    codes = payload.get('codes')
+    start = payload.get('start')
+    end = payload.get('end')
+    fill_missing_for_date = payload.get('fill_missing_for_date')
+    if not start or not end:
+        return err("缺少参数: start 或 end")
+
+    svc = StockService()
+    target_codes = None
+    if fill_missing_for_date:
+        try:
+            dt = datetime.strptime(fill_missing_for_date, '%Y-%m-%d').date()
+        except Exception:
+            return err("参数 fill_missing_for_date 格式应为 YYYY-MM-DD")
+        stocks = set(StockInfo.objects.values_list('stock_code', flat=True))
+        have_quotes = set(
+            DailyQuotes.objects.filter(trade_date=dt).values_list('stock_code_id', flat=True)
+        )
+        missing = list(stocks - have_quotes)
+        target_codes = missing
+    elif codes == 'ALL':
+        target_codes = list(StockInfo.objects.values_list('stock_code', flat=True))
+    elif isinstance(codes, list):
+        target_codes = codes
+
+    svc.update_local_a_shares(stock_codes=target_codes, start_date=start, end_date=end)
+    return ok({"fetched": True, "size": 0 if target_codes is None else len(target_codes)})
+
+
+@require_http_methods(["GET"])
+def daily_m_value(request):
+    start = request.GET.get('start')
+    end = request.GET.get('end')
+    if not start or not end:
+        return err("缺少参数: start 或 end")
+    try:
+        s = datetime.strptime(start, '%Y-%m-%d').date()
+        e = datetime.strptime(end, '%Y-%m-%d').date()
+    except Exception:
+        return err("参数 start/end 格式应为 YYYY-MM-DD")
+    qs = DailyFactorValues.objects.filter(
+        stock_code_id='_MARKET_REGIME_INDICATOR_',
+        factor_code_id='dynamic_M_VALUE',
+        trade_date__gte=s, trade_date__lte=e
+    ).order_by('trade_date').values('trade_date', 'raw_value')
+    return ok(list(qs))
+
+
+# ----------------------- 因子管理 -----------------------
+@require_http_methods(["GET", "POST", "PUT", "DELETE"])
+def factors_params(request):
+    if request.method == 'GET':
+        items = StrategyParameters.objects.all().values('param_name', 'param_value', 'group_name', 'description')
+        return ok(list(items))
+    try:
+        import json
+        payload = json.loads(request.body.decode('utf-8') or '{}')
+    except Exception:
+        payload = {}
+    if request.method == 'POST':
+        if not payload.get('param_name'):
+            return err('缺少参数: param_name')
+        StrategyParameters.objects.update_or_create(
+            param_name=payload['param_name'],
+            defaults={
+                'param_value': Decimal(str(payload.get('param_value', '0'))),
+                'group_name': payload.get('group_name') or None,
+                'description': payload.get('description') or None,
+            }
+        )
+        return ok({"saved": True})
+    if request.method == 'PUT':
+        if not payload.get('param_name'):
+            return err('缺少参数: param_name')
+        StrategyParameters.objects.update_or_create(
+            param_name=payload['param_name'],
+            defaults={
+                'param_value': Decimal(str(payload.get('param_value', '0'))),
+                'group_name': payload.get('group_name') or None,
+                'description': payload.get('description') or None,
+            }
+        )
+        return ok({"saved": True})
+    if request.method == 'DELETE':
+        name = request.GET.get('name')
+        if not name:
+            return err('缺少参数: name')
+        StrategyParameters.objects.filter(param_name=name).delete()
+        return ok({"deleted": True})
+
+
+@require_http_methods(["GET", "POST", "PUT", "DELETE"])
+def factors_definitions(request):
+    if request.method == 'GET':
+        items = FactorDefinitions.objects.all().values('factor_code', 'factor_name', 'description', 'direction', 'is_active')
+        return ok(list(items))
+    try:
+        import json
+        payload = json.loads(request.body.decode('utf-8') or '{}')
+    except Exception:
+        payload = {}
+    if request.method == 'POST':
+        if not payload.get('factor_code'):
+            return err('缺少参数: factor_code')
+        FactorDefinitions.objects.update_or_create(
+            factor_code=payload['factor_code'],
+            defaults={
+                'factor_name': payload.get('factor_name', ''),
+                'description': payload.get('description') or None,
+                'direction': payload.get('direction', 'positive'),
+                'is_active': bool(payload.get('is_active', True))
+            }
+        )
+        return ok({"saved": True})
+    if request.method == 'PUT':
+        if not payload.get('factor_code'):
+            return err('缺少参数: factor_code')
+        FactorDefinitions.objects.update_or_create(
+            factor_code=payload['factor_code'],
+            defaults={
+                'factor_name': payload.get('factor_name', ''),
+                'description': payload.get('description') or None,
+                'direction': payload.get('direction', 'positive'),
+                'is_active': bool(payload.get('is_active', True))
+            }
+        )
+        return ok({"saved": True})
+    if request.method == 'DELETE':
+        code = request.GET.get('code')
+        if not code:
+            return err('缺少参数: code')
+        FactorDefinitions.objects.filter(factor_code=code).delete()
+        return ok({"deleted": True})
+
+
+# ----------------------- 系统管理 -----------------------
+@require_http_methods(["GET", "DELETE"])
+def system_schema(request):
+    """
+    GET  列出可删除的 schema（默认前缀 m_dist_）
+      - 可选参数：prefix（默认 m_dist_）
+    DELETE 删除指定 schema：严格白名单与名称校验，执行 DROP SCHEMA <name> CASCADE
+      - 参数：name
+    """
+    if request.method == 'GET':
+        # 支持逗号分隔的多个前缀，默认 m_dist_ 与 backtest_
+        prefix = request.GET.get('prefix', 'm_dist_,backtest_')
+        prefixes = [p.strip() for p in prefix.split(',') if p.strip()]
+        if not prefixes:
+            prefixes = ['m_dist_']
+        try:
+            with connection.cursor() as cur:
+                conditions = " OR ".join(["schema_name LIKE %s"] * len(prefixes))
+                sql = f"""
+                    SELECT schema_name
+                    FROM information_schema.schemata
+                    WHERE {conditions}
+                    ORDER BY schema_name DESC
+                    LIMIT 500
+                """
+                params = [p + '%' for p in prefixes]
+                cur.execute(sql, params)
+                rows = [r[0] for r in cur.fetchall()]
+            return ok(rows)
+        except Exception as e:
+            return err(f"查询 schema 列表失败: {e}")
+
+    # DELETE
+    name = request.GET.get('name')
+    if not name:
+        return err('缺少参数: name')
+
+    # 严格校验：仅允许小写字母/数字/下划线，且必须以允许前缀开头
+    import re
+    if not re.match(r'^[a-z_][a-z0-9_]*$', name or ''):
+        return err('非法的 schema 名称')
+    allowed_prefixes = ['m_dist_', 'backtest_']
+    if not any(name.startswith(p) for p in allowed_prefixes):
+        return err('不在允许的 schema 前缀白名单内')
+
+    # 保护系统/常用 schema
+    protected = {'public', 'pg_catalog', 'information_schema'}
+    if name in protected:
+        return err('禁止删除系统 schema')
+
+    try:
+        with connection.cursor() as cur:
+            # 直接使用经严格校验后的名称，避免 SQL 注入风险
+            cur.execute(f'DROP SCHEMA {name} CASCADE')
+        return ok({"deleted": True, "name": name})
+    except Exception as e:
+        return err(f"删除失败: {e}")
+
+
+@require_http_methods(["GET"])
+def system_backtest_results(request):
+    """
+    回测结果查询（普通回测优先）：
+    - 参数：schema（必填，backtest_* 为普通回测），start/end（可选），rf（年化无风险利率，默认0.02）
+    - 返回：资金曲线、M值、Sharpe(逐日累计)、以及汇总指标（年化收益、最大回撤、Sharpe）
+    """
+    schema = request.GET.get('schema')
+    if not schema:
+        return err('缺少参数: schema')
+    rf_annual = request.GET.get('rf')
+    try:
+        rf_annual = float(rf_annual) if rf_annual is not None else 0.02
+    except Exception:
+        rf_annual = 0.02
+
+    # 仅处理普通回测
+    if not schema.startswith('backtest_'):
+        return ok({"mode": "unsupported", "schema": schema})
+
+    # 校验schema 名称
+    import re
+    if not re.match(r'^[a-z_][a-z0-9_]*$', schema or ''):
+        return err('非法的 schema 名称')
+
+    # 先取该schema中可用日期范围
+    try:
+        with connection.cursor() as cur:
+            cur.execute(f'SELECT MIN(trade_date), MAX(trade_date) FROM {schema}.tb_trade_manager_backtest_daily_log')
+            row = cur.fetchone()
+            if not row or not row[0] or not row[1]:
+                return ok({"schema": schema, "mode": "normal", "dates": [], "equity": [], "m_value": [], "csi300": [], "sharpe": [], "summary": {"annualized": 0, "max_drawdown": 0, "sharpe": 0}, "range": None})
+            min_date, max_date = row[0], row[1]
+    except Exception as e:
+        return err(f"读取回测日期范围失败: {e}")
+
+    # 解析 start/end，默认全区间
+    start_str = request.GET.get('start')
+    end_str = request.GET.get('end')
+    try:
+        s = datetime.strptime(start_str, '%Y-%m-%d').date() if start_str else min_date
+    except Exception:
+        s = min_date
+    try:
+        e = datetime.strptime(end_str, '%Y-%m-%d').date() if end_str else max_date
+    except Exception:
+        e = max_date
+    if s > e:
+        s, e = e, s
+
+    # 查询资金与M值
+    with connection.cursor() as cur:
+        cur.execute(
+            f"""
+            SELECT trade_date, total_assets, market_m_value
+            FROM {schema}.tb_trade_manager_backtest_daily_log
+            WHERE trade_date >= %s AND trade_date <= %s
+            ORDER BY trade_date
+            """,
+            [s, e]
+        )
+        rows = cur.fetchall()
+
+    if not rows:
+        return ok({"schema": schema, "mode": "normal", "dates": [], "equity": [], "m_value": [], "csi300": [], "sharpe": [], "summary": {"annualized": 0, "max_drawdown": 0, "sharpe": 0}, "range": {"min": min_date.isoformat(), "max": max_date.isoformat()}})
+
+    # 计算指标
+    dates = []
+    equity = []
+    m_values = []
+    for d, ta, mv in rows:
+        dates.append(d.isoformat())
+        try:
+            equity.append(float(ta))
+        except Exception:
+            equity.append(None)
+        try:
+            m_values.append(float(mv) if mv is not None else None)
+        except Exception:
+            m_values.append(None)
+
+    # 获取沪深300收盘价序列（用于前端对齐为同起点对照）
+    csi_map = {}
+    try:
+        csi_qs = (
+            IndexQuotesCsi300.objects
+            .filter(trade_date__gte=s, trade_date__lte=e)
+            .order_by('trade_date')
+            .values('trade_date', 'close')
+        )
+        for r in csi_qs:
+            td = r['trade_date']
+            try:
+                csi_map[td.isoformat()] = float(r['close']) if r['close'] is not None else None
+            except Exception:
+                csi_map[td.isoformat()] = None
+    except Exception:
+        csi_map = {}
+    csi_series = [csi_map.get(d) for d in dates]
+
+    # 日收益率
+    import math
+    daily_returns = []
+    for i in range(1, len(equity)):
+        prev = equity[i-1]
+        curr = equity[i]
+        if prev and prev != 0 and curr is not None:
+            daily_returns.append((curr / prev) - 1.0)
+        else:
+            daily_returns.append(0.0)
+
+    # 累计Sharpe（从区间起始滚动到当日），rf按252交易日折算
+    sharpe_series = []
+    rf_daily = (rf_annual or 0.0) / 252.0
+    import statistics
+    for i in range(len(daily_returns)):
+        sub = daily_returns[:i+1]
+        if len(sub) < 2 or all(abs(x - rf_daily) < 1e-12 for x in sub):
+            sharpe_series.append(0.0)
+            continue
+        mean_excess = statistics.fmean([x - rf_daily for x in sub])
+        std = statistics.pstdev(sub)
+        sharpe = (math.sqrt(252.0) * mean_excess / std) if std > 0 else 0.0
+        sharpe_series.append(sharpe)
+    # 对齐长度（与dates一致，首日无收益设0）
+    sharpe_series = [0.0] + sharpe_series
+
+    # 汇总：年化、最大回撤、Sharpe（区间整体）
+    n = len(equity)
+    if n >= 2 and equity[0] and equity[-1]:
+        ann = (equity[-1] / equity[0]) ** (252.0 / (n - 1)) - 1.0
+    else:
+        ann = 0.0
+    # 最大回撤
+    peak = -float('inf')
+    max_dd = 0.0
+    for val in equity:
+        if val is None:
+            continue
+        peak = max(peak, val)
+        if peak > 0:
+            dd = (val / peak) - 1.0
+            max_dd = min(max_dd, dd)
+    # 区间Sharpe
+    if len(daily_returns) >= 2:
+        mean_excess = statistics.fmean([x - rf_daily for x in daily_returns])
+        std = statistics.pstdev(daily_returns)
+        sharpe_all = (math.sqrt(252.0) * mean_excess / std) if std > 0 else 0.0
+    else:
+        sharpe_all = 0.0
+
+    return ok({
+        "schema": schema,
+        "mode": "normal",
+        "start": s.isoformat(),
+        "end": e.isoformat(),
+        "range": {"min": min_date.isoformat(), "max": max_date.isoformat()},
+        "dates": dates,
+        "equity": equity,
+        "m_value": m_values,
+        "csi300": csi_series,
+        "sharpe": sharpe_series,
+        "summary": {"annualized": ann, "max_drawdown": max_dd, "sharpe": sharpe_all},
+        "rf": rf_annual
+    })
+
+
+# ----------------------- AI配置管理 -----------------------
+@require_http_methods(["GET", "POST", "PUT", "DELETE"])
+def ai_source_config(request):
+    """
+    AI源配置管理API
+    GET: 获取所有AI源配置
+    POST: 创建新的AI源配置
+    PUT: 更新AI源配置
+    DELETE: 删除AI源配置
+    """
+    if request.method == 'GET':
+        try:
+            sources = AiConfigManager.get_active_sources()
+            return ok(sources)
+        except Exception as e:
+            return err(f"获取AI源配置失败: {str(e)}")
+    
+    try:
+        import json
+        payload = json.loads(request.body.decode('utf-8') or '{}')
+    except Exception:
+        payload = {}
+    
+    if request.method == 'POST':
+        # 创建AI源配置
+        name = payload.get('name')
+        url = payload.get('url')
+        api_key = payload.get('api_key')
+        description = payload.get('description', '')
+        is_active = payload.get('is_active', True)
+        
+        if not name or not url or not api_key:
+            return err("缺少必要参数: name, url, api_key")
+        
+        try:
+            source = AiConfigManager.create_source_config(
+                name=name,
+                url=url,
+                api_key=api_key,
+                description=description,
+                is_active=is_active
+            )
+            return ok({"id": source.id, "message": "AI源配置创建成功"})
+        except Exception as e:
+            return err(f"创建AI源配置失败: {str(e)}")
+    
+    if request.method == 'PUT':
+        # 更新AI源配置
+        source_id = payload.get('id')
+        if not source_id:
+            return err("缺少参数: id")
+        
+        try:
+            source = AiConfigManager.update_source_config(
+                source_id=source_id,
+                name=payload.get('name'),
+                url=payload.get('url'),
+                api_key=payload.get('api_key'),
+                description=payload.get('description'),
+                is_active=payload.get('is_active')
+            )
+            if source:
+                return ok({"message": "AI源配置更新成功"})
+            else:
+                return err("AI源配置不存在")
+        except Exception as e:
+            return err(f"更新AI源配置失败: {str(e)}")
+    
+    if request.method == 'DELETE':
+        # 删除AI源配置
+        source_id = request.GET.get('id')
+        if not source_id:
+            return err("缺少参数: id")
+        
+        try:
+            success = AiConfigManager.delete_source_config(int(source_id))
+            if success:
+                return ok({"message": "AI源配置删除成功"})
+            else:
+                return err("AI源配置不存在")
+        except Exception as e:
+            return err(f"删除AI源配置失败: {str(e)}")
+
+
+@require_http_methods(["GET", "POST", "PUT", "DELETE"])
+def ai_model_config(request):
+    """
+    AI模型配置管理API
+    GET: 获取所有AI模型配置
+    POST: 创建新的AI模型配置
+    PUT: 更新AI模型配置
+    DELETE: 删除AI模型配置
+    """
+    if request.method == 'GET':
+        try:
+            models = AiConfigManager.get_active_models()
+            return ok(models)
+        except Exception as e:
+            return err(f"获取AI模型配置失败: {str(e)}")
+    
+    try:
+        import json
+        payload = json.loads(request.body.decode('utf-8') or '{}')
+    except Exception:
+        payload = {}
+    
+    if request.method == 'POST':
+        # 创建AI模型配置
+        name = payload.get('name')
+        model_type = payload.get('model_type', 1)
+        source_id = payload.get('source_id')
+        model_id = payload.get('model_id')
+        max_tokens = payload.get('max_tokens', 1000)
+        temperature = payload.get('temperature', 0.7)
+        description = payload.get('description', '')
+        is_active = payload.get('is_active', True)
+        
+        if not name or not source_id or not model_id:
+            return err("缺少必要参数: name, source_id, model_id")
+        
+        try:
+            model = AiConfigManager.create_model_config(
+                name=name,
+                model_type=model_type,
+                source_id=source_id,
+                model_id=model_id,
+                max_tokens=max_tokens,
+                temperature=temperature,
+                description=description,
+                is_active=is_active
+            )
+            return ok({"id": model.id, "message": "AI模型配置创建成功"})
+        except Exception as e:
+            return err(f"创建AI模型配置失败: {str(e)}")
+    
+    if request.method == 'PUT':
+        # 更新AI模型配置
+        model_id = payload.get('id')
+        if not model_id:
+            return err("缺少参数: id")
+        
+        try:
+            model = AiConfigManager.update_model_config(
+                model_id=model_id,
+                name=payload.get('name'),
+                model_type=payload.get('model_type'),
+                source_id=payload.get('source_id'),
+                model_id_str=payload.get('model_id'),
+                max_tokens=payload.get('max_tokens'),
+                temperature=payload.get('temperature'),
+                description=payload.get('description'),
+                is_active=payload.get('is_active')
+            )
+            if model:
+                return ok({"message": "AI模型配置更新成功"})
+            else:
+                return err("AI模型配置不存在")
+        except Exception as e:
+            return err(f"更新AI模型配置失败: {str(e)}")
+    
+    if request.method == 'DELETE':
+        # 删除AI模型配置
+        model_id = request.GET.get('id')
+        if not model_id:
+            return err("缺少参数: id")
+        
+        try:
+            success = AiConfigManager.delete_model_config(int(model_id))
+            if success:
+                return ok({"message": "AI模型配置删除成功"})
+            else:
+                return err("AI模型配置不存在")
+        except Exception as e:
+            return err(f"删除AI模型配置失败: {str(e)}")
+
+
+@require_http_methods(["POST"])
+def ai_generate_text(request):
+    """
+    AI文本生成API
+    POST: 使用配置的AI模型生成文本
+    """
+    try:
+        import json
+        payload = json.loads(request.body.decode('utf-8') or '{}')
+    except Exception:
+        payload = {}
+    
+    prompt = payload.get('prompt')
+    model_name = payload.get('model_name')
+    temperature = payload.get('temperature')
+    max_tokens = payload.get('max_tokens')
+    
+    if not prompt:
+        return err("缺少参数: prompt")
+    
+    try:
+        service = AiService(model_name)
+        result = service.generate_text(
+            prompt=prompt,
+            temperature=temperature,
+            max_tokens=max_tokens
+        )
+        return ok({"result": result})
+    except AiServiceException as e:
+        return err(f"AI服务错误: {str(e)}")
+    except Exception as e:
+        return err(f"AI文本生成失败: {str(e)}")
+
+
+@require_http_methods(["GET"])
+def ai_test_connection(request):
+    """
+    AI服务连接测试API
+    GET: 测试指定AI模型的连接状态
+    """
+    model_name = request.GET.get('model_name')
+    
+    try:
+        service = AiService(model_name)
+        is_connected = service.test_connection()
+        return ok({"connected": is_connected})
+    except Exception as e:
+        return err(f"连接测试失败: {str(e)}")
+
+
+@require_http_methods(["GET"])
+def ai_available_models(request):
+    """
+    获取可用AI模型列表API
+    GET: 返回所有可用的AI模型信息
+    """
+    try:
+        service = AiService()
+        models = service.get_available_models()
+        return ok(models)
+    except Exception as e:
+        return err(f"获取模型列表失败: {str(e)}")
+
+
+@require_http_methods(["POST"])
+def ai_evaluate_csi300(request):
+    """AI评测沪深300指数走势"""
+    try:
+        import json
+        payload = json.loads(request.body.decode('utf-8') or '{}')
+    except Exception:
+        payload = {}
+    
+    model_id = payload.get('model_id')
+    if not model_id:
+        return err("缺少参数: model_id")
+    
+    try:
+        from ai_manager.service.ai_service import AiService
+        from ai_manager.service.config_manager import AiConfigManager
+        from datetime import datetime, timedelta
+        from common.models import IndexQuotesCsi300
+        
+        # 获取半年内的沪深300数据
+        end_date = datetime.now().date()
+        start_date = end_date - timedelta(days=180)  # 约半年
+        
+        # 查询数据
+        qs = IndexQuotesCsi300.objects.filter(
+            trade_date__gte=start_date, 
+            trade_date__lte=end_date
+        ).order_by('trade_date')
+        
+        if not qs.exists():
+            return err("没有找到沪深300历史数据")
+        
+        # 构建数据格式
+        market_data = {}
+        for record in qs:
+            date_str = record.trade_date.strftime('%Y-%m-%d')
+            market_data[date_str] = {
+                'high': float(record.high),
+                'low': float(record.low),
+                'open': float(record.open),
+                'close': float(record.close),
+                'volume': float(record.volume),
+                'amount': float(record.amount)
+            }
+        
+        # 构建提示词
+        prompt = f"""
+你是一位专业的金融分析师，现在需要分析沪深300指数的历史数据并预测后续走势。
+
+历史数据（按日期从远到近排列）：
+{json.dumps(market_data, ensure_ascii=False, indent=2)}
+
+请基于以上历史数据，分析沪深300指数的后续走势，并按照以下JSON格式输出结果：
+示例:
+{{
+    "综合看涨分数": 85,
+    "趋势动能看涨分数": 78,
+    "均值回归看涨分数": 92,
+    "质量波动看涨分数": 88,
+    "总结": "基于技术分析，沪深300指数呈现强劲上升趋势，成交量放大，建议关注后续突破机会。"
+}}
+
+评分标准：
+- 分数范围：-100到+100
+- 正数表示看涨，负数表示看跌
+- 综合看涨分数：整体市场趋势的综合评估
+- 趋势动能看涨分数：基于价格趋势和动量的评估，考虑均线斜率，均线排列，ADX等
+- 均值回归看涨分数：基于价格偏离均值的回归可能性评估，考虑乖离率，RSI等
+- 质量波动看涨分数：基于成交量和价格波动的质量评估，考虑回撤，收益率标准差等
+- 综合看涨分数：基于三个维度的综合评估
+- 总结：200字以内的分析总结
+
+请严格按照JSON格式输出，不要包含任何其他文字。
+"""
+        
+        # 调用AI服务
+        ai_service = AiService()
+        result = ai_service.generate_text(prompt, model_id=model_id)
+        
+        if not result:
+            return err("AI分析失败，请稍后重试")
+        
+        # 解析AI返回的JSON结果
+        try:
+            # 清理AI返回的文本，提取JSON部分
+            result_text = result.strip()
+            if result_text.startswith('```json'):
+                result_text = result_text[7:]
+            if result_text.endswith('```'):
+                result_text = result_text[:-3]
+            
+            ai_result = json.loads(result_text)
+            
+            # 验证结果格式
+            required_fields = ['综合看涨分数', '趋势动能看涨分数', '均值回归看涨分数', '质量波动看涨分数', '总结']
+            for field in required_fields:
+                if field not in ai_result:
+                    return err(f"AI返回结果缺少字段: {field}")
+            
+            # 验证分数范围
+            score_fields = ['综合看涨分数', '趋势动能看涨分数', '均值回归看涨分数', '质量波动看涨分数']
+            for field in score_fields:
+                score = ai_result[field]
+                if not isinstance(score, (int, float)) or score < -100 or score > 100:
+                    return err(f"分数 {field} 超出范围(-100到+100): {score}")
+            
+            return ok({
+                'analysis_result': ai_result,
+                'data_period': {
+                    'start_date': start_date.strftime('%Y-%m-%d'),
+                    'end_date': end_date.strftime('%Y-%m-%d'),
+                    'data_count': len(market_data)
+                }
+            })
+            
+        except json.JSONDecodeError as e:
+            return err(f"AI返回结果格式错误: {str(e)}")
+        
+    except Exception as e:
+        return err(f"AI评测失败: {str(e)}")
+
+
+@require_http_methods(["POST"])
+def ai_evaluate_stock(request):
+    """AI评测个股走势"""
+    try:
+        import json
+        payload = json.loads(request.body.decode('utf-8') or '{}')
+    except Exception:
+        payload = {}
+    
+    model_id = payload.get('model_id')
+    stock_code = payload.get('stock_code')
+    stock_name = payload.get('stock_name')
+    
+    if not model_id:
+        return err("缺少参数: model_id")
+    if not stock_code:
+        return err("缺少参数: stock_code")
+    
+    try:
+        from ai_manager.service.ai_service import AiService
+        from ai_manager.service.config_manager import AiConfigManager
+        from datetime import datetime, timedelta
+        from common.models import DailyQuotes
+        
+        # 获取半年内的个股数据
+        end_date = datetime.now().date()
+        start_date = end_date - timedelta(days=180)  # 约半年
+        
+        # 查询数据
+        qs = DailyQuotes.objects.filter(
+            stock_code=stock_code,
+            trade_date__gte=start_date, 
+            trade_date__lte=end_date
+        ).order_by('trade_date')
+        
+        if not qs.exists():
+            return err(f"没有找到股票 {stock_code} 的历史数据")
+        
+        # 构建数据格式
+        market_data = {}
+        for record in qs:
+            date_str = record.trade_date.strftime('%Y-%m-%d')
+            market_data[date_str] = {
+                'high': float(record.high),
+                'low': float(record.low),
+                'open': float(record.open),
+                'close': float(record.close),
+                'hfq_close': float(record.hfq_close),
+                'volume': float(record.volume),
+                'amount': float(record.turnover)
+            }
+        
+        # 构建AI提示词
+        stock_display_name = f"{stock_name}({stock_code})" if stock_name else stock_code
+        prompt = f"""你是一位专业的金融分析师，现在需要分析一只股票的未来走势。
+
+股票信息：{stock_display_name}
+
+历史数据（最近180个交易日，按日期从远到近排列）：
+{json.dumps(market_data, ensure_ascii=False, indent=2)}
+
+数据字段说明：
+- high/low/open/close: 不复权价格
+- hfq_close: 后复权收盘价（已考虑分红送股影响，更适合技术分析）
+- volume: 成交量（股）
+- amount: 成交额（元）
+
+请基于以上历史数据，从技术分析角度分析该股票的未来走势。请严格按照以下JSON格式输出分析结果：
+
+{{
+    "综合看涨分数": 数值(-100到+100),
+    "趋势动能看涨分数": 数值(-100到+100),
+    "均值回归看涨分数": 数值(-100到+100),
+    "质量波动看涨分数": 数值(-100到+100),
+    "总结": "200字以内的分析总结"
+}}
+
+评分标准：
+- 分数范围：-100到+100
+- 正数表示看涨，负数表示看跌
+- 综合看涨分数：整体的综合评估
+- 趋势动能看涨分数：基于价格趋势和动量的评估，考虑均线斜率，均线排列，ADX等
+- 均值回归看涨分数：基于价格偏离均值的回归可能性评估，考虑乖离率，RSI等
+- 质量波动看涨分数：基于成交量和价格波动的质量评估，考虑回撤，收益率标准差等
+- 综合看涨分数：基于三个维度的综合评估
+- 总结：200字以内的分析总结
+
+请确保输出的是有效的JSON格式，不要包含任何其他文字。"""
+
+        # 调用AI服务
+        ai_service = AiService()
+        ai_response = ai_service.generate_text(prompt, model_id=model_id)
+        
+        # 解析AI返回的JSON
+        import re
+        # 提取JSON部分
+        json_match = re.search(r'\{.*\}', ai_response, re.DOTALL)
+        if not json_match:
+            return err("AI返回结果格式错误：未找到有效的JSON")
+        
+        ai_result = json.loads(json_match.group())
+        
+        # 验证必需字段
+        required_fields = ['综合看涨分数', '趋势动能看涨分数', '均值回归看涨分数', '质量波动看涨分数', '总结']
+        for field in required_fields:
+            if field not in ai_result:
+                return err(f"AI返回结果缺少字段: {field}")
+        
+        # 验证分数范围
+        score_fields = ['综合看涨分数', '趋势动能看涨分数', '均值回归看涨分数', '质量波动看涨分数']
+        for field in score_fields:
+            score = ai_result[field]
+            if not isinstance(score, (int, float)) or score < -100 or score > 100:
+                return err(f"分数 {field} 超出范围(-100到+100): {score}")
+        
+        return ok({
+            'analysis_result': ai_result,
+            'data_period': {
+                'start_date': start_date.strftime('%Y-%m-%d'),
+                'end_date': end_date.strftime('%Y-%m-%d'),
+                'data_count': len(market_data)
+            }
+        })
+        
+    except json.JSONDecodeError as e:
+        return err(f"AI返回结果格式错误: {str(e)}")
+    
+    except Exception as e:
+        return err(f"AI评测失败: {str(e)}")
+
+
 ####文件结束####
