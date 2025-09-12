@@ -31,7 +31,11 @@
       title="AI评测沪深300走势"
       :visible.sync="showAiDialog"
       :width="isMobile ? '95%' : '600px'"
-      :class="{ 'ai-evaluation-mobile': isMobile, 'ai-evaluation-dialog': !isMobile }"
+      :class="{ 
+        'ai-evaluation-mobile': isMobile, 
+        'ai-evaluation-dialog': !isMobile,
+        'has-result': !!aiResult
+      }"
       :append-to-body="isMobile"
       :close-on-click-modal="false"
       :close-on-press-escape="true"
@@ -63,56 +67,115 @@
       
       <!-- 评测结果 -->
       <div v-if="aiResult" class="ai-evaluation-result">
-        <!-- 综合分数 -->
-        <div class="overall-score">
-          <div class="score-circle" :class="getScoreClass(aiResult.analysis_result['综合看涨分数'])">
-            <div class="score-value">{{ aiResult.analysis_result['综合看涨分数'] }}</div>
-            <div class="score-label">综合{{ getScoreLabel(aiResult.analysis_result['综合看涨分数']) }}</div>
-          </div>
-        </div>
-        
-        <!-- 子分数 -->
-        <div class="sub-scores">
-          <div class="score-item">
-            <div class="score-name">趋势动能{{ getScoreLabel(aiResult.analysis_result['趋势动能看涨分数']) }}</div>
-            <el-progress 
-              :percentage="Math.abs(aiResult.analysis_result['趋势动能看涨分数'])" 
-              :color="getProgressColor(aiResult.analysis_result['趋势动能看涨分数'])"
-              :show-text="false">
-            </el-progress>
-            <div class="score-value-text">{{ aiResult.analysis_result['趋势动能看涨分数'] }}</div>
+        <!-- 竖屏模式：紧凑布局 -->
+        <div v-if="isMobile" class="mobile-compact-layout">
+          <!-- 综合分数 - 水平布局 -->
+          <div class="mobile-overall-score">
+            <div class="score-circle" :class="getScoreClass(aiResult.analysis_result['综合看涨分数'])">
+              <div class="score-value">{{ aiResult.analysis_result['综合看涨分数'] }}</div>
+              <div class="score-label">综合{{ getScoreLabel(aiResult.analysis_result['综合看涨分数']) }}</div>
+            </div>
+            <div class="mobile-summary-text">
+              <h4>AI分析总结</h4>
+              <p>{{ aiResult.analysis_result['总结'] }}</p>
+            </div>
           </div>
           
-          <div class="score-item">
-            <div class="score-name">均值回归{{ getScoreLabel(aiResult.analysis_result['均值回归看涨分数']) }}</div>
-            <el-progress 
-              :percentage="Math.abs(aiResult.analysis_result['均值回归看涨分数'])" 
-              :color="getProgressColor(aiResult.analysis_result['均值回归看涨分数'])"
-              :show-text="false">
-            </el-progress>
-            <div class="score-value-text">{{ aiResult.analysis_result['均值回归看涨分数'] }}</div>
+          <!-- 子分数 - 网格布局 -->
+          <div class="mobile-sub-scores">
+            <div class="mobile-score-item">
+              <div class="score-name">趋势动能</div>
+              <div class="score-value-text">{{ aiResult.analysis_result['趋势动能看涨分数'] }}</div>
+              <el-progress 
+                :percentage="Math.abs(aiResult.analysis_result['趋势动能看涨分数'])" 
+                :color="getProgressColor(aiResult.analysis_result['趋势动能看涨分数'])"
+                :show-text="false"
+                :stroke-width="4">
+              </el-progress>
+            </div>
+            
+            <div class="mobile-score-item">
+              <div class="score-name">均值回归</div>
+              <div class="score-value-text">{{ aiResult.analysis_result['均值回归看涨分数'] }}</div>
+              <el-progress 
+                :percentage="Math.abs(aiResult.analysis_result['均值回归看涨分数'])" 
+                :color="getProgressColor(aiResult.analysis_result['均值回归看涨分数'])"
+                :show-text="false"
+                :stroke-width="4">
+              </el-progress>
+            </div>
+            
+            <div class="mobile-score-item">
+              <div class="score-name">质量波动</div>
+              <div class="score-value-text">{{ aiResult.analysis_result['质量波动看涨分数'] }}</div>
+              <el-progress 
+                :percentage="Math.abs(aiResult.analysis_result['质量波动看涨分数'])" 
+                :color="getProgressColor(aiResult.analysis_result['质量波动看涨分数'])"
+                :show-text="false"
+                :stroke-width="4">
+              </el-progress>
+            </div>
           </div>
           
-          <div class="score-item">
-            <div class="score-name">质量波动{{ getScoreLabel(aiResult.analysis_result['质量波动看涨分数']) }}</div>
-            <el-progress 
-              :percentage="Math.abs(aiResult.analysis_result['质量波动看涨分数'])" 
-              :color="getProgressColor(aiResult.analysis_result['质量波动看涨分数'])"
-              :show-text="false">
-            </el-progress>
-            <div class="score-value-text">{{ aiResult.analysis_result['质量波动看涨分数'] }}</div>
+          <!-- 数据信息 -->
+          <div class="mobile-data-info">
+            <p><strong>分析数据：</strong>{{ aiResult.data_period.start_date }} 至 {{ aiResult.data_period.end_date }} ({{ aiResult.data_period.data_count }}个交易日)</p>
           </div>
         </div>
         
-        <!-- 总结 -->
-        <div class="ai-summary">
-          <h4>AI分析总结</h4>
-          <p>{{ aiResult.analysis_result['总结'] }}</p>
-        </div>
-        
-        <!-- 数据信息 -->
-        <div class="data-info">
-          <p><strong>分析数据：</strong>{{ aiResult.data_period.start_date }} 至 {{ aiResult.data_period.end_date }} ({{ aiResult.data_period.data_count }}个交易日)</p>
+        <!-- PC模式：原有布局 -->
+        <div v-else class="desktop-layout">
+          <!-- 综合分数 -->
+          <div class="overall-score">
+            <div class="score-circle" :class="getScoreClass(aiResult.analysis_result['综合看涨分数'])">
+              <div class="score-value">{{ aiResult.analysis_result['综合看涨分数'] }}</div>
+              <div class="score-label">综合{{ getScoreLabel(aiResult.analysis_result['综合看涨分数']) }}</div>
+            </div>
+          </div>
+          
+          <!-- 子分数 -->
+          <div class="sub-scores">
+            <div class="score-item">
+              <div class="score-name">趋势动能{{ getScoreLabel(aiResult.analysis_result['趋势动能看涨分数']) }}</div>
+              <el-progress 
+                :percentage="Math.abs(aiResult.analysis_result['趋势动能看涨分数'])" 
+                :color="getProgressColor(aiResult.analysis_result['趋势动能看涨分数'])"
+                :show-text="false">
+              </el-progress>
+              <div class="score-value-text">{{ aiResult.analysis_result['趋势动能看涨分数'] }}</div>
+            </div>
+            
+            <div class="score-item">
+              <div class="score-name">均值回归{{ getScoreLabel(aiResult.analysis_result['均值回归看涨分数']) }}</div>
+              <el-progress 
+                :percentage="Math.abs(aiResult.analysis_result['均值回归看涨分数'])" 
+                :color="getProgressColor(aiResult.analysis_result['均值回归看涨分数'])"
+                :show-text="false">
+              </el-progress>
+              <div class="score-value-text">{{ aiResult.analysis_result['均值回归看涨分数'] }}</div>
+            </div>
+            
+            <div class="score-item">
+              <div class="score-name">质量波动{{ getScoreLabel(aiResult.analysis_result['质量波动看涨分数']) }}</div>
+              <el-progress 
+                :percentage="Math.abs(aiResult.analysis_result['质量波动看涨分数'])" 
+                :color="getProgressColor(aiResult.analysis_result['质量波动看涨分数'])"
+                :show-text="false">
+              </el-progress>
+              <div class="score-value-text">{{ aiResult.analysis_result['质量波动看涨分数'] }}</div>
+            </div>
+          </div>
+          
+          <!-- 总结 -->
+          <div class="ai-summary">
+            <h4>AI分析总结</h4>
+            <p>{{ aiResult.analysis_result['总结'] }}</p>
+          </div>
+          
+          <!-- 数据信息 -->
+          <div class="data-info">
+            <p><strong>分析数据：</strong>{{ aiResult.data_period.start_date }} 至 {{ aiResult.data_period.end_date }} ({{ aiResult.data_period.data_count }}个交易日)</p>
+          </div>
         </div>
       </div>
       
@@ -489,16 +552,27 @@ export default {
   margin-left: 10px;
 }
 
-/* 桌面端对话框优化 - 避免滚动条 */
+/* 桌面端对话框优化 - 内容驱动高度 */
 .ai-evaluation-dialog .el-dialog {
   max-height: 90vh !important;
   overflow: hidden !important;
 }
 
 .ai-evaluation-dialog .el-dialog__body {
-  max-height: calc(90vh - 120px) !important;
   overflow-y: auto !important;
   padding: 20px !important;
+  /* 移除固定高度，让内容决定高度 */
+  max-height: none !important;
+}
+
+/* 当没有分析结果时，限制最大高度，保持紧凑 */
+.ai-evaluation-dialog:not(.has-result) .el-dialog__body {
+  max-height: calc(90vh - 120px) !important;
+}
+
+/* 当有分析结果时，允许更大的高度 */
+.ai-evaluation-dialog.has-result .el-dialog__body {
+  max-height: calc(90vh - 100px) !important;
 }
 
 /* 移动端对话框样式 */
@@ -544,11 +618,23 @@ export default {
 
 .ai-evaluation-mobile .el-dialog__body {
   padding: 12px 16px;
-  max-height: calc(100vh - 140px);
   overflow-y: auto;
   background: #fff;
   flex: 1;
   min-height: 0;
+  -webkit-overflow-scrolling: touch;
+  /* 移除固定高度，让内容决定高度 */
+  max-height: none !important;
+}
+
+/* 当没有分析结果时，限制最大高度，保持紧凑 */
+.ai-evaluation-mobile:not(.has-result) .el-dialog__body {
+  max-height: calc(100vh - 200px);
+}
+
+/* 当有分析结果时，允许更大的高度 */
+.ai-evaluation-mobile.has-result .el-dialog__body {
+  max-height: calc(100vh - 160px);
 }
 
 .ai-evaluation-mobile .el-dialog__footer {
@@ -589,49 +675,140 @@ export default {
 /* 响应式设计 */
 @media (max-width: 768px) {
   .score-circle {
-    width: 80px;
-    height: 80px;
+    width: 70px;
+    height: 70px;
   }
   
   .score-value {
-    font-size: 24px;
+    font-size: 20px;
   }
   
   .score-label {
-    font-size: 10px;
+    font-size: 9px;
   }
   
   .ai-summary {
-    padding: 12px;
+    padding: 8px;
+    margin: 8px 0;
   }
   
   .ai-summary h4 {
-    font-size: 13px;
-  }
-  
-  .ai-summary p {
-    font-size: 12px;
-  }
-  
-  .score-item {
-    margin-bottom: 12px;
-  }
-  
-  .score-name {
     font-size: 12px;
     margin-bottom: 4px;
   }
   
+  .ai-summary p {
+    font-size: 11px;
+    line-height: 1.4;
+    margin: 0;
+  }
+  
+  .score-item {
+    margin-bottom: 8px;
+  }
+  
+  .score-name {
+    font-size: 11px;
+    margin-bottom: 2px;
+  }
+  
   .score-value-text {
-    font-size: 13px;
+    font-size: 12px;
   }
   
   .data-info {
-    padding: 10px;
+    padding: 6px;
+    margin: 4px 0;
   }
   
   .data-info p {
+    font-size: 10px;
+    margin: 0;
+  }
+  
+  /* 优化子分数布局，使其更紧凑 */
+  .sub-scores {
+    margin: 8px 0;
+  }
+  
+  /* 优化整体分数区域 */
+  .overall-score {
+    margin: 8px 0;
+  }
+  
+  /* 移动端紧凑布局样式 */
+  .mobile-compact-layout {
+    padding: 0;
+  }
+  
+  .mobile-overall-score {
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+    margin-bottom: 12px;
+    padding: 8px;
+    background: #f8fafc;
+    border-radius: 8px;
+  }
+  
+  .mobile-summary-text {
+    flex: 1;
+    min-width: 0;
+  }
+  
+  .mobile-summary-text h4 {
+    font-size: 12px;
+    margin: 0 0 4px 0;
+    color: #374151;
+  }
+  
+  .mobile-summary-text p {
     font-size: 11px;
+    line-height: 1.4;
+    margin: 0;
+    color: #6b7280;
+  }
+  
+  .mobile-sub-scores {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 8px;
+    margin-bottom: 12px;
+  }
+  
+  .mobile-score-item {
+    text-align: center;
+    padding: 8px 4px;
+    background: #f9fafb;
+    border-radius: 6px;
+    border: 1px solid #e5e7eb;
+  }
+  
+  .mobile-score-item .score-name {
+    font-size: 10px;
+    color: #6b7280;
+    margin-bottom: 4px;
+    font-weight: 500;
+  }
+  
+  .mobile-score-item .score-value-text {
+    font-size: 12px;
+    font-weight: 600;
+    margin-bottom: 4px;
+    color: #374151;
+  }
+  
+  .mobile-data-info {
+    padding: 6px 8px;
+    background: #f3f4f6;
+    border-radius: 6px;
+    text-align: center;
+  }
+  
+  .mobile-data-info p {
+    font-size: 10px;
+    margin: 0;
+    color: #6b7280;
   }
 }
 </style>
