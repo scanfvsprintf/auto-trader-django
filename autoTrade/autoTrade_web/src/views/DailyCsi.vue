@@ -31,6 +31,7 @@
       title="AI评测沪深300走势"
       :visible.sync="showAiDialog"
       :width="isMobile ? '95%' : '600px'"
+      :top="isMobile ? '5vh' : '15vh'"
       :class="{ 
         'ai-evaluation-mobile': isMobile, 
         'ai-evaluation-dialog': !isMobile,
@@ -242,38 +243,6 @@ export default {
     isPortraitMobile(){ return this.isMobile && this.isPortrait }
   },
   methods: {
-    // 动态调整对话框高度
-    adjustDialogHeight() {
-      this.$nextTick(() => {
-        const dialog = document.querySelector('.ai-evaluation-mobile .el-dialog, .ai-evaluation-dialog .el-dialog');
-        if (dialog) {
-          // 移除固定高度，让内容决定高度
-          dialog.style.height = 'auto';
-          dialog.style.maxHeight = 'none';
-          
-          // 重新计算并设置合适的高度
-          const content = dialog.querySelector('.el-dialog__body');
-          if (content) {
-            const contentHeight = content.scrollHeight;
-            const headerHeight = dialog.querySelector('.el-dialog__header')?.offsetHeight || 0;
-            const footerHeight = dialog.querySelector('.el-dialog__footer')?.offsetHeight || 0;
-            const totalHeight = contentHeight + headerHeight + footerHeight;
-            
-            // 限制最大高度
-            const maxHeight = window.innerHeight * 0.9;
-            if (totalHeight > maxHeight) {
-              dialog.style.maxHeight = maxHeight + 'px';
-              content.style.maxHeight = (maxHeight - headerHeight - footerHeight) + 'px';
-              content.style.overflowY = 'auto';
-            } else {
-              dialog.style.maxHeight = totalHeight + 'px';
-              content.style.maxHeight = 'none';
-              content.style.overflowY = 'visible';
-            }
-          }
-        }
-      });
-    },
     
     fetchCSI(){
       if (!this.csiRange || this.csiRange.length!==2) { this.$message.error('请选择时间区间'); return }
@@ -341,8 +310,6 @@ export default {
     showAiEvaluationDialog() {
       this.showAiDialog = true
       this.resetAiEvaluation()
-      // 调整对话框高度
-      setTimeout(() => this.adjustDialogHeight(), 100);
     },
     
     resetAiEvaluation() {
@@ -390,9 +357,6 @@ export default {
           this.aiProgressStatus = 'success'
           this.aiProgressText = '分析完成！'
           this.aiResult = response.data.data
-          
-          // 分析完成后调整对话框高度
-          setTimeout(() => this.adjustDialogHeight(), 100);
           
           setTimeout(() => {
             this.aiEvaluating = false
@@ -599,19 +563,6 @@ export default {
 .ai-evaluation-dialog .el-dialog__body {
   overflow-y: auto !important;
   padding: 20px !important;
-  /* 移除固定高度，让内容决定高度 */
-  max-height: none !important;
-  height: auto !important;
-}
-
-/* 当没有分析结果时，限制最大高度，保持紧凑 */
-.ai-evaluation-dialog:not(.has-result) .el-dialog__body {
-  max-height: calc(90vh - 120px) !important;
-}
-
-/* 当有分析结果时，允许更大的高度 */
-.ai-evaluation-dialog.has-result .el-dialog__body {
-  max-height: calc(90vh - 100px) !important;
 }
 
 /* 移动端对话框样式 */
@@ -632,13 +583,6 @@ export default {
   flex-direction: column !important;
 }
 
-/* 强制对话框高度自适应 */
-.ai-evaluation-mobile .el-dialog,
-.ai-evaluation-mobile .el-dialog__wrapper {
-  height: auto !important;
-  max-height: none !important;
-}
-
 .ai-evaluation-mobile .el-dialog__wrapper {
   background-color: rgba(0, 0, 0, 0.5) !important;
   position: fixed !important;
@@ -647,9 +591,6 @@ export default {
   width: 100% !important;
   height: 100vh !important;
   z-index: 4999 !important;
-  display: flex !important;
-  align-items: center !important;
-  justify-content: center !important;
 }
 
 .ai-evaluation-mobile .el-dialog__header {
@@ -666,25 +607,12 @@ export default {
 }
 
 .ai-evaluation-mobile .el-dialog__body {
-  padding: 12px 16px !important;
-  overflow-y: auto !important;
-  background: #fff !important;
-  flex: 1 !important;
-  min-height: 0 !important;
-  -webkit-overflow-scrolling: touch !important;
-  /* 移除固定高度，让内容决定高度 */
-  max-height: none !important;
-  height: auto !important;
-}
-
-/* 当没有分析结果时，限制最大高度，保持紧凑 */
-.ai-evaluation-mobile:not(.has-result) .el-dialog__body {
-  max-height: calc(100vh - 200px) !important;
-}
-
-/* 当有分析结果时，允许更大的高度 */
-.ai-evaluation-mobile.has-result .el-dialog__body {
-  max-height: calc(100vh - 160px) !important;
+  padding: 12px 16px;
+  overflow-y: auto;
+  background: #fff;
+  flex: 1;
+  min-height: 0;
+  -webkit-overflow-scrolling: touch;
 }
 
 .ai-evaluation-mobile .el-dialog__footer {
