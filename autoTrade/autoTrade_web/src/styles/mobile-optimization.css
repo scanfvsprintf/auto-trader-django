@@ -9,14 +9,46 @@
   --initial-viewport-height: 100vh;
   --is-mobile: 0;
   --is-portrait: 0;
+  --locked-viewport: 0;
 }
 
-/* 键盘弹起时的全局样式 */
+/* 视口锁定状态 */
+body.viewport-locked {
+  height: var(--viewport-height, 100vh) !important;
+  max-height: var(--viewport-height, 100vh) !important;
+  overflow: hidden !important;
+  position: relative !important;
+}
+
+body.viewport-locked html {
+  height: var(--viewport-height, 100vh) !important;
+  max-height: var(--viewport-height, 100vh) !important;
+  overflow: hidden !important;
+}
+
+/* 键盘弹起时的全局样式 - 更激进的方案 */
 body.keyboard-open {
   position: fixed !important;
   width: 100% !important;
+  height: 100% !important;
   top: 0 !important;
+  left: 0 !important;
   overflow: hidden !important;
+  /* 防止任何滚动 */
+  touch-action: none !important;
+  -webkit-overflow-scrolling: auto !important;
+}
+
+/* 键盘弹起时强制固定所有容器 */
+body.keyboard-open .layout,
+body.keyboard-open .layout-mobile-portrait,
+body.keyboard-open .selection-root,
+body.keyboard-open .ai-config-root,
+body.keyboard-open .system-root {
+  height: var(--viewport-height, 100vh) !important;
+  max-height: var(--viewport-height, 100vh) !important;
+  overflow: hidden !important;
+  position: relative !important;
 }
 
 /* 移动端输入框优化 */
@@ -46,12 +78,33 @@ body.keyboard-open {
     transform: translateZ(0) !important;
   }
   
-  /* 输入框聚焦时的视口稳定 */
+  /* 输入框聚焦时的视口稳定 - 更激进的方案 */
   .el-input.is-active,
   .el-select.is-active,
   .el-date-editor.is-active {
     position: relative !important;
     z-index: 1000 !important;
+    /* 强制固定位置，防止任何移动 */
+    transform: translateZ(0) !important;
+    will-change: auto !important;
+  }
+  
+  /* 输入框聚焦时立即稳定视口 */
+  .el-input__inner:focus,
+  .el-textarea__inner:focus,
+  .el-select .el-input__inner:focus {
+    /* 立即触发视口稳定 */
+    animation: none !important;
+    transition: none !important;
+  }
+  
+  /* 防止输入框聚焦时的任何动画 */
+  .el-input.is-active .el-input__inner,
+  .el-select.is-active .el-input__inner,
+  .el-date-editor.is-active .el-range-input {
+    animation: none !important;
+    transition: none !important;
+    transform: translateZ(0) !important;
   }
 }
 
@@ -65,7 +118,7 @@ body.keyboard-open {
   }
 }
 
-/* 移动端布局稳定性 */
+/* 移动端布局稳定性 - 更激进的方案 */
 @media (max-width: 768px) {
   .layout,
   .layout-mobile-portrait,
@@ -73,6 +126,25 @@ body.keyboard-open {
     height: var(--viewport-height, 100vh) !important;
     max-height: var(--viewport-height, 100vh) !important;
     overflow: hidden !important;
+  }
+  
+  /* 完全阻止视口变化 */
+  html, body {
+    height: var(--viewport-height, 100vh) !important;
+    max-height: var(--viewport-height, 100vh) !important;
+    overflow: hidden !important;
+    position: relative !important;
+  }
+  
+  /* 强制所有滚动容器使用固定高度 */
+  .layout-content,
+  .layout-mobile-content,
+  .selection-content,
+  .scroll-area {
+    height: calc(var(--viewport-height, 100vh) - 100px) !important;
+    max-height: calc(var(--viewport-height, 100vh) - 100px) !important;
+    overflow-y: auto !important;
+    overflow-x: hidden !important;
   }
 }
 

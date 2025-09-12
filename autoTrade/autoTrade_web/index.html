@@ -2,8 +2,37 @@
 <html lang="zh-CN">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, user-scalable=no" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, user-scalable=no, maximum-scale=1.0, minimum-scale=1.0" />
     <title>量化交易管理端</title>
+    <style>
+      /* 立即锁定视口，防止任何变化 */
+      html, body {
+        height: 100vh !important;
+        max-height: 100vh !important;
+        overflow: hidden !important;
+        position: relative !important;
+        -webkit-overflow-scrolling: auto !important;
+      }
+      
+      /* 移动端立即应用 */
+      @media (max-width: 768px) {
+        html, body {
+          height: 100vh !important;
+          max-height: 100vh !important;
+          overflow: hidden !important;
+          position: fixed !important;
+          width: 100% !important;
+          top: 0 !important;
+          left: 0 !important;
+        }
+        
+        #app {
+          height: 100vh !important;
+          max-height: 100vh !important;
+          overflow: hidden !important;
+        }
+      }
+    </style>
   </head>
   <body>
     <div id="app"></div>
