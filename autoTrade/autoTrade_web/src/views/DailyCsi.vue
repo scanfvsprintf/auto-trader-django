@@ -129,7 +129,7 @@
 <script>
 import axios from 'axios'
 import * as echarts from 'echarts'
-import viewportManager from '@/utils/viewportManager'
+import smartViewportManager from '@/utils/smartViewportManager'
 
 export default {
   name: 'DailyCsi',
@@ -331,7 +331,7 @@ export default {
     },
     updateDeviceInfo(){
       // 从视口管理器获取最新的设备信息
-      const viewportInfo = viewportManager.getViewportInfo();
+      const viewportInfo = smartViewportManager.getViewportInfo();
       this.isMobile = viewportInfo.isMobile;
       this.isPortrait = viewportInfo.isPortrait;
     }

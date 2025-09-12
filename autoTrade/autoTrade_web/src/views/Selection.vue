@@ -105,7 +105,7 @@
 
 <script>
 import axios from 'axios'
-import viewportManager from '@/utils/viewportManager'
+import smartViewportManager from '@/utils/smartViewportManager'
 
 export default {
   name: 'Selection',
@@ -221,14 +221,20 @@ export default {
         const w = window.innerWidth || 1024
         const h = window.innerHeight || 768
         this.isMobile = w <= 768
-        this.isPortrait = h >= w
+        
+        // 修复：避免键盘弹起时的横屏误判
+        if (!this._lastHeight || Math.abs(h - this._lastHeight) < 100) {
+          this.isPortrait = h >= w
+        }
+        this._lastHeight = h
+        
         // 因子抽屉在竖屏使用更窄占比，横屏/PC 使用 40%
         this.drawerSize = this.isPortraitMobile ? '90%' : '40%'
       }catch(e){ this.isMobile=false; this.isPortrait=true }
     },
     updateDeviceInfo(){
       // 从视口管理器获取最新的设备信息
-      const viewportInfo = viewportManager.getViewportInfo();
+      const viewportInfo = smartViewportManager.getViewportInfo();
       this.isMobile = viewportInfo.isMobile;
       this.isPortrait = viewportInfo.isPortrait;
       // 更新抽屉大小

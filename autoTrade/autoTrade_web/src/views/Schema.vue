@@ -18,7 +18,7 @@
 
 <script>
 import axios from 'axios'
-import viewportManager from '@/utils/viewportManager'
+import smartViewportManager from '@/utils/smartViewportManager'
 
 export default {
   name: 'Schema',
@@ -49,7 +49,7 @@ export default {
     deleteSchema(){ if(!this.schema){this.$message.error('请选择 schema');return} axios.delete('/webManager/system/schema', { params: { name: this.schema } }).then(res=>{ if(res.data.code===0){ this.$message.success('删除成功'); this.loadSchemas(); this.schema=''; } else this.$message.error(res.data.msg) }) },
     updateDeviceInfo(){
       // 从视口管理器获取最新的设备信息
-      const viewportInfo = viewportManager.getViewportInfo();
+      const viewportInfo = smartViewportManager.getViewportInfo();
       this.isMobile = viewportInfo.isMobile;
       this.isPortrait = viewportInfo.isPortrait;
     }

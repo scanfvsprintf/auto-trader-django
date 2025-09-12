@@ -32,7 +32,7 @@
 
 <script>
 import axios from 'axios'
-import viewportManager from '@/utils/viewportManager'
+import smartViewportManager from '@/utils/smartViewportManager'
 
 export default {
   name: 'Factors',
@@ -60,7 +60,7 @@ export default {
     saveDef(){ this.$message.info('请在后续版本提供编辑表单，这里仅展示读取。') },
     updateDeviceInfo(){
       // 从视口管理器获取最新的设备信息
-      const viewportInfo = viewportManager.getViewportInfo();
+      const viewportInfo = smartViewportManager.getViewportInfo();
       this.isMobile = viewportInfo.isMobile;
       this.isPortrait = viewportInfo.isPortrait;
     }

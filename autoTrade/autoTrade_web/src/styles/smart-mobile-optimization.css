@@ -1,0 +1,200 @@
+/**
+ * 智能移动端优化样式 - 主动适应键盘变化
+ * 不再试图阻止键盘弹起，而是优雅地适应这种变化
+ */
+
+/* 全局CSS变量 */
+:root {
+  --viewport-height: 100vh;
+  --initial-viewport-height: 100vh;
+  --available-height: 100vh;
+  --keyboard-height: 0px;
+  --is-mobile: 0;
+  --is-portrait: 0;
+}
+
+/* 基础移动端样式 */
+@media (max-width: 768px) {
+  html, body {
+    height: 100vh;
+    height: var(--available-height, 100vh);
+    overflow-x: hidden;
+    position: relative;
+  }
+  
+  #app {
+    height: 100vh;
+    height: var(--available-height, 100vh);
+    overflow: hidden;
+  }
+}
+
+/* 键盘弹起时的优雅适应 */
+body.keyboard-open {
+  /* 不阻止滚动，而是适应变化 */
+  overflow: hidden;
+  height: var(--available-height, 100vh);
+}
+
+/* 布局容器适应键盘 */
+@media (max-width: 768px) {
+  .layout,
+  .layout-mobile-portrait,
+  .selection-root,
+  .ai-config-root,
+  .system-root {
+    height: var(--available-height, 100vh);
+    max-height: var(--available-height, 100vh);
+    overflow: hidden;
+    transition: height 0.3s ease-out;
+  }
+  
+  /* 内容区域适应键盘 */
+  .layout-content,
+  .layout-mobile-content,
+  .selection-content,
+  .scroll-area {
+    height: calc(var(--available-height, 100vh) - 100px);
+    max-height: calc(var(--available-height, 100vh) - 100px);
+    overflow-y: auto;
+    overflow-x: hidden;
+    -webkit-overflow-scrolling: touch;
+    transition: height 0.3s ease-out;
+  }
+}
+
+/* 输入框优化 - 温和方案 */
+@media (max-width: 768px) {
+  /* 防止iOS Safari自动缩放 */
+  input[type="text"],
+  input[type="password"],
+  input[type="email"],
+  input[type="number"],
+  input[type="tel"],
+  input[type="url"],
+  textarea,
+  select {
+    font-size: 16px !important;
+    -webkit-appearance: none !important;
+    -webkit-tap-highlight-color: transparent !important;
+  }
+  
+  /* ElementUI输入框 */
+  .el-input__inner,
+  .el-textarea__inner,
+  .el-select .el-input__inner {
+    font-size: 16px !important;
+    -webkit-appearance: none !important;
+    -webkit-tap-highlight-color: transparent !important;
+  }
+  
+  /* 输入框聚焦时的平滑处理 */
+  .el-input.is-active,
+  .el-select.is-active,
+  .el-date-editor.is-active {
+    position: relative;
+    z-index: 1000;
+    transition: all 0.3s ease-out;
+  }
+}
+
+/* 底部导航适应键盘 */
+@media (max-width: 768px) {
+  .layout-bottom-nav {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    z-index: 4000;
+    transition: transform 0.3s ease-out;
+  }
+  
+  /* 键盘弹起时，底部导航可能需要调整 */
+  body.keyboard-open .layout-bottom-nav {
+    /* 根据键盘高度调整位置 */
+    transform: translateY(calc(-1 * var(--keyboard-height, 0px)));
+  }
+}
+
+/* 抽屉和弹窗适应键盘 */
+@media (max-width: 768px) {
+  .el-drawer__wrapper,
+  .el-dialog__wrapper {
+    z-index: 6000;
+  }
+  
+  .el-drawer__body,
+  .el-dialog__body {
+    height: var(--available-height, 100vh);
+    max-height: var(--available-height, 100vh);
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    transition: height 0.3s ease-out;
+  }
+}
+
+/* 平滑过渡动画 */
+@media (max-width: 768px) {
+  * {
+    transition: height 0.3s ease-out, max-height 0.3s ease-out;
+  }
+  
+  /* 排除不需要过渡的元素 */
+  input, textarea, select, button, img, video, canvas {
+    transition: none;
+  }
+}
+
+/* 滚动优化 */
+@media (max-width: 768px) {
+  .scroll-area,
+  .layout-content,
+  .layout-mobile-content,
+  .selection-content {
+    -webkit-overflow-scrolling: touch;
+    scroll-behavior: smooth;
+  }
+  
+  /* 自定义滚动条 */
+  .scroll-area::-webkit-scrollbar {
+    width: 4px;
+  }
+  
+  .scroll-area::-webkit-scrollbar-thumb {
+    background: rgba(0, 0, 0, 0.2);
+    border-radius: 2px;
+  }
+  
+  .scroll-area::-webkit-scrollbar-track {
+    background: transparent;
+  }
+}
+
+/* 输入框聚焦时的视觉反馈 */
+@media (max-width: 768px) {
+  .el-input__inner:focus,
+  .el-textarea__inner:focus,
+  .el-select .el-input__inner:focus {
+    border-color: #409eff !important;
+    box-shadow: 0 0 0 2px rgba(64, 158, 255, 0.2) !important;
+    transition: all 0.3s ease-out;
+  }
+}
+
+/* 防止页面跳动 */
+@media (max-width: 768px) {
+  body {
+    -webkit-text-size-adjust: 100%;
+    -webkit-tap-highlight-color: transparent;
+  }
+  
+  /* 防止双击缩放 */
+  * {
+    touch-action: manipulation;
+  }
+  
+  /* 输入框除外，需要允许文本选择 */
+  input, textarea {
+    touch-action: auto;
+  }
+}

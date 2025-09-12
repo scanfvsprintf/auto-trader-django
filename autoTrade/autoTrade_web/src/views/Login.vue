@@ -28,7 +28,7 @@
 </template>
 
 <script>
-import viewportManager from '@/utils/viewportManager'
+import smartViewportManager from '@/utils/smartViewportManager'
 
 export default {
   name: 'Login',
@@ -233,7 +233,7 @@ export default {
   methods: {
     updateViewportHeight() {
       // 更新登录页面的视口高度
-      const viewportInfo = viewportManager.getViewportInfo()
+      const viewportInfo = smartViewportManager.getViewportInfo()
       document.documentElement.style.setProperty('--login-viewport-height', `${viewportInfo.currentHeight}px`)
     }
   }

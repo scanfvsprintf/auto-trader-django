@@ -79,7 +79,7 @@
   </template>
 
 <script>
-import viewportManager from '@/utils/viewportManager'
+import smartViewportManager from '@/utils/smartViewportManager'
 
 export default {
   name: 'Layout',
@@ -121,12 +121,18 @@ export default {
         const w = window.innerWidth || 1024
         const h = window.innerHeight || 768
         this.isMobile = w <= 768
-        this.isPortrait = h >= w
+        
+        // 修复：避免键盘弹起时的横屏误判
+        // 使用智能视口管理器的逻辑，避免频繁的横竖屏切换
+        if (!this._lastHeight || Math.abs(h - this._lastHeight) < 100) {
+          this.isPortrait = h >= w
+        }
+        this._lastHeight = h
       }catch(e){ this.isMobile=false; this.isPortrait=true }
     },
     updateDeviceInfo(){
-      // 从视口管理器获取最新的设备信息
-      const viewportInfo = viewportManager.getViewportInfo();
+      // 从智能视口管理器获取最新的设备信息
+      const viewportInfo = smartViewportManager.getViewportInfo();
       this.isMobile = viewportInfo.isMobile;
       this.isPortrait = viewportInfo.isPortrait;
     },
