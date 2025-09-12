@@ -1,0 +1,100 @@
+/**
+ * 移动端优化样式
+ * 解决键盘弹起时的界面闪烁和跳转问题
+ */
+
+/* 全局移动端视口稳定性 */
+:root {
+  --viewport-height: 100vh;
+  --initial-viewport-height: 100vh;
+  --is-mobile: 0;
+  --is-portrait: 0;
+}
+
+/* 键盘弹起时的全局样式 */
+body.keyboard-open {
+  position: fixed !important;
+  width: 100% !important;
+  top: 0 !important;
+  overflow: hidden !important;
+}
+
+/* 移动端输入框优化 */
+@media (max-width: 768px) {
+  /* 防止iOS Safari自动缩放 */
+  input[type="text"],
+  input[type="password"],
+  input[type="email"],
+  input[type="number"],
+  input[type="tel"],
+  input[type="url"],
+  textarea,
+  select {
+    font-size: 16px !important;
+    -webkit-appearance: none !important;
+    -webkit-tap-highlight-color: transparent !important;
+    transform: translateZ(0) !important;
+  }
+  
+  /* ElementUI输入框特殊处理 */
+  .el-input__inner,
+  .el-textarea__inner,
+  .el-select .el-input__inner {
+    font-size: 16px !important;
+    -webkit-appearance: none !important;
+    -webkit-tap-highlight-color: transparent !important;
+    transform: translateZ(0) !important;
+  }
+  
+  /* 输入框聚焦时的视口稳定 */
+  .el-input.is-active,
+  .el-select.is-active,
+  .el-date-editor.is-active {
+    position: relative !important;
+    z-index: 1000 !important;
+  }
+}
+
+/* 移动端滚动优化 */
+@media (max-width: 768px) {
+  .scroll-area,
+  .layout-content,
+  .layout-mobile-content {
+    -webkit-overflow-scrolling: touch !important;
+    transform: translateZ(0) !important;
+  }
+}
+
+/* 移动端布局稳定性 */
+@media (max-width: 768px) {
+  .layout,
+  .layout-mobile-portrait,
+  .selection-root {
+    height: var(--viewport-height, 100vh) !important;
+    max-height: var(--viewport-height, 100vh) !important;
+    overflow: hidden !important;
+  }
+}
+
+/* 移动端底部导航稳定性 */
+@media (max-width: 768px) {
+  .layout-bottom-nav {
+    transform: translateZ(0) !important;
+    position: fixed !important;
+    z-index: 4000 !important;
+  }
+}
+
+/* 移动端抽屉和弹窗优化 */
+@media (max-width: 768px) {
+  .el-drawer__wrapper,
+  .el-dialog__wrapper {
+    z-index: 6000 !important;
+  }
+  
+  .el-drawer__body,
+  .el-dialog__body {
+    -webkit-overflow-scrolling: touch !important;
+    transform: translateZ(0) !important;
+  }
+}

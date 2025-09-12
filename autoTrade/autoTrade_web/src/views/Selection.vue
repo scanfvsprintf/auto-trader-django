@@ -105,6 +105,8 @@
 
 <script>
 import axios from 'axios'
+import viewportManager from '@/utils/viewportManager'
+
 export default {
   name: 'Selection',
   data(){
@@ -133,10 +135,16 @@ export default {
     this.queryDate = t
     this.$nextTick(this.fetchPlans)
     this.onResize();
-    window.addEventListener('resize', this.onResize)
-    window.addEventListener('orientationchange', this.onResize)
+    // 使用视口管理器获取设备信息
+    this.updateDeviceInfo();
+    // 定期同步设备信息
+    this.deviceInfoInterval = setInterval(this.updateDeviceInfo, 1000);
   },
-  beforeDestroy(){ window.removeEventListener('resize', this.onResize); window.removeEventListener('orientationchange', this.onResize) },
+  beforeDestroy(){ 
+    if (this.deviceInfoInterval) {
+      clearInterval(this.deviceInfoInterval);
+    }
+  },
   computed:{
     isPortraitMobile(){ return this.isMobile && this.isPortrait }
   },
@@ -217,21 +225,61 @@ export default {
         // 因子抽屉在竖屏使用更窄占比，横屏/PC 使用 40%
         this.drawerSize = this.isPortraitMobile ? '90%' : '40%'
       }catch(e){ this.isMobile=false; this.isPortrait=true }
+    },
+    updateDeviceInfo(){
+      // 从视口管理器获取最新的设备信息
+      const viewportInfo = viewportManager.getViewportInfo();
+      this.isMobile = viewportInfo.isMobile;
+      this.isPortrait = viewportInfo.isPortrait;
+      // 更新抽屉大小
+      this.drawerSize = this.isPortraitMobile ? '90%' : '40%'
     }
   }
 }
   </script>
 
 <style scoped>
-.selection-root{ display:flex; flex-direction:column; height:100%; background:#ffffff }
-.selection-toolbar-static{ flex:0 0 auto; background:#ffffff; padding:12px 12px; margin:0 -8px; border-bottom:1px solid #e6ebf2; overflow-x:auto; -webkit-overflow-scrolling:touch }
+.selection-root{ 
+  display:flex; 
+  flex-direction:column; 
+  height:100%; 
+  background:#ffffff;
+  /* 使用CSS变量确保视口稳定性 */
+  height: var(--viewport-height, 100vh);
+  max-height: var(--viewport-height, 100vh);
+}
+.selection-toolbar-static{ 
+  flex:0 0 auto; 
+  background:#ffffff; 
+  padding:12px 12px; 
+  margin:0 -8px; 
+  border-bottom:1px solid #e6ebf2; 
+  overflow-x:auto; 
+  -webkit-overflow-scrolling:touch;
+  /* 防止键盘弹起时的布局跳动 */
+  transform: translateZ(0);
+}
 .selection-toolbar-form{ display:flex; flex-wrap:nowrap; align-items:center; gap:8px; width:max-content }
 .selection-toolbar-form .el-form-item{ margin-right:0; margin-bottom:0; flex:0 0 auto }
 .selection-toolbar-form .toolbar-actions .toolbar-actions-row{ display:flex; flex-wrap:nowrap; gap:8px }
 .selection-toolbar-form .el-input__inner, .selection-toolbar-form .el-date-editor{ height:28px; line-height:28px }
 .selection-toolbar-form .el-button{ height:28px; padding: 0 10px }
-.selection-content{ flex:1 1 auto; position: relative; z-index: 1; padding:12px 8px 8px }
-.scroll-area{ height:100%; overflow:auto }
+.selection-content{ 
+  flex:1 1 auto; 
+  position: relative; 
+  z-index: 1; 
+  padding:12px 8px 8px;
+  /* 移动端滚动优化 */
+  -webkit-overflow-scrolling: touch;
+  /* 防止键盘弹起时的布局跳动 */
+  transform: translateZ(0);
+}
+.scroll-area{ 
+  height:100%; 
+  overflow:auto;
+  /* 移动端滚动优化 */
+  -webkit-overflow-scrolling: touch;
+}
 .factor-drawer{ padding:12px }
 .factor-drawer-header{ margin-bottom:8px }
 .factor-stock{ font-weight:600; color:#1f2937 }

@@ -18,10 +18,25 @@
 
 <script>
 import axios from 'axios'
+import viewportManager from '@/utils/viewportManager'
+
 export default {
   name: 'Schema',
-  data(){ return { schema: '', schemaList: [], readOnly: false } },
-  created(){ this.readOnly = !!window.__READ_ONLY__; this.loadSchemas() },
+  data(){ return { schema: '', schemaList: [], readOnly: false, isMobile: false, isPortrait: true } },
+  created(){ 
+    this.readOnly = !!window.__READ_ONLY__; 
+    this.loadSchemas();
+    this.updateDeviceInfo();
+    this.deviceInfoInterval = setInterval(this.updateDeviceInfo, 1000);
+  },
+  beforeDestroy(){ 
+    if (this.deviceInfoInterval) {
+      clearInterval(this.deviceInfoInterval);
+    }
+  },
+  computed: {
+    isPortraitMobile(){ return this.isMobile && this.isPortrait }
+  },
   methods: {
     loadSchemas(){ axios.get('/webManager/system/schema').then(res=>{ if(res.data.code===0) this.schemaList = res.data.data || [] }) },
     onSchemaDropdownVisible(v){ if(v){ this.loadSchemas() } },
@@ -31,7 +46,13 @@ export default {
         .then(()=> this.deleteSchema())
         .catch(()=>{})
     },
-    deleteSchema(){ if(!this.schema){this.$message.error('请选择 schema');return} axios.delete('/webManager/system/schema', { params: { name: this.schema } }).then(res=>{ if(res.data.code===0){ this.$message.success('删除成功'); this.loadSchemas(); this.schema=''; } else this.$message.error(res.data.msg) }) }
+    deleteSchema(){ if(!this.schema){this.$message.error('请选择 schema');return} axios.delete('/webManager/system/schema', { params: { name: this.schema } }).then(res=>{ if(res.data.code===0){ this.$message.success('删除成功'); this.loadSchemas(); this.schema=''; } else this.$message.error(res.data.msg) }) },
+    updateDeviceInfo(){
+      // 从视口管理器获取最新的设备信息
+      const viewportInfo = viewportManager.getViewportInfo();
+      this.isMobile = viewportInfo.isMobile;
+      this.isPortrait = viewportInfo.isPortrait;
+    }
   }
 }
   </script>

@@ -79,6 +79,8 @@
   </template>
 
 <script>
+import viewportManager from '@/utils/viewportManager'
+
 export default {
   name: 'Layout',
   data(){
@@ -100,8 +102,18 @@ export default {
       return p
     }
   },
-  created(){ this.onResize(); window.addEventListener('resize', this.onResize); window.addEventListener('orientationchange', this.onResize) },
-  beforeDestroy(){ window.removeEventListener('resize', this.onResize); window.removeEventListener('orientationchange', this.onResize) },
+  created(){ 
+    this.onResize(); 
+    // 使用视口管理器获取设备信息
+    this.updateDeviceInfo();
+    // 定期同步设备信息
+    this.deviceInfoInterval = setInterval(this.updateDeviceInfo, 1000);
+  },
+  beforeDestroy(){ 
+    if (this.deviceInfoInterval) {
+      clearInterval(this.deviceInfoInterval);
+    }
+  },
   methods: {
     doLogout(){ localStorage.removeItem('authedUser'); this.$router.replace('/login') },
     onResize(){
@@ -111,6 +123,12 @@ export default {
         this.isMobile = w <= 768
         this.isPortrait = h >= w
       }catch(e){ this.isMobile=false; this.isPortrait=true }
+    },
+    updateDeviceInfo(){
+      // 从视口管理器获取最新的设备信息
+      const viewportInfo = viewportManager.getViewportInfo();
+      this.isMobile = viewportInfo.isMobile;
+      this.isPortrait = viewportInfo.isPortrait;
     },
     toggleDaily(){ this.showDailyPop = !this.showDailyPop },
     toggleSystem(){ this.showSystemPop = !this.showSystemPop },
@@ -130,10 +148,39 @@ export default {
 .layout-content.is-selection{ overflow:hidden }
 
 /* 竖屏移动端 */
-.layout-mobile-portrait{ flex:1; display:flex; flex-direction:column; min-height:0 }
-.layout-mobile-content{ flex:1; overflow:auto; padding:0 8px 56px 8px; position: relative; z-index: 1 }
+.layout-mobile-portrait{ 
+  flex:1; 
+  display:flex; 
+  flex-direction:column; 
+  min-height:0;
+  /* 使用CSS变量确保视口稳定性 */
+  height: var(--viewport-height, 100vh);
+  max-height: var(--viewport-height, 100vh);
+}
+.layout-mobile-content{ 
+  flex:1; 
+  overflow:auto; 
+  padding:0 8px 56px 8px; 
+  position: relative; 
+  z-index: 1;
+  /* 移动端滚动优化 */
+  -webkit-overflow-scrolling: touch;
+  /* 防止键盘弹起时的布局跳动 */
+  transform: translateZ(0);
+}
 .layout-mobile-content.is-selection{ overflow:hidden }
-.layout-bottom-nav{ position:fixed; left:0; right:0; bottom:0; height:52px; border-top:1px solid #e6ebf2; background:#fff; z-index: 4000; }
+.layout-bottom-nav{ 
+  position:fixed; 
+  left:0; 
+  right:0; 
+  bottom:0; 
+  height:52px; 
+  border-top:1px solid #e6ebf2; 
+  background:#fff; 
+  z-index: 4000;
+  /* 确保底部导航在键盘弹起时保持可见 */
+  transform: translateZ(0);
+}
 .bottom-nav{ height:100%; display:flex; align-items:center; justify-content:space-around; padding:0 8px }
 .bottom-item{ flex:1; display:flex; align-items:center; justify-content:center; color:#374151; padding:0 6px; height:100%; line-height:1; font-size:13px; box-sizing:border-box; -webkit-tap-highlight-color:transparent }
 .bottom-item.active{ color:#2563eb; font-weight:600 }

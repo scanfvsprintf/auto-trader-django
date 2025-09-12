@@ -129,6 +129,8 @@
 <script>
 import axios from 'axios'
 import * as echarts from 'echarts'
+import viewportManager from '@/utils/viewportManager'
+
 export default {
   name: 'DailyCsi',
   data(){ 
@@ -139,6 +141,7 @@ export default {
       loading:false, 
       loadingRemote:false, 
       isMobile:false,
+      isPortrait: true,
       // AI评测相关
       showAiDialog: false,
       selectedModelId: null,
@@ -163,8 +166,17 @@ export default {
       ]
     }
     this.$nextTick(this.fetchCSI)
-    try{ const w=window.innerWidth||1024; this.isMobile = w <= 768 }catch(e){ this.isMobile=false }
+    this.updateDeviceInfo();
+    this.deviceInfoInterval = setInterval(this.updateDeviceInfo, 1000);
     this.loadAvailableModels()
+  },
+  beforeDestroy(){ 
+    if (this.deviceInfoInterval) {
+      clearInterval(this.deviceInfoInterval);
+    }
+  },
+  computed: {
+    isPortraitMobile(){ return this.isMobile && this.isPortrait }
   },
   methods: {
     fetchCSI(){
@@ -316,6 +328,12 @@ export default {
       if (score >= -20) return '#E6A23C' // 橙色 - 中性
       if (score >= -60) return '#F56C6C' // 浅红色 - 看跌
       return '#F56C6C' // 红色 - 强烈看跌
+    },
+    updateDeviceInfo(){
+      // 从视口管理器获取最新的设备信息
+      const viewportInfo = viewportManager.getViewportInfo();
+      this.isMobile = viewportInfo.isMobile;
+      this.isPortrait = viewportInfo.isPortrait;
     }
   }
 }

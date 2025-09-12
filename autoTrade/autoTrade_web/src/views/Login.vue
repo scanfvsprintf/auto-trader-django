@@ -28,6 +28,8 @@
 </template>
 
 <script>
+import viewportManager from '@/utils/viewportManager'
+
 export default {
   name: 'Login',
   data(){
@@ -221,15 +223,29 @@ export default {
     this.step = this.step.bind(this)
     this.setupCanvas()
     window.addEventListener('resize', this.handleResize)
+    // 使用视口管理器确保登录页面稳定
+    this.updateViewportHeight()
   },
   beforeDestroy(){
     cancelAnimationFrame(this._raf)
     window.removeEventListener('resize', this.handleResize)
+  },
+  methods: {
+    updateViewportHeight() {
+      // 更新登录页面的视口高度
+      const viewportInfo = viewportManager.getViewportInfo()
+      document.documentElement.style.setProperty('--login-viewport-height', `${viewportInfo.currentHeight}px`)
+    }
   }
 }
 </script>
 <style scoped>
-.login-root{ position:relative; height:100vh; overflow:hidden; }
+.login-root{ 
+  position:relative; 
+  height:100vh; 
+  height: var(--login-viewport-height, 100vh); /* 使用动态视口高度 */
+  overflow:hidden; 
+}
 .star-canvas{ position:absolute; inset:0; display:block }
 .login-center{ position:relative; z-index:1; height:100%; display:flex; align-items:center; justify-content:center; padding:16px }
 .login-card{ width:480px; max-width:100%; border-radius:16px; padding:20px 20px 16px; border:1px solid rgba(17,24,39,0.08); background: rgba(255,255,255,0.50); backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px); box-shadow:0 20px 60px rgba(17,24,39,0.06) }

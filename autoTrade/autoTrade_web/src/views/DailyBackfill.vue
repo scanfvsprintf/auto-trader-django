@@ -50,9 +50,11 @@
 
 <script>
 import axios from 'axios'
+import viewportManager from '@/utils/viewportManager'
+
 export default {
   name: 'DailyBackfill',
-  data(){ return { mode:'range', codes:'', range:[], missingDate:'', pickerOptions:{}, loading:false } },
+  data(){ return { mode:'range', codes:'', range:[], missingDate:'', pickerOptions:{}, loading:false, isMobile: false, isPortrait: true } },
   created(){
     const end = new Date(); const start = new Date(); start.setMonth(start.getMonth()-1)
     const fmt = d => `${d.getFullYear()}-${('0'+(d.getMonth()+1)).slice(-2)}-${('0'+d.getDate()).slice(-2)}`
@@ -64,6 +66,16 @@ export default {
         { text:'最近一年', onClick: p=>{ const e=new Date(); const s=new Date(); s.setFullYear(s.getFullYear()-1); p.$emit('pick',[fmt(s),fmt(e)]) }}
       ]
     }
+    this.updateDeviceInfo();
+    this.deviceInfoInterval = setInterval(this.updateDeviceInfo, 1000);
+  },
+  beforeDestroy(){ 
+    if (this.deviceInfoInterval) {
+      clearInterval(this.deviceInfoInterval);
+    }
+  },
+  computed: {
+    isPortraitMobile(){ return this.isMobile && this.isPortrait }
   },
   methods: {
     doBackfill(){
@@ -83,6 +95,12 @@ export default {
           .catch(()=> this.$message.error('补拉失败'))
           .finally(()=> this.loading=false)
       }
+    },
+    updateDeviceInfo(){
+      // 从视口管理器获取最新的设备信息
+      const viewportInfo = viewportManager.getViewportInfo();
+      this.isMobile = viewportInfo.isMobile;
+      this.isPortrait = viewportInfo.isPortrait;
     }
   }
 }

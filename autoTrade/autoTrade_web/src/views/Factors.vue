@@ -32,10 +32,24 @@
 
 <script>
 import axios from 'axios'
+import viewportManager from '@/utils/viewportManager'
+
 export default {
   name: 'Factors',
-  data(){ return { params: [], defs: [], readOnly: false }},
-  created(){ this.load() },
+  data(){ return { params: [], defs: [], readOnly: false, isMobile: false, isPortrait: true }},
+  created(){ 
+    this.load();
+    this.updateDeviceInfo();
+    this.deviceInfoInterval = setInterval(this.updateDeviceInfo, 1000);
+  },
+  beforeDestroy(){ 
+    if (this.deviceInfoInterval) {
+      clearInterval(this.deviceInfoInterval);
+    }
+  },
+  computed: {
+    isPortraitMobile(){ return this.isMobile && this.isPortrait }
+  },
   methods: {
     load(){
       this.readOnly = !!window.__READ_ONLY__
@@ -43,7 +57,13 @@ export default {
       axios.get('/webManager/factors/definitions').then(res=>{ if(res.data.code===0) this.defs=res.data.data||[] })
     },
     saveParam(){ this.$message.info('请在后续版本提供编辑表单，这里仅展示读取。') },
-    saveDef(){ this.$message.info('请在后续版本提供编辑表单，这里仅展示读取。') }
+    saveDef(){ this.$message.info('请在后续版本提供编辑表单，这里仅展示读取。') },
+    updateDeviceInfo(){
+      // 从视口管理器获取最新的设备信息
+      const viewportInfo = viewportManager.getViewportInfo();
+      this.isMobile = viewportInfo.isMobile;
+      this.isPortrait = viewportInfo.isPortrait;
+    }
   }
 }
   </script>
