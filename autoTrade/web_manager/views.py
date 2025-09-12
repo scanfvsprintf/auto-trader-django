@@ -5,6 +5,7 @@ from django.db import connection
 from django.db.models import F
 from datetime import datetime, timedelta
 from decimal import Decimal
+from pypinyin import lazy_pinyin, Style
 
 from common.models import (
     DailyTradingPlan, StockInfo, DailyFactorValues, FactorDefinitions,
@@ -25,14 +26,50 @@ def err(msg, code=1):
 @require_http_methods(["GET"])
 def stock_search(request):
     """
-    模糊搜索股票：支持代码或名称 contains。
+    模糊搜索股票：支持代码、名称或拼音首字母匹配。
     参数: q  结果最多返回 20 条
     """
     q = request.GET.get('q', '').strip()
     if not q:
         return ok([])
-    qs = StockInfo.objects.filter(models.Q(stock_code__icontains=q) | models.Q(stock_name__icontains=q)).values('stock_code', 'stock_name')[:20]
-    return ok(list(qs))
+    
+    # 基础查询：代码和名称匹配
+    base_qs = StockInfo.objects.filter(
+        models.Q(stock_code__icontains=q) | models.Q(stock_name__icontains=q)
+    )
+    
+    # 如果查询词是纯字母，尝试拼音首字母匹配
+    if q.isalpha() and len(q) <= 6:  # 限制长度避免性能问题
+        # 获取所有股票数据用于拼音匹配
+        all_stocks = StockInfo.objects.all().values('stock_code', 'stock_name')
+        pinyin_matches = []
+        
+        for stock in all_stocks:
+            stock_name = stock['stock_name']
+            # 生成拼音首字母
+            pinyin_initials = ''.join([p[0].upper() for p in lazy_pinyin(stock_name, style=Style.FIRST_LETTER)])
+            # 检查是否匹配
+            if q.upper() in pinyin_initials:
+                pinyin_matches.append(stock)
+        
+        # 合并结果，去重
+        base_results = list(base_qs.values('stock_code', 'stock_name'))
+        all_results = base_results + pinyin_matches
+        
+        # 去重并保持顺序
+        seen = set()
+        unique_results = []
+        for item in all_results:
+            key = item['stock_code']
+            if key not in seen:
+                seen.add(key)
+                unique_results.append(item)
+        
+        return ok(unique_results[:20])
+    else:
+        # 非字母查询，只使用基础匹配
+        qs = base_qs.values('stock_code', 'stock_name')[:20]
+        return ok(list(qs))
 
 
 # ----------------------- 选股管理 -----------------------
