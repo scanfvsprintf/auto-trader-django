@@ -115,167 +115,122 @@
       </div>
     </el-drawer>
     
-    <!-- AI评测对话框 -->
-    <el-dialog
-      :title="`AI评测${currentName || '个股'}走势`"
-      :visible.sync="showAiDialog"
-      :width="isMobile ? '95%' : '600px'"
-      :top="isMobile ? '5vh' : '15vh'"
-      :class="{ 
-        'ai-evaluation-mobile': isMobile, 
-        'ai-evaluation-dialog': !isMobile,
-        'has-result': !!aiResult
-      }"
-      :append-to-body="isMobile"
-      :close-on-click-modal="false"
-      :close-on-press-escape="true"
-      :destroy-on-close="true">
+    <!-- AI评测抽屉 -->
+    <el-drawer 
+      :visible.sync="showAiDialog" 
+      :title="`AI评测${currentName || '个股'}走势`" 
+      size="90%" 
+      :append-to-body="true" 
+      :destroy-on-close="true" 
+      custom-class="ai-evaluation-drawer">
       
-      <!-- 模型选择 -->
-      <div v-if="!aiResult" class="ai-evaluation-content">
-        <el-form label-width="100px">
-          <el-form-item label="选择AI模型">
-            <el-select v-model="selectedModelId" placeholder="请选择AI模型" style="width: 100%;">
-              <el-option
-                v-for="model in availableModels"
-                :key="model.id"
-                :label="model.name"
-                :value="model.id">
-                <span style="float: left">{{ model.name }}</span>
-                <span style="float: right; color: #8492a6; font-size: 13px">{{ model.source_name }}</span>
-              </el-option>
-            </el-select>
-          </el-form-item>
-        </el-form>
-        
-        <!-- 评测进度 -->
-        <div v-if="aiEvaluating" class="ai-evaluation-progress">
-          <el-progress :percentage="aiProgress" :status="aiProgressStatus"></el-progress>
-          <p class="progress-text">{{ aiProgressText }}</p>
-        </div>
-      </div>
-      
-      <!-- 评测结果 -->
-      <div v-if="aiResult" class="ai-evaluation-result">
-        <!-- 竖屏模式：紧凑布局 -->
-        <div v-if="isMobile" class="mobile-compact-layout">
-          <!-- 综合分数 - 水平布局 -->
-          <div class="mobile-overall-score">
-            <div class="score-circle" :class="getScoreClass(aiResult.analysis_result['综合看涨分数'])">
-              <div class="score-value">{{ aiResult.analysis_result['综合看涨分数'] }}</div>
-              <div class="score-label">综合{{ getScoreLabel(aiResult.analysis_result['综合看涨分数']) }}</div>
-            </div>
-            <div class="mobile-summary-text">
-              <h4>AI分析总结</h4>
-              <p>{{ aiResult.analysis_result['总结'] }}</p>
-            </div>
+      <div class="ai-drawer-body">
+        <!-- 模型选择 -->
+        <div v-if="!aiResult" class="ai-evaluation-content">
+          <div class="ai-section">
+            <div class="ai-sec-title">AI模型选择</div>
+            <el-form label-position="top" class="ai-form">
+              <el-form-item label="选择AI模型">
+                <el-select v-model="selectedModelId" placeholder="请选择AI模型" style="width: 100%;">
+                  <el-option
+                    v-for="model in availableModels"
+                    :key="model.id"
+                    :label="model.name"
+                    :value="model.id">
+                    <span style="float: left">{{ model.name }}</span>
+                    <span style="float: right; color: #8492a6; font-size: 13px">{{ model.source_name }}</span>
+                  </el-option>
+                </el-select>
+              </el-form-item>
+            </el-form>
           </div>
           
-          <!-- 子分数 - 网格布局 -->
-          <div class="mobile-sub-scores">
-            <div class="mobile-score-item">
-              <div class="score-name">趋势动能</div>
-              <div class="score-value-text">{{ aiResult.analysis_result['趋势动能看涨分数'] }}</div>
-              <el-progress 
-                :percentage="Math.abs(aiResult.analysis_result['趋势动能看涨分数'])" 
-                :color="getProgressColor(aiResult.analysis_result['趋势动能看涨分数'])"
-                :show-text="false"
-                :stroke-width="4">
-              </el-progress>
+          <!-- 评测进度 -->
+          <div v-if="aiEvaluating" class="ai-section">
+            <div class="ai-sec-title">分析进度</div>
+            <div class="ai-evaluation-progress">
+              <el-progress :percentage="aiProgress" :status="aiProgressStatus"></el-progress>
+              <p class="progress-text">{{ aiProgressText }}</p>
             </div>
-            
-            <div class="mobile-score-item">
-              <div class="score-name">均值回归</div>
-              <div class="score-value-text">{{ aiResult.analysis_result['均值回归看涨分数'] }}</div>
-              <el-progress 
-                :percentage="Math.abs(aiResult.analysis_result['均值回归看涨分数'])" 
-                :color="getProgressColor(aiResult.analysis_result['均值回归看涨分数'])"
-                :show-text="false"
-                :stroke-width="4">
-              </el-progress>
-            </div>
-            
-            <div class="mobile-score-item">
-              <div class="score-name">质量波动</div>
-              <div class="score-value-text">{{ aiResult.analysis_result['质量波动看涨分数'] }}</div>
-              <el-progress 
-                :percentage="Math.abs(aiResult.analysis_result['质量波动看涨分数'])" 
-                :color="getProgressColor(aiResult.analysis_result['质量波动看涨分数'])"
-                :show-text="false"
-                :stroke-width="4">
-              </el-progress>
-            </div>
-          </div>
-          
-          <!-- 数据信息 -->
-          <div class="mobile-data-info">
-            <p><strong>分析数据：</strong>{{ aiResult.data_period.start_date }} 至 {{ aiResult.data_period.end_date }} ({{ aiResult.data_period.data_count }}个交易日)</p>
           </div>
         </div>
         
-        <!-- PC模式：原有布局 -->
-        <div v-else class="desktop-layout">
+        <!-- 评测结果 -->
+        <div v-if="aiResult" class="ai-evaluation-result">
           <!-- 综合分数 -->
-          <div class="overall-score">
-            <div class="score-circle" :class="getScoreClass(aiResult.analysis_result['综合看涨分数'])">
-              <div class="score-value">{{ aiResult.analysis_result['综合看涨分数'] }}</div>
-              <div class="score-label">综合{{ getScoreLabel(aiResult.analysis_result['综合看涨分数']) }}</div>
+          <div class="ai-section">
+            <div class="ai-sec-title">综合评分</div>
+            <div class="overall-score">
+              <div class="score-circle" :class="getScoreClass(aiResult.analysis_result['综合看涨分数'])">
+                <div class="score-value">{{ aiResult.analysis_result['综合看涨分数'] }}</div>
+                <div class="score-label">综合{{ getScoreLabel(aiResult.analysis_result['综合看涨分数']) }}</div>
+              </div>
             </div>
           </div>
           
           <!-- 子分数 -->
-          <div class="sub-scores">
-            <div class="score-item">
-              <div class="score-name">趋势动能{{ getScoreLabel(aiResult.analysis_result['趋势动能看涨分数']) }}</div>
-              <el-progress 
-                :percentage="Math.abs(aiResult.analysis_result['趋势动能看涨分数'])" 
-                :color="getProgressColor(aiResult.analysis_result['趋势动能看涨分数'])"
-                :show-text="false">
-              </el-progress>
-              <div class="score-value-text">{{ aiResult.analysis_result['趋势动能看涨分数'] }}</div>
-            </div>
-            
-            <div class="score-item">
-              <div class="score-name">均值回归{{ getScoreLabel(aiResult.analysis_result['均值回归看涨分数']) }}</div>
-              <el-progress 
-                :percentage="Math.abs(aiResult.analysis_result['均值回归看涨分数'])" 
-                :color="getProgressColor(aiResult.analysis_result['均值回归看涨分数'])"
-                :show-text="false">
-              </el-progress>
-              <div class="score-value-text">{{ aiResult.analysis_result['均值回归看涨分数'] }}</div>
-            </div>
-            
-            <div class="score-item">
-              <div class="score-name">质量波动{{ getScoreLabel(aiResult.analysis_result['质量波动看涨分数']) }}</div>
-              <el-progress 
-                :percentage="Math.abs(aiResult.analysis_result['质量波动看涨分数'])" 
-                :color="getProgressColor(aiResult.analysis_result['质量波动看涨分数'])"
-                :show-text="false">
-              </el-progress>
-              <div class="score-value-text">{{ aiResult.analysis_result['质量波动看涨分数'] }}</div>
+          <div class="ai-section">
+            <div class="ai-sec-title">详细分析</div>
+            <div class="sub-scores">
+              <div class="score-item">
+                <div class="score-name">趋势动能{{ getScoreLabel(aiResult.analysis_result['趋势动能看涨分数']) }}</div>
+                <el-progress 
+                  :percentage="Math.abs(aiResult.analysis_result['趋势动能看涨分数'])" 
+                  :color="getProgressColor(aiResult.analysis_result['趋势动能看涨分数'])"
+                  :show-text="false">
+                </el-progress>
+                <div class="score-value-text">{{ aiResult.analysis_result['趋势动能看涨分数'] }}</div>
+              </div>
+              
+              <div class="score-item">
+                <div class="score-name">均值回归{{ getScoreLabel(aiResult.analysis_result['均值回归看涨分数']) }}</div>
+                <el-progress 
+                  :percentage="Math.abs(aiResult.analysis_result['均值回归看涨分数'])" 
+                  :color="getProgressColor(aiResult.analysis_result['均值回归看涨分数'])"
+                  :show-text="false">
+                </el-progress>
+                <div class="score-value-text">{{ aiResult.analysis_result['均值回归看涨分数'] }}</div>
+              </div>
+              
+              <div class="score-item">
+                <div class="score-name">质量波动{{ getScoreLabel(aiResult.analysis_result['质量波动看涨分数']) }}</div>
+                <el-progress 
+                  :percentage="Math.abs(aiResult.analysis_result['质量波动看涨分数'])" 
+                  :color="getProgressColor(aiResult.analysis_result['质量波动看涨分数'])"
+                  :show-text="false">
+                </el-progress>
+                <div class="score-value-text">{{ aiResult.analysis_result['质量波动看涨分数'] }}</div>
+              </div>
             </div>
           </div>
           
           <!-- 总结 -->
-          <div class="ai-summary">
-            <h4>AI分析总结</h4>
-            <p>{{ aiResult.analysis_result['总结'] }}</p>
+          <div class="ai-section">
+            <div class="ai-sec-title">AI分析总结</div>
+            <div class="ai-summary">
+              <p>{{ aiResult.analysis_result['总结'] }}</p>
+            </div>
           </div>
           
           <!-- 数据信息 -->
-          <div class="data-info">
-            <p><strong>分析数据：</strong>{{ aiResult.data_period.start_date }} 至 {{ aiResult.data_period.end_date }} ({{ aiResult.data_period.data_count }}个交易日)</p>
+          <div class="ai-section">
+            <div class="ai-sec-title">分析数据</div>
+            <div class="data-info">
+              <p><strong>数据期间：</strong>{{ aiResult.data_period.start_date }} 至 {{ aiResult.data_period.end_date }}</p>
+              <p><strong>交易日数：</strong>{{ aiResult.data_period.data_count }}个交易日</p>
+            </div>
           </div>
         </div>
+        
+        <!-- 操作按钮 -->
+        <div class="ai-drawer-actions">
+          <el-button @click="showAiDialog = false">关闭</el-button>
+          <el-button v-if="aiResult" type="primary" @click="resetAiEvaluation">重新评测</el-button>
+          <el-button v-if="!aiResult && selectedModelId && !aiEvaluating" type="primary" @click="startAiEvaluation">开始评测</el-button>
+          <el-button v-if="aiEvaluating" type="primary" :loading="true" disabled>分析中...</el-button>
+        </div>
       </div>
-      
-      <div slot="footer" class="dialog-footer">
-        <el-button @click="showAiDialog = false">关闭</el-button>
-        <el-button v-if="aiResult" type="primary" @click="resetAiEvaluation">重新评测</el-button>
-        <el-button v-if="!aiResult && selectedModelId && !aiEvaluating" type="primary" @click="startAiEvaluation">开始评测</el-button>
-        <el-button v-if="aiEvaluating" type="primary" :loading="true" disabled>分析中...</el-button>
-      </div>
-    </el-dialog>
+    </el-drawer>
   </div>
   </template>
 
@@ -715,109 +670,53 @@ export default {
   font-size: 12px;
 }
 
-/* 对话框底部按钮 */
-.dialog-footer {
-  text-align: right;
+/* AI评测抽屉样式 */
+.ai-evaluation-drawer {
+  --pad: 12px;
 }
 
-.dialog-footer .el-button {
-  margin-left: 10px;
+.ai-evaluation-drawer >>> .el-drawer__header {
+  margin-bottom: 0;
+  padding: var(--pad) var(--pad) 0 var(--pad);
+  border-bottom: 1px solid #e6ebf2;
 }
 
-/* 桌面端对话框优化 - 内容驱动高度 */
-.ai-evaluation-dialog .el-dialog {
-  max-height: 90vh !important;
-  overflow: hidden !important;
+.ai-evaluation-drawer >>> .el-drawer__body {
+  padding: 0;
+  background: #f9fbff;
 }
 
-.ai-evaluation-dialog .el-dialog__body {
-  overflow-y: auto !important;
-  padding: 20px !important;
+.ai-drawer-body {
+  padding: 12px;
 }
 
-/* 移动端对话框样式 */
-.ai-evaluation-mobile .el-dialog {
-  width: 95% !important;
-  margin: 0 auto !important;
-  max-width: 420px;
-  height: auto !important;
-  max-height: calc(100vh - 60px) !important;
-  border-radius: 12px;
-  overflow: hidden;
-  position: fixed !important;
-  top: 30px !important;
-  left: 50% !important;
-  transform: translateX(-50%) !important;
-  z-index: 5000 !important;
-  display: flex !important;
-  flex-direction: column !important;
-}
-
-.ai-evaluation-mobile .el-dialog__wrapper {
-  background-color: rgba(0, 0, 0, 0.5) !important;
-  position: fixed !important;
-  top: 0 !important;
-  left: 0 !important;
-  width: 100% !important;
-  height: 100vh !important;
-  z-index: 4999 !important;
-}
-
-.ai-evaluation-mobile .el-dialog__header {
-  padding: 12px 16px 8px;
-  background: #f8fafc;
-  border-bottom: 1px solid #e2e8f0;
-  flex-shrink: 0;
-}
-
-.ai-evaluation-mobile .el-dialog__title {
-  font-size: 15px;
-  font-weight: 600;
-  color: #1e293b;
-}
-
-.ai-evaluation-mobile .el-dialog__body {
-  padding: 12px 16px;
-  overflow-y: auto;
+.ai-section {
   background: #fff;
-  flex: 1;
-  min-height: 0;
-  -webkit-overflow-scrolling: touch;
-}
-
-.ai-evaluation-mobile .el-dialog__footer {
-  padding: 8px 16px 12px;
-  background: #f8fafc;
-  border-top: 1px solid #e2e8f0;
-  flex-shrink: 0;
-  display: flex;
-  gap: 8px;
-}
-
-.ai-evaluation-mobile .el-dialog__footer .el-button {
-  flex: 1;
-  padding: 10px 16px;
+  border: 1px solid #e6ebf2;
   border-radius: 6px;
-  font-weight: 500;
-  z-index: 5001 !important;
-  position: relative;
-}
-
-.ai-evaluation-mobile .el-form-item {
+  padding: 10px 12px;
+  box-shadow: 0 1px 2px rgba(0,0,0,0.03);
   margin-bottom: 12px;
 }
 
-.ai-evaluation-mobile .el-form-item__label {
+.ai-sec-title {
   font-size: 13px;
-  margin-bottom: 4px;
-  line-height: 1.4;
   color: #374151;
+  font-weight: 600;
+  margin-bottom: 8px;
 }
 
-.ai-evaluation-mobile .el-input,
-.ai-evaluation-mobile .el-select,
-.ai-evaluation-mobile .el-textarea {
-  width: 100%;
+.ai-form .el-form-item {
+  margin-bottom: 10px;
+}
+
+.ai-drawer-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  margin-top: 6px;
+  padding-top: 12px;
+  border-top: 1px solid #e6ebf2;
 }
 
 /* 响应式设计 */
