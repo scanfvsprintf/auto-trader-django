@@ -73,23 +73,27 @@ class FundService:
             self._log_and_save("数据清洗后，当前批次无有效数据可存储。", level=SystemLog.LogLevelChoices.INFO)
             return
             
+        # 统一日期格式处理 - 确保日期格式正确
         quotes_df['日期'] = pd.to_datetime(quotes_df['日期']).dt.date
         
         hfq_precision = Decimal('0.0000000001')
         records_to_process = len(quotes_df)
+        success_count = 0
+        error_count = 0
     
         try:
             # 将整个批次的 update_or_create 操作放在一个事务中，以提高性能
             with transaction.atomic():
                 for _, row in quotes_df.iterrows():
                     try:
+                        fund_code = row['fund_code']
                         close_dec = Decimal(str(row['收盘']))
                         factor_dec = Decimal(str(row['复权因子']))
                         hfq_close_dec = (close_dec * factor_dec).quantize(hfq_precision, rounding=ROUND_HALF_UP)
                         
                         # 对每一行数据都执行 update_or_create
                         FundDailyQuotes.objects.update_or_create(
-                            fund_code_id=row['fund_code'], 
+                            fund_code_id=fund_code, 
                             trade_date=row['日期'],
                             defaults={
                                 'open': Decimal(str(row['开盘'])), 
@@ -102,11 +106,18 @@ class FundService:
                                 'hfq_close': hfq_close_dec
                             }
                         )
+                        success_count += 1
+                        
                     except (InvalidOperation, TypeError) as conversion_error:
                         self._log_and_save(f"跳过一条数据转换失败的记录: {row['fund_code']} on {row['日期']}. Error: {conversion_error}", level=SystemLog.LogLevelChoices.WARNING)
+                        error_count += 1
+                        continue
+                    except Exception as e:
+                        self._log_and_save(f"跳过一条数据存储失败的记录: {row['fund_code']} on {row['日期']}. Error: {e}", level=SystemLog.LogLevelChoices.WARNING)
+                        error_count += 1
                         continue
             
-            self._log_and_save(f"通过 update_or_create 成功处理了 {records_to_process} 条基金日线数据。")
+            self._log_and_save(f"通过 update_or_create 成功处理了 {success_count} 条基金日线数据，跳过 {error_count} 条错误记录。")
     
         except (DatabaseError, Exception) as e:
             self._log_and_save(f"数据批量入库阶段(update_or_create)发生严重错误: {e}", level=SystemLog.LogLevelChoices.ERROR)
@@ -206,14 +217,23 @@ class FundService:
         start_date_str = datetime.datetime.strptime(start_date, '%Y-%m-%d').strftime('%Y%m%d') if start_date else today_str
         end_date_str = datetime.datetime.strptime(end_date, '%Y-%m-%d').strftime('%Y%m%d') if end_date else today_str
         
+        self._log_and_save(f"日期范围: {start_date_str} 到 {end_date_str}")
+        
         # 定义批处理参数
         batch_size = 50  # 每批处理50只基金，可以根据你的机器内存调整
         batch_quotes_list = []
+        success_count = 0
+        error_count = 0
         
         # 改为串行循环
         for i, code in enumerate(target_codes):
-            ak_code = code.split('.')[1]
-            logger.info(f"进度: [{i+1}/{len(target_codes)}] 正在获取 {code}...")
+            # 正确提取akshare需要的纯数字代码
+            if '.' in code:
+                ak_code = code.split('.')[1]  # 从 'sh.510050' 提取 '510050'
+            else:
+                ak_code = code  # 如果已经是纯数字格式，直接使用
+            
+            logger.info(f"进度: [{i+1}/{len(target_codes)}] 正在获取 {code} (ak_code: {ak_code})...")
             try:
                 # 使用基金历史数据接口
                 df_normal = ak.fund_etf_hist_em(symbol=ak_code, period="daily", start_date=start_date_str, end_date=end_date_str, adjust="")
@@ -221,17 +241,30 @@ class FundService:
                 df_hfq = ak.fund_etf_hist_em(symbol=ak_code, period="daily", start_date=start_date_str, end_date=end_date_str, adjust="hfq")
                 
                 if df_normal.empty or df_hfq.empty:
+                    self._log_and_save(f"获取 {code} 数据为空，跳过", level=SystemLog.LogLevelChoices.WARNING)
+                    error_count += 1
                     continue
  
+                # 合并不复权和后复权数据
                 df = pd.merge(df_normal, df_hfq[['日期', '收盘']], on='日期', suffixes=('', '_hfq'))
                 df['复权因子'] = df.apply(lambda row: row['收盘_hfq'] / row['收盘'] if row['收盘'] and row['收盘'] != 0 else 0, axis=1)
-                df['fund_code'] = code
+                df['fund_code'] = code  # 使用完整的基金代码（如 'sh.510050'）
+                
+                # 验证数据完整性
+                if len(df) == 0:
+                    self._log_and_save(f"合并后 {code} 数据为空，跳过", level=SystemLog.LogLevelChoices.WARNING)
+                    error_count += 1
+                    continue
+                
                 batch_quotes_list.append(df)
+                success_count += 1
+                self._log_and_save(f"成功获取 {code} 数据，共 {len(df)} 条记录")
                 
                 time.sleep(1.4) # 增加礼貌性延时，降低被封风险
  
             except Exception as e:
                 self._log_and_save(f"获取 {code} 日线行情失败: {e}", level=SystemLog.LogLevelChoices.WARNING)
+                error_count += 1
                 continue
  
             # 检查是否达到批处理大小，或者已经是最后一只基金
@@ -251,7 +284,7 @@ class FundService:
                 batch_quotes_list = []
                 self._log_and_save(f"批次 {i//batch_size + 1} 处理完毕，内存已释放。")
  
-        self._log_and_save("场内ETF数据更新任务全部执行完毕。")
+        self._log_and_save(f"场内ETF数据更新任务全部执行完毕。成功处理 {success_count} 只基金，失败 {error_count} 只基金。")
 
     def query_fund_info(self, fund_codes: list[str] = None) -> dict[str, FundInfo]:
         """
