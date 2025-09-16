@@ -495,6 +495,11 @@ def daily_etf(request):
     hfq = request.GET.get('hfq', '0') == '1'
     if not code or not start or not end:
         return err("缺少参数: code/start/end")
+    
+    # 添加调试日志
+    import logging
+    logger = logging.getLogger(__name__)
+    logger.info(f"ETF查询请求: code={code}, start={start}, end={end}, with_vol={with_vol}, with_amt={with_amt}, hfq={hfq}")
     try:
         s = datetime.strptime(start, '%Y-%m-%d').date()
         e = datetime.strptime(end, '%Y-%m-%d').date()
@@ -510,26 +515,33 @@ def daily_etf(request):
     # 转换数值为基础类型，避免前端图表无法渲染
     data = []
     for r in raw_rows:
-        factor = float(r.get('adjust_factor') or 1)
-        o = float(r['open'])
-        h = float(r['high'])
-        l = float(r['low'])
-        c = float(r['close'])
-        if hfq:
-            o, h, l, c = o*factor, h*factor, l*factor, c*factor
-        item = {
-            'trade_date': r['trade_date'],
-            'open': o,
-            'high': h,
-            'low': l,
-            'close': c,
-        }
-        if with_vol:
-            item['volume'] = int(r.get('volume') or 0)
-        if with_amt:
-            v = r.get('turnover')
-            item['turnover'] = float(v) if v is not None else None
-        data.append(item)
+        try:
+            factor = float(r.get('adjust_factor') or 1)
+            o = float(r['open'])
+            h = float(r['high'])
+            l = float(r['low'])
+            c = float(r['close'])
+            if hfq:
+                o, h, l, c = o*factor, h*factor, l*factor, c*factor
+            item = {
+                'trade_date': r['trade_date'],
+                'open': o,
+                'high': h,
+                'low': l,
+                'close': c,
+            }
+            if with_vol:
+                item['volume'] = int(r.get('volume') or 0)
+            if with_amt:
+                v = r.get('turnover')
+                item['turnover'] = float(v) if v is not None else None
+            data.append(item)
+        except (ValueError, TypeError) as e:
+            # 跳过数据转换失败的记录，记录日志但不中断处理
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.warning(f"ETF数据转换失败，跳过记录: {r}, 错误: {e}")
+            continue
     if ma and data:
         try:
             ma_list = [int(x) for x in ma.split(',') if x.strip()]
@@ -550,6 +562,9 @@ def daily_etf(request):
     # ETF暂时没有分数线，直接返回空
     for item in data:
         item['final_score'] = None
+    
+    # 添加调试日志
+    logger.info(f"ETF查询结果: 返回 {len(data)} 条数据")
     return ok(data)
 
 

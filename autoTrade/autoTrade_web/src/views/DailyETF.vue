@@ -223,8 +223,20 @@ export default {
       const withAmt = this.subMode==='amt' ? 1 : 0
       const maParam = this.subMode==='ma' ? this.ma : ''
       axios.get('/webManager/daily/etf', { params: { code:this.code, start, end, ma:maParam, with_vol:withVol, with_amt:withAmt, hfq:this.useHfq?1:0 } })
-        .then(res=>{ if(res.data.code===0){ this.etfData=res.data.data||[]; this.draw() } else this.$message.error(res.data.msg) })
-        .catch(()=> this.$message.error('查询失败'))
+        .then(res=>{ 
+          console.log('ETF查询响应:', res.data); // 添加调试日志
+          if(res.data.code===0){ 
+            this.etfData=res.data.data||[]; 
+            this.draw() 
+          } else { 
+            console.error('ETF查询业务错误:', res.data.msg); // 添加调试日志
+            this.$message.error(res.data.msg) 
+          } 
+        })
+        .catch(err=>{ 
+          console.error('ETF查询网络错误:', err); // 添加详细错误信息
+          this.$message.error(`查询失败: ${err.message || '网络错误'}`) 
+        })
         .finally(()=> this.loading=false)
     },
     onSubModeChange(){ this.fetchETF() },
@@ -233,10 +245,18 @@ export default {
     draw(){
       const el=this.$refs.etfChart; if(!el) return
       if(this._chart){ this._chart.dispose(); this._chart=null }
-      const chart=echarts.init(el, null, { renderer:'canvas', devicePixelRatio:(window.devicePixelRatio||1) })
-      this._chart = chart
-      const x=this.etfData.map(x=>x.trade_date)
-      const kdata=this.etfData.map(x=>[x.trade_date,x.open,x.close,x.low,x.high])
+      
+      // 检查数据是否有效
+      if(!this.etfData || this.etfData.length === 0){
+        console.warn('ETF数据为空，无法绘制图表');
+        return;
+      }
+      
+      try {
+        const chart=echarts.init(el, null, { renderer:'canvas', devicePixelRatio:(window.devicePixelRatio||1) })
+        this._chart = chart
+        const x=this.etfData.map(x=>x.trade_date)
+        const kdata=this.etfData.map(x=>[x.trade_date,x.open,x.close,x.low,x.high])
       const toPoints = (ys)=> ys.map((v,i)=> [x[i], v])
       const series=[ { type:'candlestick', data:kdata, xAxisIndex:0, yAxisIndex:0, name:this.code, encode:{ x:0, y:[1,2,3,4] }, itemStyle:{ color:'#ec0000', color0:'#00da3c' } } ]
       
@@ -285,11 +305,16 @@ export default {
         ], 
         yAxis:[ 
           { type:'value', name:'价格', nameLocation:'middle', nameGap: this.isMobile?28:36, scale:true, axisLabel:{ formatter:v=>Number(v).toFixed(2), color:'#6b7280', margin: this.isMobile?6:8, fontSize: this.isMobile?10:12 }, gridIndex:0 }, 
+          { type:'value', name:'', gridIndex:0, show:false }, // 占位yAxis，索引1
           subYAxis 
         ], 
         series 
       })
       this.$nextTick(()=>{ chart.resize() })
+      } catch (error) {
+        console.error('ETF图表绘制失败:', error);
+        this.$message.error('图表绘制失败，请检查数据格式');
+      }
     }
   }
 }
