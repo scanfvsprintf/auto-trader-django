@@ -14,6 +14,8 @@ from .backtest_logs import BacktestDailyLog,BacktestOperationLog
 from .index_quotes_csi300 import IndexQuotesCsi300
 from .ai_source_config import AiSourceConfig
 from .ai_model_config import AiModelConfig
+from .fund_info import FundInfo
+from .fund_daily_quotes import FundDailyQuotes
 
 __all__ = [
     'StockInfo',
@@ -31,5 +33,7 @@ __all__ = [
     "MDistributionBacktestLog",
     'IndexQuotesCsi300',
     'AiSourceConfig',
-    'AiModelConfig'
+    'AiModelConfig',
+    'FundInfo',
+    'FundDailyQuotes'
 ]

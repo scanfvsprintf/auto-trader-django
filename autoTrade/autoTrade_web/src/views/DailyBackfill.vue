@@ -12,6 +12,14 @@
               </el-radio-group>
             </el-form-item>
 
+            <el-form-item label="拉取范围">
+              <el-radio-group v-model="fetchRange">
+                <el-radio-button label="ALL">全部</el-radio-button>
+                <el-radio-button label="STOCK">A股</el-radio-button>
+                <el-radio-button label="ETF">场内ETF</el-radio-button>
+              </el-radio-group>
+            </el-form-item>
+
             <template v-if="mode==='range'">
               <el-form-item label="codes">
                 <el-input v-model="codes" placeholder="留空=全部；或 sh.600000,sz.000001" style="width:320px" />
@@ -36,9 +44,10 @@
           <div class="help-panel">
             <div class="help-title">如何选择补拉模式</div>
             <ul class="help-list">
-              <li><b>时间区间补拉</b>：为选定股票在起止日期内补齐/更新日线</li>
-              <li><b>缺失日补拉</b>：仅针对某一天，自动找出该日缺少日线的股票并补齐（忽略 codes）</li>
-              <li>二者互斥：填写“缺失日”时，仅执行缺失日补拉</li>
+              <li><b>时间区间补拉</b>：为选定股票/ETF在起止日期内补齐/更新日线</li>
+              <li><b>缺失日补拉</b>：仅针对某一天，自动找出该日缺少日线的股票/ETF并补齐（忽略 codes）</li>
+              <li><b>拉取范围</b>：全部(A股+ETF)、仅A股、仅场内ETF</li>
+              <li>二者互斥：填写"缺失日"时，仅执行缺失日补拉</li>
               <li>建议顺序：先缺失日 → 再时间区间</li>
             </ul>
           </div>
@@ -54,7 +63,7 @@ import smartViewportManager from '@/utils/smartViewportManager'
 
 export default {
   name: 'DailyBackfill',
-  data(){ return { mode:'range', codes:'', range:[], missingDate:'', pickerOptions:{}, loading:false, isMobile: false, isPortrait: true } },
+  data(){ return { mode:'range', codes:'', range:[], missingDate:'', pickerOptions:{}, loading:false, isMobile: false, isPortrait: true, fetchRange:'ALL' } },
   created(){
     const end = new Date(); const start = new Date(); start.setMonth(start.getMonth()-1)
     const fmt = d => `${d.getFullYear()}-${('0'+(d.getMonth()+1)).slice(-2)}-${('0'+d.getDate()).slice(-2)}`
@@ -82,7 +91,7 @@ export default {
       this.loading = true
       if(this.mode==='missing'){
         if(!this.missingDate){ this.loading=false; this.$message.error('请选择缺失日'); return }
-        axios.post('/webManager/daily/fetch', { start:this.missingDate, end:this.missingDate, fill_missing_for_date: this.missingDate })
+        axios.post('/webManager/daily/fetch', { start:this.missingDate, end:this.missingDate, fill_missing_for_date: this.missingDate, fetch_range: this.fetchRange })
           .then(res=>{ if(res.data.code===0) this.$message.success('已执行缺失日补拉'); else this.$message.error(res.data.msg) })
           .catch(()=> this.$message.error('补拉失败'))
           .finally(()=> this.loading=false)
@@ -90,7 +99,7 @@ export default {
         if(!this.range || this.range.length!==2){ this.loading=false; this.$message.error('请选择时间区间'); return }
         const [start, end] = this.range
         const codesPayload = (this.codes && this.codes.trim()) ? this.codes.split(',').map(s=>s.trim()).filter(Boolean) : []
-        axios.post('/webManager/daily/fetch', { codes: codesPayload, start, end })
+        axios.post('/webManager/daily/fetch', { codes: codesPayload, start, end, fetch_range: this.fetchRange })
           .then(res=>{ if(res.data.code===0) this.$message.success('已执行时间区间补拉'); else this.$message.error(res.data.msg) })
           .catch(()=> this.$message.error('补拉失败'))
           .finally(()=> this.loading=false)

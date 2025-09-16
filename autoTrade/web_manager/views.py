@@ -9,9 +9,11 @@ from pypinyin import lazy_pinyin, Style
 
 from common.models import (
     DailyTradingPlan, StockInfo, DailyFactorValues, FactorDefinitions,
-    DailyQuotes, IndexQuotesCsi300, StrategyParameters, AiSourceConfig, AiModelConfig
+    DailyQuotes, IndexQuotesCsi300, StrategyParameters, AiSourceConfig, AiModelConfig,
+    FundInfo, FundDailyQuotes
 )
 from data_manager.service.stock_service import StockService
+from data_manager.service.fund_service import FundService
 from selection_manager.service.selection_service import SelectionService
 from ai_manager.service.config_manager import AiConfigManager
 from ai_manager.service.ai_service import AiService, AiServiceException
@@ -69,6 +71,57 @@ def stock_search(request):
     else:
         # 非字母查询，只使用基础匹配
         qs = base_qs.values('stock_code', 'stock_name')[:20]
+        return ok(list(qs))
+
+
+# ----------------------- 通用：ETF搜索 -----------------------
+@require_http_methods(["GET"])
+def etf_search(request):
+    """
+    模糊搜索ETF：支持代码、名称或拼音首字母匹配。
+    参数: q  结果最多返回 20 条
+    """
+    q = request.GET.get('q', '').strip()
+    if not q:
+        return ok([])
+    
+    # 基础查询：代码和名称匹配
+    base_qs = FundInfo.objects.filter(
+        models.Q(fund_code__icontains=q) | models.Q(fund_name__icontains=q),
+        fund_type=FundInfo.FundTypeChoices.ETF
+    )
+    
+    # 如果查询词是纯字母，尝试拼音首字母匹配
+    if q.isalpha() and len(q) <= 6:  # 限制长度避免性能问题
+        # 获取所有ETF数据用于拼音匹配
+        all_etfs = FundInfo.objects.filter(fund_type=FundInfo.FundTypeChoices.ETF).values('fund_code', 'fund_name')
+        pinyin_matches = []
+        
+        for etf in all_etfs:
+            etf_name = etf['fund_name']
+            # 生成拼音首字母
+            pinyin_initials = ''.join([p[0].upper() for p in lazy_pinyin(etf_name, style=Style.FIRST_LETTER)])
+            # 检查是否匹配
+            if q.upper() in pinyin_initials:
+                pinyin_matches.append(etf)
+        
+        # 合并结果，去重
+        base_results = list(base_qs.values('fund_code', 'fund_name'))
+        all_results = base_results + pinyin_matches
+        
+        # 去重并保持顺序
+        seen = set()
+        unique_results = []
+        for item in all_results:
+            key = item['fund_code']
+            if key not in seen:
+                seen.add(key)
+                unique_results.append(item)
+        
+        return ok(unique_results[:20])
+    else:
+        # 非字母查询，只使用基础匹配
+        qs = base_qs.values('fund_code', 'fund_name')[:20]
         return ok(list(qs))
 
 
@@ -431,6 +484,75 @@ def daily_stock(request):
     return ok(data)
 
 
+@require_http_methods(["GET"])
+def daily_etf(request):
+    code = request.GET.get('code')
+    start = request.GET.get('start')
+    end = request.GET.get('end')
+    ma = request.GET.get('ma', '')
+    with_vol = request.GET.get('with_vol', '0') == '1'
+    with_amt = request.GET.get('with_amt', '0') == '1'
+    hfq = request.GET.get('hfq', '0') == '1'
+    if not code or not start or not end:
+        return err("缺少参数: code/start/end")
+    try:
+        s = datetime.strptime(start, '%Y-%m-%d').date()
+        e = datetime.strptime(end, '%Y-%m-%d').date()
+    except Exception:
+        return err("参数 start/end 格式应为 YYYY-MM-DD")
+    qs = FundDailyQuotes.objects.filter(fund_code_id=code, trade_date__gte=s, trade_date__lte=e).order_by('trade_date')
+    fields = ['trade_date', 'open', 'high', 'low', 'close', 'adjust_factor']
+    if with_vol:
+        fields.append('volume')
+    if with_amt:
+        fields.append('turnover')
+    raw_rows = list(qs.values(*fields))
+    # 转换数值为基础类型，避免前端图表无法渲染
+    data = []
+    for r in raw_rows:
+        factor = float(r.get('adjust_factor') or 1)
+        o = float(r['open'])
+        h = float(r['high'])
+        l = float(r['low'])
+        c = float(r['close'])
+        if hfq:
+            o, h, l, c = o*factor, h*factor, l*factor, c*factor
+        item = {
+            'trade_date': r['trade_date'],
+            'open': o,
+            'high': h,
+            'low': l,
+            'close': c,
+        }
+        if with_vol:
+            item['volume'] = int(r.get('volume') or 0)
+        if with_amt:
+            v = r.get('turnover')
+            item['turnover'] = float(v) if v is not None else None
+        data.append(item)
+    if ma and data:
+        try:
+            ma_list = [int(x) for x in ma.split(',') if x.strip()]
+            closes = [d['close'] for d in data]
+            for m in ma_list:
+                ma_vals = []
+                for i in range(len(closes)):
+                    if i + 1 < m:
+                        ma_vals.append(None)
+                    else:
+                        window = closes[i + 1 - m:i + 1]
+                        ma_vals.append(sum(window) / m)
+                key = f'ma{m}'
+                for i in range(len(data)):
+                    data[i][key] = ma_vals[i]
+        except Exception:
+            pass
+    # ETF暂时没有分数线，直接返回空
+    for item in data:
+        item['final_score'] = None
+    return ok(data)
+
+
 @require_http_methods(["POST"])
 def daily_fetch(request):
     try:
@@ -442,29 +564,104 @@ def daily_fetch(request):
     start = payload.get('start')
     end = payload.get('end')
     fill_missing_for_date = payload.get('fill_missing_for_date')
+    fetch_range = payload.get('fetch_range', 'ALL')  # 新增：拉取范围，默认全部
     if not start or not end:
         return err("缺少参数: start 或 end")
 
-    svc = StockService()
-    target_codes = None
-    if fill_missing_for_date:
-        try:
-            dt = datetime.strptime(fill_missing_for_date, '%Y-%m-%d').date()
-        except Exception:
-            return err("参数 fill_missing_for_date 格式应为 YYYY-MM-DD")
-        stocks = set(StockInfo.objects.values_list('stock_code', flat=True))
-        have_quotes = set(
-            DailyQuotes.objects.filter(trade_date=dt).values_list('stock_code_id', flat=True)
-        )
-        missing = list(stocks - have_quotes)
-        target_codes = missing
-    elif codes == 'ALL':
-        target_codes = list(StockInfo.objects.values_list('stock_code', flat=True))
-    elif isinstance(codes, list):
-        target_codes = codes
+    # 根据拉取范围选择不同的服务
+    if fetch_range == 'ETF':
+        # 只拉取场内ETF
+        svc = FundService()
+        target_codes = None
+        if fill_missing_for_date:
+            try:
+                dt = datetime.strptime(fill_missing_for_date, '%Y-%m-%d').date()
+            except Exception:
+                return err("参数 fill_missing_for_date 格式应为 YYYY-MM-DD")
+            funds = set(FundInfo.objects.filter(fund_type=FundInfo.FundTypeChoices.ETF).values_list('fund_code', flat=True))
+            have_quotes = set(
+                FundDailyQuotes.objects.filter(trade_date=dt).values_list('fund_code_id', flat=True)
+            )
+            missing = list(funds - have_quotes)
+            target_codes = missing
+        elif codes == 'ALL':
+            target_codes = list(FundInfo.objects.filter(fund_type=FundInfo.FundTypeChoices.ETF).values_list('fund_code', flat=True))
+        elif isinstance(codes, list):
+            target_codes = codes
 
-    svc.update_local_a_shares(stock_codes=target_codes, start_date=start, end_date=end)
-    return ok({"fetched": True, "size": 0 if target_codes is None else len(target_codes)})
+        svc.update_local_etf_shares(fund_codes=target_codes, start_date=start, end_date=end)
+        return ok({"fetched": True, "size": 0 if target_codes is None else len(target_codes), "type": "ETF"})
+    
+    elif fetch_range == 'STOCK':
+        # 只拉取A股
+        svc = StockService()
+        target_codes = None
+        if fill_missing_for_date:
+            try:
+                dt = datetime.strptime(fill_missing_for_date, '%Y-%m-%d').date()
+            except Exception:
+                return err("参数 fill_missing_for_date 格式应为 YYYY-MM-DD")
+            stocks = set(StockInfo.objects.values_list('stock_code', flat=True))
+            have_quotes = set(
+                DailyQuotes.objects.filter(trade_date=dt).values_list('stock_code_id', flat=True)
+            )
+            missing = list(stocks - have_quotes)
+            target_codes = missing
+        elif codes == 'ALL':
+            target_codes = list(StockInfo.objects.values_list('stock_code', flat=True))
+        elif isinstance(codes, list):
+            target_codes = codes
+
+        svc.update_local_a_shares(stock_codes=target_codes, start_date=start, end_date=end)
+        return ok({"fetched": True, "size": 0 if target_codes is None else len(target_codes), "type": "STOCK"})
+    
+    else:
+        # 拉取全部（A股 + ETF）
+        stock_svc = StockService()
+        fund_svc = FundService()
+        
+        # 拉取A股
+        stock_target_codes = None
+        if fill_missing_for_date:
+            try:
+                dt = datetime.strptime(fill_missing_for_date, '%Y-%m-%d').date()
+            except Exception:
+                return err("参数 fill_missing_for_date 格式应为 YYYY-MM-DD")
+            stocks = set(StockInfo.objects.values_list('stock_code', flat=True))
+            have_quotes = set(
+                DailyQuotes.objects.filter(trade_date=dt).values_list('stock_code_id', flat=True)
+            )
+            missing = list(stocks - have_quotes)
+            stock_target_codes = missing
+        elif codes == 'ALL':
+            stock_target_codes = list(StockInfo.objects.values_list('stock_code', flat=True))
+        elif isinstance(codes, list):
+            stock_target_codes = codes
+
+        stock_svc.update_local_a_shares(stock_codes=stock_target_codes, start_date=start, end_date=end)
+        
+        # 拉取ETF
+        fund_target_codes = None
+        if fill_missing_for_date:
+            try:
+                dt = datetime.strptime(fill_missing_for_date, '%Y-%m-%d').date()
+            except Exception:
+                return err("参数 fill_missing_for_date 格式应为 YYYY-MM-DD")
+            funds = set(FundInfo.objects.filter(fund_type=FundInfo.FundTypeChoices.ETF).values_list('fund_code', flat=True))
+            have_quotes = set(
+                FundDailyQuotes.objects.filter(trade_date=dt).values_list('fund_code_id', flat=True)
+            )
+            missing = list(funds - have_quotes)
+            fund_target_codes = missing
+        elif codes == 'ALL':
+            fund_target_codes = list(FundInfo.objects.filter(fund_type=FundInfo.FundTypeChoices.ETF).values_list('fund_code', flat=True))
+        elif isinstance(codes, list):
+            fund_target_codes = codes
+
+        fund_svc.update_local_etf_shares(fund_codes=fund_target_codes, start_date=start, end_date=end)
+        
+        total_size = (0 if stock_target_codes is None else len(stock_target_codes)) + (0 if fund_target_codes is None else len(fund_target_codes))
+        return ok({"fetched": True, "size": total_size, "type": "ALL"})
 
 
 @require_http_methods(["GET"])

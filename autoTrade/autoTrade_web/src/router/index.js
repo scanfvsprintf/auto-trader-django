@@ -6,6 +6,7 @@ import Selection from '../views/Selection.vue'
 import Daily from '../views/Daily.vue'
 import DailyCsi from '../views/DailyCsi.vue'
 import DailyStock from '../views/DailyStock.vue'
+import DailyETF from '../views/DailyETF.vue'
 import DailyBackfill from '../views/DailyBackfill.vue'
 import Factors from '../views/Factors.vue'
 import System from '../views/System.vue'
@@ -27,6 +28,7 @@ const router = new Router({
       { path: 'daily', component: Daily, redirect: '/daily/csi', children: [
         { path: 'csi', component: DailyCsi },
         { path: 'stock', component: DailyStock },
+        { path: 'etf', component: DailyETF },
         { path: 'backfill', component: DailyBackfill }
       ]},
       { path: 'factors', component: Factors },

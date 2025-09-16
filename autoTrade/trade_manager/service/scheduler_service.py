@@ -13,6 +13,7 @@ from decimal import Decimal
 from selection_manager.service.selection_service import SelectionService
 from data_manager.service.corporate_action_service import CorporateActionService
 from data_manager.service.stock_service import StockService
+from data_manager.service.fund_service import FundService
 from data_manager.service.email_service import EmailNotificationService
 from trade_manager.service.before_fix_service import BeforeFixService
 from trade_manager.service.decision_order_service import DecisionOrderService
@@ -89,6 +90,13 @@ def selection_job():
     service = StockService()
     service.update_local_a_shares(start_date=date.today().strftime('%Y-%m-%d'),end_date=date.today().strftime('%Y-%m-%d'))
     service.update_csi300_index_data(start_date=date.today().strftime('%Y-%m-%d'), end_date=date.today().strftime('%Y-%m-%d'))
+    
+    # 新增：拉取当日场内ETF日线信息
+    logger.info("开始拉取当日场内ETF日线信息...")
+    fund_service = FundService()
+    fund_service.update_local_etf_shares(start_date=date.today().strftime('%Y-%m-%d'), end_date=date.today().strftime('%Y-%m-%d'))
+    logger.info("场内ETF日线信息拉取完成。")
+    
     service = SelectionService(trade_date=date.today(), mode='realtime')
     service.run_selection()
 

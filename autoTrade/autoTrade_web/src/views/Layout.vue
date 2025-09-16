@@ -23,6 +23,7 @@
             <template slot="title">日线管理</template>
             <el-menu-item index="/daily/csi">沪深300</el-menu-item>
             <el-menu-item index="/daily/stock">单股K线</el-menu-item>
+            <el-menu-item index="/daily/etf">ETF K线</el-menu-item>
             <el-menu-item index="/daily/backfill">日线补拉</el-menu-item>
           </el-submenu>
           <el-menu-item index="/factors">因子管理</el-menu-item>
@@ -52,6 +53,7 @@
             <div class="daily-pop">
               <div class="daily-item" @click="navigate('/daily/csi')">沪深300</div>
               <div class="daily-item" @click="navigate('/daily/stock')">单股K线</div>
+              <div class="daily-item" @click="navigate('/daily/etf')">ETF K线</div>
               <div class="daily-item" @click="navigate('/daily/backfill')">日线补拉</div>
             </div>
             <div slot="reference" class="bottom-item" :class="{active: activeBottom.indexOf('/daily')===0}" @click="toggleDaily">
@@ -94,6 +96,7 @@ export default {
       const p = this.$route && this.$route.path ? this.$route.path : '/selection'
       if(p.startsWith('/daily/')){
         if(p.startsWith('/daily/stock')) return '/daily/stock'
+        if(p.startsWith('/daily/etf')) return '/daily/etf'
         return '/daily/csi'
       }
       if(p.startsWith('/system/') || p === '/ai-config'){
