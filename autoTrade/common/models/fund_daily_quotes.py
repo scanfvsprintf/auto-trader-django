@@ -72,4 +72,5 @@ class FundDailyQuotes(models.Model):
         verbose_name_plural = verbose_name
         indexes = [
             models.Index(fields=['trade_date'], name='funddailyquotes_tradedate_idx'),
+            models.Index(fields=['fund_code', 'trade_date'], name='fdq_fund_date_idx'), # 优化按基金代码查询最早日期的性能
         ]

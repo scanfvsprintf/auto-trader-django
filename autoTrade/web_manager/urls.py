@@ -9,6 +9,7 @@ urlpatterns = [
     path('selection/run_range', views.selection_run_range),
     # 通用-股票搜索
     path('stock/search', views.stock_search),
+    path('fund/search', views.fund_search),
     # 通用-ETF搜索
     path('etf/search', views.etf_search),
     # 日线管理
@@ -33,6 +34,10 @@ urlpatterns = [
     # AI评测功能
     path('ai/evaluate/csi300', views.ai_evaluate_csi300),
     path('ai/evaluate/stock', views.ai_evaluate_stock),
+    # 指标分析
+    path('analysis/correlation/compare', views.correlation_analysis_compare),
+    # 组合回测
+    path('backtest/portfolio', views.portfolio_backtest),
 ]
 
 

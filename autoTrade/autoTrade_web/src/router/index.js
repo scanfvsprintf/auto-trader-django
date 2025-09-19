@@ -13,6 +13,9 @@ import System from '../views/System.vue'
 import Schema from '../views/Schema.vue'
 import SystemBacktest from '../views/SystemBacktest.vue'
 import AiConfig from '../views/AiConfig.vue'
+import Analysis from '../views/Analysis.vue'
+import CorrelationAnalysis from '../views/CorrelationAnalysis.vue'
+import PortfolioBacktest from '../views/PortfolioBacktest.vue'
 
 Vue.use(Router)
 
@@ -32,9 +35,14 @@ const router = new Router({
         { path: 'backfill', component: DailyBackfill }
       ]},
       { path: 'factors', component: Factors },
+      { path: 'analysis', component: Analysis, redirect: '/analysis/correlation', children: [
+        { path: 'correlation', component: CorrelationAnalysis }
+      ]},
       { path: 'system', component: System },
       { path: 'system/schema', component: Schema },
-      { path: 'backtest', component: SystemBacktest },
+      { path: 'backtest', redirect: '/backtest/stock' },
+      { path: 'backtest/stock', component: SystemBacktest },
+      { path: 'backtest/portfolio', component: PortfolioBacktest },
       { path: 'ai-config', component: AiConfig }
     ]}
   ]
@@ -43,7 +51,7 @@ const router = new Router({
 router.beforeEach((to, from, next) => {
   if (to.path !== '/login' && !isAuthed()) { next('/login'); return }
   // 简单基于用户名的只读权限示例：xiangmei 视为只读
-  if (to.path === '/selection' || to.path === '/factors' || to.path === '/system' || to.path.startsWith('/system/') || to.path === '/backtest' || to.path === '/ai-config') {
+  if (to.path === '/selection' || to.path === '/factors' || to.path.startsWith('/analysis') || to.path === '/system' || to.path.startsWith('/system/') || to.path.startsWith('/backtest') || to.path === '/ai-config') {
     const u = localStorage.getItem('authedUser') || ''
     // 在页面内部据此控制按钮的显示与禁用
     window.__READ_ONLY__ = (u === 'xiangmei')

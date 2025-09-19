@@ -71,5 +71,6 @@ class DailyQuotes(models.Model):
         verbose_name = '日线行情'
         verbose_name_plural = verbose_name
         indexes = [
-            models.Index(fields=['trade_date'], name='dailyquotes_tradedate_idx'), # <--- 在这里添加
+            models.Index(fields=['trade_date'], name='dailyquotes_tradedate_idx'),
+            models.Index(fields=['stock_code', 'trade_date'], name='dq_stock_date_idx'), # 优化按股票代码查询最早日期的性能
         ]

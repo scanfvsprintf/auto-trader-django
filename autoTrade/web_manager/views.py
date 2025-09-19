@@ -6,6 +6,7 @@ from django.db.models import F
 from datetime import datetime, timedelta
 from decimal import Decimal
 from pypinyin import lazy_pinyin, Style
+import logging
 
 from common.models import (
     DailyTradingPlan, StockInfo, DailyFactorValues, FactorDefinitions,
@@ -24,6 +25,37 @@ def ok(data=None):
 
 def err(msg, code=1):
     return JsonResponse({"code": code, "msg": msg, "data": None}, status=200)
+
+def parse_date_string(date_str):
+    """
+    解析日期字符串，支持多种格式
+    支持的格式：
+    - YYYY-MM-DD
+    - YYYY-MM-DDTHH:MM:SS.sssZ (ISO 8601)
+    - YYYY-MM-DDTHH:MM:SSZ
+    """
+    if not date_str:
+        return None
+    
+    # 移除可能的时区信息
+    date_str = str(date_str).strip()
+    
+    # 尝试不同的日期格式
+    formats = [
+        '%Y-%m-%d',                    # 2024-01-01
+        '%Y-%m-%dT%H:%M:%S.%fZ',      # 2024-01-01T03:28:15.650Z
+        '%Y-%m-%dT%H:%M:%SZ',         # 2024-01-01T03:28:15Z
+        '%Y-%m-%dT%H:%M:%S',          # 2024-01-01T03:28:15
+    ]
+    
+    for fmt in formats:
+        try:
+            return datetime.strptime(date_str, fmt).date()
+        except ValueError:
+            continue
+    
+    # 如果所有格式都失败，抛出异常
+    raise ValueError(f"无法解析日期格式: {date_str}")
 # ----------------------- 通用：股票搜索 -----------------------
 @require_http_methods(["GET"])
 def stock_search(request):
@@ -67,12 +99,99 @@ def stock_search(request):
                 seen.add(key)
                 unique_results.append(item)
         
-        return ok(unique_results[:20])
+        # 获取所有股票代码
+        stock_codes = [item['stock_code'] for item in unique_results[:20]]
+        
+        # 一次性查询所有股票的最早交易日期
+        from common.models import DailyQuotes
+        earliest_dates = {}
+        if stock_codes:
+            earliest_quotes = DailyQuotes.objects.filter(
+                stock_code_id__in=stock_codes
+            ).values('stock_code_id').annotate(
+                earliest_date=models.Min('trade_date')
+            )
+            earliest_dates = {item['stock_code_id']: item['earliest_date'] for item in earliest_quotes}
+        
+        # 添加起始时间信息
+        results = []
+        for item in unique_results[:20]:
+            results.append({
+                'stock_code': item['stock_code'],
+                'stock_name': item['stock_name'],
+                'start_date': earliest_dates.get(item['stock_code'], None)
+            })
+        
+        return ok(results)
     else:
         # 非字母查询，只使用基础匹配
         qs = base_qs.values('stock_code', 'stock_name')[:20]
-        return ok(list(qs))
+        
+        # 获取所有股票代码
+        stock_codes = [stock['stock_code'] for stock in qs]
+        
+        # 一次性查询所有股票的最早交易日期
+        from common.models import DailyQuotes
+        earliest_dates = {}
+        if stock_codes:
+            earliest_quotes = DailyQuotes.objects.filter(
+                stock_code_id__in=stock_codes
+            ).values('stock_code_id').annotate(
+                earliest_date=models.Min('trade_date')
+            )
+            earliest_dates = {item['stock_code_id']: item['earliest_date'] for item in earliest_quotes}
+        
+        # 添加起始时间信息
+        results = []
+        for stock in qs:
+            results.append({
+                'stock_code': stock['stock_code'],
+                'stock_name': stock['stock_name'],
+                'start_date': earliest_dates.get(stock['stock_code'], None)
+            })
+        
+        return ok(results)
 
+@require_http_methods(["GET"])
+def fund_search(request):
+    """
+    模糊搜索基金：支持代码、名称匹配，包含起始时间信息。
+    参数: keyword  结果最多返回 20 条
+    """
+    keyword = request.GET.get('keyword', '').strip()
+    limit = int(request.GET.get('limit', 20))
+    
+    if not keyword:
+        return ok([])
+    
+    # 基础查询：代码和名称匹配，使用select_related优化查询
+    qs = FundInfo.objects.filter(
+        models.Q(fund_code__icontains=keyword) | models.Q(fund_name__icontains=keyword)
+    ).select_related()[:limit]
+    
+    # 获取所有基金代码
+    fund_codes = [fund.fund_code for fund in qs]
+    
+    # 一次性查询所有基金的最早交易日期
+    from common.models import FundDailyQuotes
+    earliest_dates = {}
+    if fund_codes:
+        earliest_quotes = FundDailyQuotes.objects.filter(
+            fund_code_id__in=fund_codes
+        ).values('fund_code_id').annotate(
+            earliest_date=models.Min('trade_date')
+        )
+        earliest_dates = {item['fund_code_id']: item['earliest_date'] for item in earliest_quotes}
+    
+    results = []
+    for fund in qs:
+        results.append({
+            'code': fund.fund_code,
+            'name': fund.fund_name,
+            'start_date': earliest_dates.get(fund.fund_code, fund.listing_date)
+        })
+    
+    return ok(results)
 
 # ----------------------- 通用：ETF搜索 -----------------------
 @require_http_methods(["GET"])
@@ -497,7 +616,6 @@ def daily_etf(request):
         return err("缺少参数: code/start/end")
     
     # 添加调试日志
-    import logging
     logger = logging.getLogger(__name__)
     logger.info(f"ETF查询请求: code={code}, start={start}, end={end}, with_vol={with_vol}, with_amt={with_amt}, hfq={hfq}")
     try:
@@ -538,7 +656,6 @@ def daily_etf(request):
             data.append(item)
         except (ValueError, TypeError) as e:
             # 跳过数据转换失败的记录，记录日志但不中断处理
-            import logging
             logger = logging.getLogger(__name__)
             logger.warning(f"ETF数据转换失败，跳过记录: {r}, 错误: {e}")
             continue
@@ -1503,3 +1620,899 @@ def ai_evaluate_stock(request):
     except Exception as e:
         return err(f"AI评测失败: {str(e)}")
 
+
+# ----------------------- 指标分析 -----------------------
+@require_http_methods(["POST"])
+def correlation_analysis_compare(request):
+    """
+    相关性分析：标的比较
+    参数：
+    - symbol1: 第一个标的代码 (股票或基金)
+    - symbol2: 第二个标的代码 (股票或基金)  
+    - window_size: 移动窗口大小，默认60天
+    - start_date: 开始日期 (可选)
+    - end_date: 结束日期 (可选)
+    """
+    try:
+        import json
+        payload = json.loads(request.body.decode('utf-8') or '{}')
+    except Exception:
+        payload = {}
+    
+    symbol1 = payload.get('symbol1')
+    symbol2 = payload.get('symbol2')
+    window_size = int(payload.get('window_size', 60))
+    start_date_str = payload.get('start_date')
+    end_date_str = payload.get('end_date')
+    
+    if not symbol1 or not symbol2:
+        return err("缺少参数: symbol1 或 symbol2")
+    
+    if window_size < 10 or window_size > 252:
+        return err("窗口大小必须在10-252之间")
+    
+    try:
+        from datetime import datetime, timedelta
+        import pandas as pd
+        import numpy as np
+        from scipy.stats import pearsonr
+        
+        # 确定日期范围
+        if start_date_str and end_date_str:
+            start_date = parse_date_string(start_date_str)
+            end_date = parse_date_string(end_date_str)
+        else:
+            # 默认查询最近一年的数据
+            end_date = datetime.now().date()
+            start_date = end_date - timedelta(days=365)
+        
+        # 获取两个标的的基础信息
+        symbol1_info = None
+        symbol2_info = None
+        
+        # 判断是股票还是基金
+        if '.' in symbol1:
+            symbol1_info = FundInfo.objects.filter(fund_code=symbol1).first()
+            symbol1_type = 'fund'
+        else:
+            symbol1_info = StockInfo.objects.filter(stock_code=symbol1).first()
+            symbol1_type = 'stock'
+            
+        if '.' in symbol2:
+            symbol2_info = FundInfo.objects.filter(fund_code=symbol2).first()
+            symbol2_type = 'fund'
+        else:
+            symbol2_info = StockInfo.objects.filter(stock_code=symbol2).first()
+            symbol2_type = 'stock'
+        
+        if not symbol1_info or not symbol2_info:
+            return err("找不到指定的标的信息")
+        
+        # 获取历史数据
+        def get_price_data(symbol, symbol_type, start_date, end_date):
+            if symbol_type == 'fund':
+                qs = FundDailyQuotes.objects.filter(
+                    fund_code_id=symbol,
+                    trade_date__gte=start_date,
+                    trade_date__lte=end_date
+                ).order_by('trade_date').values('trade_date', 'hfq_close')
+            else:
+                qs = DailyQuotes.objects.filter(
+                    stock_code_id=symbol,
+                    trade_date__gte=start_date,
+                    trade_date__lte=end_date
+                ).order_by('trade_date').values('trade_date', 'hfq_close')
+            
+            data = []
+            for row in qs:
+                try:
+                    data.append({
+                        'trade_date': row['trade_date'],
+                        'price': float(row['hfq_close'])
+                    })
+                except (ValueError, TypeError):
+                    continue
+            
+            return pd.DataFrame(data)
+        
+        # 获取两个标的的价格数据
+        df1 = get_price_data(symbol1, symbol1_type, start_date, end_date)
+        df2 = get_price_data(symbol2, symbol2_type, start_date, end_date)
+        
+        if df1.empty or df2.empty:
+            return err("获取价格数据失败或数据为空")
+        
+        # 合并数据，确保日期对齐
+        df_merged = pd.merge(df1, df2, on='trade_date', suffixes=('_1', '_2'))
+        df_merged = df_merged.sort_values('trade_date').reset_index(drop=True)
+        
+        if len(df_merged) < window_size:
+            return err(f"数据点不足，至少需要 {window_size} 个交易日的数据")
+        
+        # 计算日收益率
+        df_merged['returns_1'] = df_merged['price_1'].pct_change()
+        df_merged['returns_2'] = df_merged['price_2'].pct_change()
+        
+        # 移除缺失值
+        df_merged = df_merged.dropna()
+        
+        if len(df_merged) < window_size:
+            return err("计算收益率后数据不足")
+        
+        # 计算移动相关系数
+        correlations = []
+        dates = []
+        
+        for i in range(window_size - 1, len(df_merged)):
+            window_data = df_merged.iloc[i - window_size + 1:i + 1]
+            
+            # 计算Pearson相关系数
+            try:
+                corr, _ = pearsonr(window_data['returns_1'], window_data['returns_2'])
+                correlations.append(corr if not np.isnan(corr) else 0)
+                # 确保日期只包含日期部分，不包含时间
+                trade_date = df_merged.iloc[i]['trade_date']
+                if hasattr(trade_date, 'date'):
+                    dates.append(trade_date.date())
+                else:
+                    dates.append(trade_date)
+            except:
+                correlations.append(0)
+                # 确保日期只包含日期部分，不包含时间
+                trade_date = df_merged.iloc[i]['trade_date']
+                if hasattr(trade_date, 'date'):
+                    dates.append(trade_date.date())
+                else:
+                    dates.append(trade_date)
+        
+        # 准备图表数据点（参考回测管理的实现方式）
+        chart_data = []
+        for i, date in enumerate(dates):
+            chart_data.append([date.strftime('%Y-%m-%d'), correlations[i]])
+        
+        # 计算统计信息
+        final_corr = correlations[-1] if correlations else 0
+        avg_corr = np.mean(correlations) if correlations else 0
+        max_corr = np.max(correlations) if correlations else 0
+        min_corr = np.min(correlations) if correlations else 0
+        std_corr = np.std(correlations) if correlations else 0
+        
+        return ok({
+            'symbol1': {
+                'code': symbol1,
+                'name': symbol1_info.fund_name if symbol1_type == 'fund' else symbol1_info.stock_name,
+                'type': symbol1_type
+            },
+            'symbol2': {
+                'code': symbol2,
+                'name': symbol2_info.fund_name if symbol2_type == 'fund' else symbol2_info.stock_name,
+                'type': symbol2_type
+            },
+            'analysis_period': {
+                'start_date': dates[0].strftime('%Y-%m-%d') if dates else None,
+                'end_date': dates[-1].strftime('%Y-%m-%d') if dates else None,
+                'window_size': window_size,
+                'total_points': len(correlations)
+            },
+            'statistics': {
+                'current_correlation': round(final_corr, 4),
+                'average_correlation': round(avg_corr, 4),
+                'max_correlation': round(max_corr, 4),
+                'min_correlation': round(min_corr, 4),
+                'correlation_std': round(std_corr, 4)
+            },
+            'chart_data': chart_data,
+            'chart_config': {
+                'title': f'{symbol1_info.fund_name if symbol1_type == "fund" else symbol1_info.stock_name} vs {symbol2_info.fund_name if symbol2_type == "fund" else symbol2_info.stock_name}',
+                'subtitle': f'移动相关系数 (窗口大小: {window_size}天)',
+                'yAxis_min': -1.1,
+                'yAxis_max': 1.1
+            }
+        })
+        
+    except Exception as e:
+        logger = logging.getLogger(__name__)
+        logger.error(f"相关性分析失败: {str(e)}")
+        return err(f"相关性分析失败: {str(e)}")
+
+
+# ----------------------- 组合回测功能 -----------------------
+@require_http_methods(["POST"])
+def portfolio_backtest(request):
+    """
+    组合回测功能
+    参数：
+    - portfolio_items: 组合标的列表 [{"type": "stock|fund|cash", "code": "代码", "ratio": 比例}]
+    - rebalance_strategy: 再平衡策略 {"type": "none|time|deviation", "params": {...}}
+    - initial_capital: 初始资金
+    - monthly_withdrawal: 每月取出现金
+    - commission_rate: 交易佣金率 (带%号)
+    - date_range: 回测日期区间 {"type": "custom|month|half_year|year|five_year|ten_year", "start": "开始日期", "end": "结束日期"}
+    """
+    try:
+        import json
+        payload = json.loads(request.body.decode('utf-8') or '{}')
+    except Exception:
+        payload = {}
+    
+    portfolio_items = payload.get('portfolio_items', [])
+    rebalance_strategy = payload.get('rebalance_strategy', {})
+    initial_capital = float(payload.get('initial_capital', 100000))
+    monthly_withdrawal = float(payload.get('monthly_withdrawal', 0))
+    commission_rate_str = payload.get('commission_rate', '0.02854%')
+    date_range = payload.get('date_range', {})
+    
+    if not portfolio_items:
+        return err("请至少添加一个组合标的")
+    
+    if initial_capital <= 0:
+        return err("初始资金必须大于0")
+    
+    try:
+        from datetime import datetime, timedelta
+        import pandas as pd
+        import numpy as np
+        import math
+        
+        # 解析佣金率
+        commission_rate = float(commission_rate_str.replace('%', '')) / 100
+        
+        # 确定回测日期范围
+        logger = logging.getLogger(__name__)
+        logger.info(f"接收到的日期区间参数: {date_range}")
+        start_date, end_date = _parse_backtest_date_range(date_range)
+        logger.info(f"解析后的日期范围: {start_date} 到 {end_date}")
+        
+        # 获取组合数据
+        portfolio_data = _get_portfolio_data(portfolio_items, start_date, end_date)
+        if portfolio_data.empty:
+            return err("无法获取组合数据，请检查标的代码和日期范围")
+        
+        # 运行回测
+        backtest_results = _run_portfolio_backtest(
+            portfolio_items=portfolio_items,
+            portfolio_data=portfolio_data,
+            rebalance_strategy=rebalance_strategy,
+            initial_capital=initial_capital,
+            monthly_withdrawal=monthly_withdrawal,
+            commission_rate=commission_rate
+        )
+        
+        if backtest_results.empty:
+            return err("回测失败，无有效结果")
+        
+        # 计算统计指标
+        stats = _calculate_portfolio_stats(backtest_results, initial_capital)
+        
+        # 准备图表数据
+        chart_data = _prepare_chart_data(backtest_results, portfolio_data)
+        
+        return ok({
+            'statistics': stats,
+            'chart_data': chart_data,
+            'actual_date_range': {
+                'start_date': backtest_results.index[0].strftime('%Y-%m-%d'),
+                'end_date': backtest_results.index[-1].strftime('%Y-%m-%d')
+            }
+        })
+        
+    except Exception as e:
+        logger = logging.getLogger(__name__)
+        logger.error(f"组合回测失败: {str(e)}")
+        return err(f"组合回测失败: {str(e)}")
+
+def _parse_backtest_date_range(date_range):
+    """解析回测日期范围"""
+    from datetime import datetime, timedelta
+    
+    range_type = date_range.get('type', 'year')
+    end_date = datetime.now().date()
+    
+    if range_type == 'custom':
+        start_date = parse_date_string(date_range.get('start_date'))
+        end_date = parse_date_string(date_range.get('end_date'))
+    elif range_type == 'month':
+        start_date = end_date - timedelta(days=30)
+    elif range_type == 'half_year':
+        start_date = end_date - timedelta(days=180)
+    elif range_type == 'year':
+        start_date = end_date - timedelta(days=365)
+    elif range_type == 'five_year':
+        start_date = end_date - timedelta(days=365*5)
+    elif range_type == 'ten_year':
+        start_date = end_date - timedelta(days=365*10)
+    else:
+        start_date = end_date - timedelta(days=365)
+    
+    return start_date, end_date
+
+def _get_portfolio_data(portfolio_items, start_date, end_date):
+    """获取组合数据"""
+    import pandas as pd
+    logger = logging.getLogger(__name__)
+    
+    logger.info(f"获取组合数据: 日期范围 {start_date} 到 {end_date}")
+    logger.info(f"组合标的: {portfolio_items}")
+    
+    all_data = {}
+    
+    for item in portfolio_items:
+        item_type = item.get('type')
+        code = item.get('code')
+        
+        logger.info(f"处理标的: {code} (类型: {item_type})")
+        
+        if item_type == 'cash':
+            # 现金不需要查询数据库，跳过
+            logger.info(f"跳过现金标的: {code}")
+            continue
+        elif item_type == 'stock':
+            # 获取股票数据 - 需要获取不复权和后复权价格来计算分红
+            # 获取不复权价格
+            raw_qs = DailyQuotes.objects.filter(
+                stock_code_id=code,
+                trade_date__gte=start_date,
+                trade_date__lte=end_date
+            ).order_by('trade_date').values('trade_date', 'open', 'close')
+            
+            # 获取后复权价格
+            hfq_qs = DailyQuotes.objects.filter(
+                stock_code_id=code,
+                trade_date__gte=start_date,
+                trade_date__lte=end_date
+            ).order_by('trade_date').values('trade_date', 'hfq_close')
+            
+            # 合并数据
+            raw_data = {row['trade_date']: {'open': float(row['open']), 'close': float(row['close'])} for row in raw_qs}
+            hfq_data = {row['trade_date']: {'hfq_close': float(row['hfq_close'])} for row in hfq_qs}
+            
+            logger.info(f"股票 {code} 查询到 {len(raw_data)} 条不复权数据, {len(hfq_data)} 条后复权数据")
+            logger.info(f"股票 {code} 查询条件: stock_code_id={code}, trade_date__gte={start_date}, trade_date__lte={end_date}")
+            
+            # 计算分红 - 参考ETF脚本的逻辑
+            data = []
+            dates = sorted(set(raw_data.keys()) & set(hfq_data.keys()))
+            logger.info(f"股票 {code} 合并后有 {len(dates)} 个交易日")
+            
+            for i, date in enumerate(dates):
+                raw_row = raw_data[date]
+                hfq_row = hfq_data[date]
+                
+                # 计算分红：通过对比前一日的不复权和后复权价格
+                dividend = 0.0
+                if i > 0:  # 不是第一天
+                    prev_date = dates[i-1]
+                    prev_raw = raw_data[prev_date]
+                    prev_hfq = hfq_data[prev_date]
+                    
+                    # 分红计算公式：前一日不复权价格 * (今日后复权/前日后复权) - 今日不复权价格
+                    if prev_hfq['hfq_close'] > 0:
+                        dividend = prev_raw['close'] * (hfq_row['hfq_close'] / prev_hfq['hfq_close']) - raw_row['close']
+                        dividend = max(dividend, 0)  # 分红不能为负
+                        if dividend < 0.01:  # 忽略小于1分钱的分红
+                            dividend = 0.0
+                        
+                        # 调试信息：检查分红计算
+                        if dividend > 0:
+                            logger.info(f"股票分红计算: 日期={date}, 标的={code}, 前日不复权={prev_raw['close']}, 今日不复权={raw_row['close']}, 前日后复权={prev_hfq['hfq_close']}, 今日后复权={hfq_row['hfq_close']}, 计算分红={dividend}")
+                
+                data.append({
+                    'trade_date': date,
+                    'open': raw_row['open'],
+                    'close': raw_row['close'],  # 实盘使用不复权价格
+                    'dividend': dividend
+                })
+            
+            if data:
+                df = pd.DataFrame(data)
+                df.set_index('trade_date', inplace=True)
+                all_data[code] = df
+                logger.info(f"股票 {code} 数据范围: {df.index.min()} 到 {df.index.max()}")
+                logger.info(f"股票 {code} 最终数据条数: {len(df)}")
+            else:
+                logger.warning(f"股票 {code} 没有查询到数据")
+                
+        elif item_type == 'fund':
+            # 获取ETF/基金数据 - 需要获取不复权和后复权价格来计算分红
+            # 获取不复权价格
+            raw_qs = FundDailyQuotes.objects.filter(
+                fund_code_id=code,
+                trade_date__gte=start_date,
+                trade_date__lte=end_date
+            ).order_by('trade_date').values('trade_date', 'open', 'close')
+            
+            # 获取后复权价格
+            hfq_qs = FundDailyQuotes.objects.filter(
+                fund_code_id=code,
+                trade_date__gte=start_date,
+                trade_date__lte=end_date
+            ).order_by('trade_date').values('trade_date', 'hfq_close')
+            
+            # 合并数据
+            raw_data = {row['trade_date']: {'open': float(row['open']), 'close': float(row['close'])} for row in raw_qs}
+            hfq_data = {row['trade_date']: {'hfq_close': float(row['hfq_close'])} for row in hfq_qs}
+            
+            logger.info(f"ETF {code} 查询到 {len(raw_data)} 条不复权数据, {len(hfq_data)} 条后复权数据")
+            logger.info(f"ETF {code} 查询条件: fund_code_id={code}, trade_date__gte={start_date}, trade_date__lte={end_date}")
+            
+            # 计算分红 - 参考ETF脚本的逻辑
+            data = []
+            dates = sorted(set(raw_data.keys()) & set(hfq_data.keys()))
+            logger.info(f"ETF {code} 合并后有 {len(dates)} 个交易日")
+            
+            for i, date in enumerate(dates):
+                raw_row = raw_data[date]
+                hfq_row = hfq_data[date]
+                
+                # 计算分红：通过对比前一日的不复权和后复权价格
+                dividend = 0.0
+                if i > 0:  # 不是第一天
+                    prev_date = dates[i-1]
+                    prev_raw = raw_data[prev_date]
+                    prev_hfq = hfq_data[prev_date]
+                    
+                    # 分红计算公式：前一日不复权价格 * (今日后复权/前日后复权) - 今日不复权价格
+                    if prev_hfq['hfq_close'] > 0:
+                        dividend = prev_raw['close'] * (hfq_row['hfq_close'] / prev_hfq['hfq_close']) - raw_row['close']
+                        dividend = max(dividend, 0)  # 分红不能为负
+                        if dividend < 0.01:  # 忽略小于1分钱的分红
+                            dividend = 0.0
+                        
+                        # 调试信息：检查分红计算
+                        if dividend > 0:
+                            logger.info(f"分红计算: 日期={date}, 标的={code}, 前日不复权={prev_raw['close']}, 今日不复权={raw_row['close']}, 前日后复权={prev_hfq['hfq_close']}, 今日后复权={hfq_row['hfq_close']}, 计算分红={dividend}")
+                
+                data.append({
+                    'trade_date': date,
+                    'open': raw_row['open'],
+                    'close': raw_row['close'],  # 实盘使用不复权价格
+                    'dividend': dividend
+                })
+            
+            if data:
+                df = pd.DataFrame(data)
+                df.set_index('trade_date', inplace=True)
+                all_data[code] = df
+                logger.info(f"ETF {code} 数据范围: {df.index.min()} 到 {df.index.max()}")
+                logger.info(f"ETF {code} 最终数据条数: {len(df)}")
+            else:
+                logger.warning(f"ETF {code} 没有查询到数据")
+    
+    logger.info(f"总共获取到 {len(all_data)} 个标的的数据")
+    
+    if not all_data:
+        logger.warning("没有获取到任何数据")
+        return pd.DataFrame()
+    
+    # 合并所有数据 - 使用outer join确保所有日期都被保留
+    master_df = pd.concat(all_data, axis=1, keys=all_data.keys(), join='outer')
+    logger.info(f"合并前数据形状: {master_df.shape}, 日期范围: {master_df.index.min()} 到 {master_df.index.max()}")
+    
+    # 删除所有列都为NaN的行（即没有任何标的交易的日期）
+    master_df = master_df.dropna(how='all')
+    logger.info(f"删除全NaN行后数据形状: {master_df.shape}, 日期范围: {master_df.index.min()} 到 {master_df.index.max()}")
+    
+    # 只保留所有标的都有数据的日期，避免前向填充导致的数据异常
+    master_df = master_df.dropna()
+    logger.info(f"删除NaN后数据形状: {master_df.shape}, 日期范围: {master_df.index.min()} 到 {master_df.index.max()}")
+    
+    # 检查数据质量
+    for code in all_data.keys():
+        if (code, 'open') in master_df.columns:
+            open_prices = master_df[(code, 'open')]
+            logger.info(f"标的 {code} 价格范围: 最小值={open_prices.min()}, 最大值={open_prices.max()}, 数据点数={len(open_prices)}")
+            
+            # 检查异常价格数据
+            if open_prices.min() <= 0:
+                logger.warning(f"标的 {code} 存在非正价格数据: {open_prices[open_prices <= 0].tolist()}")
+            if open_prices.max() > 10000:  # 价格超过10000元可能异常
+                logger.warning(f"标的 {code} 存在异常高价格数据: {open_prices[open_prices > 10000].tolist()}")
+    
+    # 检查数据连续性
+    if len(master_df) > 0:
+        date_diff = master_df.index.to_series().diff().dropna()
+        max_gap = date_diff.max()
+        if max_gap.days > 30:  # 如果数据间隔超过30天
+            logger.warning(f"数据存在大间隔: 最大间隔={max_gap.days}天")
+            logger.warning(f"大间隔位置: {date_diff[date_diff == max_gap].index.tolist()}")
+    
+    return master_df
+
+def _run_portfolio_backtest(portfolio_items, portfolio_data, rebalance_strategy, 
+                           initial_capital, monthly_withdrawal, commission_rate):
+    """运行组合回测"""
+    import pandas as pd
+    import numpy as np
+    import math
+    logger = logging.getLogger(__name__)
+    
+    # 初始化组合
+    portfolio = {'cash': initial_capital}
+    for item in portfolio_items:
+        code = item.get('code')
+        if item.get('type') != 'cash':
+            portfolio[f'{code}_shares'] = 0
+    
+    results = []
+    last_month_processed = None
+    last_rebalance_date = None
+    is_first_day = True
+    
+    for date, row in portfolio_data.iterrows():
+        # 获取当日价格
+        prices = {}
+        dividends = {}
+        for item in portfolio_items:
+            code = item.get('code')
+            if item.get('type') != 'cash':
+                if (code, 'open') in row.index:
+                    prices[code] = row[(code, 'open')]
+                if (code, 'dividend') in row.index:
+                    dividends[code] = row[(code, 'dividend')]
+        
+        # 严格的价格数据验证
+        if any(p <= 0 for p in prices.values()):
+            logger.warning(f"跳过日期 {date}: 存在非正价格数据 {prices}")
+            continue
+        
+        # 检查价格数据是否异常高
+        if any(p > 10000 for p in prices.values()):
+            logger.warning(f"跳过日期 {date}: 存在异常高价格数据 {prices}")
+            continue
+        
+        # 计算当前组合价值
+        current_values = _calculate_portfolio_values(portfolio, prices, portfolio_items)
+        
+        # 调试信息 - 检查价格数据
+        if date == portfolio_data.index[0]:  # 第一天
+            logger.info(f"第一天价格数据: {prices}")
+            logger.info(f"第一天组合价值: {current_values}")
+        
+        # 首次建仓
+        if is_first_day:
+            _initial_rebalance(portfolio, prices, portfolio_items, initial_capital, commission_rate)
+            is_first_day = False
+            current_values = _calculate_portfolio_values(portfolio, prices, portfolio_items)
+            logger.info(f"首次建仓后总资产: {current_values['total_assets']}")
+            logger.info(f"首次建仓后组合价值: {current_values}")
+        
+        # 处理分红
+        dividend_received_today = False
+        for item in portfolio_items:
+            code = item.get('code')
+            if item.get('type') != 'cash' and code in dividends:
+                dividend_per_share = dividends[code]
+                if dividend_per_share > 0 and portfolio.get(f'{code}_shares', 0) > 0:
+                    cash_from_dividend = portfolio[f'{code}_shares'] * dividend_per_share
+                    portfolio['cash'] += cash_from_dividend
+                    dividend_received_today = True
+                    logger.info(f"分红处理: 日期={date}, 标的={code}, 每股分红={dividend_per_share}, 持股数={portfolio[f'{code}_shares']}, 分红金额={cash_from_dividend}")
+        
+        if dividend_received_today:
+            current_values = _calculate_portfolio_values(portfolio, prices, portfolio_items)
+            logger.info(f"分红后总资产: {current_values['total_assets']}, 现金: {portfolio['cash']}")
+        
+        # 月度取现
+        current_month = date.month
+        if last_month_processed != current_month:
+            if portfolio['cash'] >= monthly_withdrawal:
+                portfolio['cash'] -= monthly_withdrawal
+            last_month_processed = current_month
+            current_values = _calculate_portfolio_values(portfolio, prices, portfolio_items)
+        
+        # 再平衡检查
+        should_rebalance = _should_rebalance(
+            date, last_rebalance_date, rebalance_strategy, 
+            portfolio, prices, portfolio_items, current_values
+        )
+        
+        if should_rebalance:
+            _rebalance_portfolio(portfolio, prices, portfolio_items, commission_rate)
+            last_rebalance_date = date
+            current_values = _calculate_portfolio_values(portfolio, prices, portfolio_items)
+        
+        # 记录结果
+        result_row = {
+            'date': date,
+            'total_assets': current_values['total_assets'],
+            'cash': portfolio['cash']
+        }
+        
+        # 调试信息 - 检查异常数据
+        if current_values['total_assets'] > initial_capital * 100:  # 如果总资产超过初始资金的100倍
+            logger.warning(f"异常数据检测: 日期={date}, 总资产={current_values['total_assets']}, 初始资金={initial_capital}")
+            logger.warning(f"价格数据: {prices}")
+            logger.warning(f"组合持仓: {portfolio}")
+            # 跳过这个异常数据
+            continue
+        
+        # 检查总资产是否异常低
+        if current_values['total_assets'] < initial_capital * 0.01:  # 如果总资产低于初始资金的1%
+            logger.warning(f"异常低资产检测: 日期={date}, 总资产={current_values['total_assets']}, 初始资金={initial_capital}")
+            logger.warning(f"价格数据: {prices}")
+            logger.warning(f"组合持仓: {portfolio}")
+            # 跳过这个异常数据
+            continue
+        
+        for item in portfolio_items:
+            code = item.get('code')
+            if item.get('type') != 'cash':
+                result_row[f'{code}_value'] = current_values.get(f'{code}_value', 0)
+        
+        results.append(result_row)
+    
+    df = pd.DataFrame(results)
+    if not df.empty and 'date' in df.columns:
+        df.set_index('date', inplace=True)
+    return df
+
+def _calculate_portfolio_values(portfolio, prices, portfolio_items):
+    """计算组合价值"""
+    # 现金部分不产生额外收益，只按实际金额计算
+    # 无风险收益应该通过其他方式处理，而不是在价值计算中重复计算
+    total_assets = portfolio['cash']
+    values = {'cash': portfolio['cash']}
+    
+    for item in portfolio_items:
+        code = item.get('code')
+        if item.get('type') != 'cash' and code in prices:
+            shares = portfolio.get(f'{code}_shares', 0)
+            value = shares * prices[code]
+            values[f'{code}_value'] = value
+            total_assets += value
+    
+    values['total_assets'] = total_assets
+    return values
+
+def _initial_rebalance(portfolio, prices, portfolio_items, initial_capital, commission_rate):
+    """初始建仓"""
+    import math
+    logger = logging.getLogger(__name__)
+    
+    logger.info(f"初始建仓开始: 初始资金={initial_capital}, 组合配置={portfolio_items}")
+    logger.info(f"建仓前现金: {portfolio['cash']}")
+    
+    for item in portfolio_items:
+        code = item.get('code')
+        ratio = item.get('ratio', 0)
+        
+        logger.info(f"处理标的: {code}, 类型: {item.get('type')}, 比例: {ratio}")
+        
+        if item.get('type') == 'cash':
+            # 现金比例不需要重新设置，因为初始现金就是initial_capital
+            # 只需要记录现金比例，实际现金金额在买入股票后会减少
+            logger.info(f"现金比例: {ratio}, 当前现金: {portfolio['cash']}")
+        elif code in prices:
+            target_value = initial_capital * ratio
+            shares = math.floor(target_value / prices[code] / 100) * 100  # 按手买入
+            if shares > 0:
+                cost = shares * prices[code]
+                commission = max(cost * commission_rate, 5)  # 最低5元佣金
+                total_cost = cost + commission
+                if portfolio['cash'] >= total_cost:
+                    portfolio['cash'] -= total_cost
+                    portfolio[f'{code}_shares'] = shares
+                    logger.info(f"买入 {code}: {shares}股, 成本: {cost}, 佣金: {commission}, 总成本: {total_cost}")
+                else:
+                    logger.warning(f"现金不足，无法买入 {code}: 需要 {total_cost}, 可用 {portfolio['cash']}")
+            else:
+                logger.info(f"目标价值 {target_value} 不足以买入 {code} 一手")
+    
+    logger.info(f"建仓后现金: {portfolio['cash']}")
+    logger.info(f"建仓后组合: {portfolio}")
+
+def _should_rebalance(date, last_rebalance_date, rebalance_strategy, 
+                     portfolio, prices, portfolio_items, current_values):
+    """判断是否需要再平衡"""
+    strategy_type = rebalance_strategy.get('type', 'none')
+    
+    if strategy_type == 'none':
+        return False
+    elif strategy_type == 'time':
+        interval_days = rebalance_strategy.get('interval_days', 30)
+        if last_rebalance_date is None:
+            return True
+        return (date - last_rebalance_date).days >= interval_days
+    elif strategy_type == 'deviation':
+        threshold = rebalance_strategy.get('threshold', 0.1)
+        target_ratios = {item.get('code'): item.get('ratio', 0) for item in portfolio_items}
+        
+        for item in portfolio_items:
+            code = item.get('code')
+            if item.get('type') != 'cash' and code in prices:
+                current_ratio = current_values.get(f'{code}_value', 0) / current_values['total_assets']
+                target_ratio = target_ratios.get(code, 0)
+                if abs(current_ratio - target_ratio) > threshold:
+                    return True
+        return False
+    
+    return False
+
+def _rebalance_portfolio(portfolio, prices, portfolio_items, commission_rate):
+    """执行再平衡 - 真正的比例再平衡"""
+    import math
+    logger = logging.getLogger(__name__)
+    
+    # 计算当前组合价值
+    current_values = _calculate_portfolio_values(portfolio, prices, portfolio_items)
+    total_assets = current_values['total_assets']
+    
+    logger.info(f"再平衡前总资产: {total_assets}")
+    logger.info(f"再平衡前现金: {portfolio['cash']}")
+    
+    # 计算当前权重
+    current_weights = {}
+    for item in portfolio_items:
+        code = item.get('code')
+        if item.get('type') == 'cash':
+            current_weights[code] = portfolio['cash'] / total_assets
+        elif code in prices:
+            current_weights[code] = current_values.get(f'{code}_value', 0) / total_assets
+    
+    # 计算目标权重
+    target_weights = {}
+    for item in portfolio_items:
+        code = item.get('code')
+        target_weights[code] = item.get('ratio', 0)
+    
+    logger.info(f"再平衡前权重: {current_weights}")
+    logger.info(f"目标权重: {target_weights}")
+    
+    # 计算需要调整的价值
+    adjustments = {}
+    for item in portfolio_items:
+        code = item.get('code')
+        target_value = total_assets * target_weights[code]
+        if item.get('type') == 'cash':
+            current_value = portfolio['cash']
+        else:
+            current_value = current_values.get(f'{code}_value', 0)
+        adjustments[code] = target_value - current_value
+    
+    logger.info(f"需要调整的价值: {adjustments}")
+    
+    # 先卖出所有需要减少的标的
+    total_proceeds = 0
+    for item in portfolio_items:
+        code = item.get('code')
+        if item.get('type') != 'cash' and code in prices and adjustments[code] < 0:
+            # 需要卖出
+            value_to_sell = abs(adjustments[code])
+            shares_to_sell = math.floor((value_to_sell / prices[code]) / 100) * 100
+            if shares_to_sell > 0 and portfolio.get(f'{code}_shares', 0) >= shares_to_sell:
+                revenue = shares_to_sell * prices[code]
+                commission = max(revenue * commission_rate, 5)
+                net_revenue = revenue - commission
+                portfolio['cash'] += net_revenue
+                portfolio[f'{code}_shares'] -= shares_to_sell
+                total_proceeds += net_revenue
+                logger.info(f"再平衡卖出 {code}: {shares_to_sell}股, 净收入: {net_revenue}")
+    
+    # 再买入所有需要增加的标的
+    for item in portfolio_items:
+        code = item.get('code')
+        if item.get('type') != 'cash' and code in prices and adjustments[code] > 0:
+            # 需要买入
+            value_to_buy = adjustments[code]
+            shares_to_buy = math.floor((value_to_buy / prices[code]) / 100) * 100
+            if shares_to_buy > 0:
+                cost = shares_to_buy * prices[code]
+                commission = max(cost * commission_rate, 5)
+                total_cost = cost + commission
+                if portfolio['cash'] >= total_cost:
+                    portfolio['cash'] -= total_cost
+                    portfolio[f'{code}_shares'] += shares_to_buy
+                    logger.info(f"再平衡买入 {code}: {shares_to_buy}股, 总成本: {total_cost}")
+                else:
+                    logger.warning(f"再平衡现金不足，无法买入 {code}: 需要 {total_cost}, 可用 {portfolio['cash']}")
+    
+    # 现金比例调整（如果有剩余现金或需要补充现金）
+    cash_adjustment = adjustments.get('cash', 0)
+    if cash_adjustment != 0:
+        logger.info(f"现金比例调整: {cash_adjustment}")
+        # 现金比例已经通过买卖操作自动调整了
+    
+    logger.info(f"再平衡后现金: {portfolio['cash']}")
+    logger.info(f"再平衡后组合: {portfolio}")
+
+def _calculate_portfolio_stats(results_df, initial_capital):
+    """计算组合统计指标"""
+    import numpy as np
+    logger = logging.getLogger(__name__)
+    
+    total_assets = results_df['total_assets']
+    returns = total_assets.pct_change().dropna()
+    
+    # 基本统计
+    final_assets = total_assets.iloc[-1]
+    total_return = (final_assets / initial_capital) - 1
+    
+    # 调试信息
+    logger.info(f"回测统计计算: 初始资金={initial_capital}, 最终资产={final_assets}, 总收益率={total_return}")
+    logger.info(f"总资产数据范围: 最小值={total_assets.min()}, 最大值={total_assets.max()}")
+    logger.info(f"总资产前5个值: {total_assets.head().tolist()}")
+    logger.info(f"总资产后5个值: {total_assets.tail().tolist()}")
+    
+    # 年化收益率
+    try:
+        duration_years = (results_df.index[-1] - results_df.index[0]).days / 365.25
+        annualized_return = (1 + total_return) ** (1 / duration_years) - 1 if duration_years > 0 else 0
+    except (AttributeError, TypeError):
+        # 如果索引不是日期类型，使用数据长度估算
+        duration_years = len(results_df) / 252  # 假设一年252个交易日
+        annualized_return = (1 + total_return) ** (1 / duration_years) - 1 if duration_years > 0 else 0
+    
+    # 最大回撤
+    peak = total_assets.expanding().max()
+    drawdown = (total_assets - peak) / peak
+    max_drawdown = drawdown.min()
+    
+    # 夏普比率 (假设无风险利率为3%)
+    risk_free_rate = 0.03
+    excess_returns = returns - risk_free_rate / 252
+    sharpe_ratio = excess_returns.mean() / excess_returns.std() * np.sqrt(252) if excess_returns.std() > 0 else 0
+    
+    return {
+        'total_return': round(total_return, 4),
+        'annualized_return': round(annualized_return, 4),
+        'max_drawdown': round(max_drawdown, 4),
+        'sharpe_ratio': round(sharpe_ratio, 4),
+        'final_assets': round(final_assets, 2),
+        'duration_years': round(duration_years, 2)
+    }
+
+def _prepare_chart_data(results_df, portfolio_data):
+    """准备图表数据"""
+    # 资金曲线数据
+    capital_curve = []
+    for date, row in results_df.iterrows():
+        capital_curve.append([date.strftime('%Y-%m-%d'), row['total_assets']])
+    
+    # 最大回撤数据
+    total_assets = results_df['total_assets']
+    peak = total_assets.expanding().max()
+    drawdown = (total_assets - peak) / peak
+    
+    max_drawdown_curve = []
+    for date, value in drawdown.items():
+        max_drawdown_curve.append([date.strftime('%Y-%m-%d'), value])
+    
+    # 持有期分析数据
+    holding_period_data = _calculate_holding_period_analysis(total_assets)
+    
+    return {
+        'capital_curve': capital_curve,
+        'max_drawdown_curve': max_drawdown_curve,
+        'holding_period_analysis': holding_period_data
+    }
+
+def _calculate_holding_period_analysis(total_assets):
+    """计算持有期分析 - 参考ETF脚本逻辑"""
+    # 计算回测区间时间长度的三分之一作为最大持有天数
+    total_days = len(total_assets)
+    max_days = min(max(1, total_days // 3), total_days - 1)  # 回测区间长度的三分之一，最少1天
+    
+    analysis_data = []
+    
+    # 调试信息
+    logger = logging.getLogger(__name__)
+    logger.info(f"持有期分析: 总数据长度={total_days}, 最大持有天数={max_days} (回测区间长度的1/3)")
+    
+    for d in range(1, max_days + 1):
+        # 计算持有d天的收益率序列 - 与ETF脚本完全一致
+        returns_d = (total_assets / total_assets.shift(d)) - 1
+        returns_d = returns_d.dropna()
+        
+        if not returns_d.empty:
+            analysis_data.append({
+                'holding_days': d,
+                'max_return': float(returns_d.max()),
+                'min_return': float(returns_d.min()),
+                'win_rate': float((returns_d > 0).sum() / len(returns_d)) if len(returns_d) > 0 else 0.0
+            })
+    
+    logger.info(f"持有期分析完成: 生成了{len(analysis_data)}个数据点")
+    if analysis_data:
+        logger.info(f"前5个数据点: {analysis_data[:5]}")
+    
+    return analysis_data

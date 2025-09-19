@@ -1,12 +1,12 @@
 <template>
   <div>
     <el-card v-loading="loading" element-loading-text="加载中...">
-      <div slot="header" v-if="!isPortraitMobile">回测管理</div>
+      <div slot="header" v-if="!isPortraitMobile">个股回测记录</div>
 
       <!-- 竖屏移动端：将按钮并入卡片标题右侧，保持简洁 -->
       <template v-if="isPortraitMobile">
         <div slot="header" style="display:flex;align-items:center;justify-content:space-between">
-          <div>回测管理</div>
+          <div>个股回测记录</div>
           <div style="display:flex;gap:8px;align-items:center">
             <el-button size="mini" type="primary" plain @click="showSettings=true"><i class="el-icon-setting" style="margin-right:4px"></i> 设置</el-button>
             <el-button size="mini" type="primary" plain :loading="loading" @click="fetchResults"><i class="el-icon-search" style="margin-right:4px"></i> 查询</el-button>
