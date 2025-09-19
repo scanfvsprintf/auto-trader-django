@@ -38,6 +38,18 @@ export default {
       password: ''
     }
   },
+  mounted(){
+    // 绑定 this 到 step，避免 rAF 回调丢失上下文
+    this.step = this.step.bind(this)
+    this.setupCanvas()
+    window.addEventListener('resize', this.handleResize)
+    // 使用视口管理器确保登录页面稳定
+    this.updateViewportHeight()
+  },
+  beforeDestroy(){
+    cancelAnimationFrame(this._raf)
+    window.removeEventListener('resize', this.handleResize)
+  },
   methods: {
     login(){
       if ((this.username === 'xiangyangxin' || this.username === 'xiangmei') && this.password === '123456') {
@@ -127,7 +139,7 @@ export default {
       const w = window.innerWidth
       const h = window.innerHeight
       const r = Math.max(w, h)
-      // 极其柔和的“流光”，使用巨型径向渐变做缓慢位移
+      // 极其柔和的"流光"，使用巨型径向渐变做缓慢位移
       this._lights = [
         { x: w * 0.25, y: h * 0.2,  r: r * 0.7, dx: 0.04,  dy: 0.00, a: 0.13 },
         { x: w * 0.75, y: h * 0.85, r: r * 0.8, dx: -0.03, dy: -0.02, a: 0.11 },
@@ -216,21 +228,7 @@ export default {
       cancelAnimationFrame(this._raf)
       this._ctx = null
       this.setupCanvas()
-    }
-  },
-  mounted(){
-    // 绑定 this 到 step，避免 rAF 回调丢失上下文
-    this.step = this.step.bind(this)
-    this.setupCanvas()
-    window.addEventListener('resize', this.handleResize)
-    // 使用视口管理器确保登录页面稳定
-    this.updateViewportHeight()
-  },
-  beforeDestroy(){
-    cancelAnimationFrame(this._raf)
-    window.removeEventListener('resize', this.handleResize)
-  },
-  methods: {
+    },
     updateViewportHeight() {
       // 更新登录页面的视口高度
       const viewportInfo = smartViewportManager.getViewportInfo()
