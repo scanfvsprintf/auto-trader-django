@@ -208,6 +208,11 @@ LOGGING = {
             'level': 'DEBUG', # 在开发时设为 DEBUG，可以看到所有信息
             'propagate': False, # 不向上传递给 root logger
         },
+        'web_manager': { # 这里使用你的 app 名称
+            'handlers': ['console','file'],
+            'level': 'DEBUG', # 在开发时设为 DEBUG，可以看到所有信息
+            'propagate': False, # 不向上传递给 root logger
+        },
         # 你可以为任何模块定义 logger
         'common': {
             'handlers': ['console', 'file'],

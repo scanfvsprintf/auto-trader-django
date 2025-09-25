@@ -44,7 +44,7 @@ class EmailNotificationService:
 
         self.email_handler = EmailHandler()
         # 从EmailHandler的配置中直接读取收件人列表
-        self.recipients = self.email_handler.recipients if hasattr(self.email_handler, 'recipients') else ['876858298@qq.com','850696281@qq.com','285173686@qq.com','2516937525@qq.com','chen_xy1997@icloud.com']
+        self.recipients = self.email_handler.recipients if hasattr(self.email_handler, 'recipients') else ['876858298@qq.com','850696281@qq.com','285173686@qq.com','2516937525@qq.com','chen_xy1997@icloud.com','yuanpei@mail.ustc.edu.cn']
 
 
     def runEmailSend(self):

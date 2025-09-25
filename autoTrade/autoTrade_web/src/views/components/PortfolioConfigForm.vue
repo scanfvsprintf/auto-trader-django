@@ -1,5 +1,31 @@
 <template>
   <div class="portfolio-config-form">
+    <!-- 配置管理工具栏 -->
+    <div class="config-toolbar">
+      <div class="toolbar-left">
+        <span class="form-title">组合回测配置</span>
+      </div>
+      <div class="toolbar-right">
+        <!-- 配置管理器 -->
+        <portfolio-config-manager
+          ref="configManager"
+          :is-mobile="isMobile"
+          :current-config="currentConfig"
+          @load-config="$emit('load-config', $event)"
+        />
+        <!-- 保存配置按钮 -->
+        <el-button 
+          :size="isMobile ? 'mini' : 'small'" 
+          type="success" 
+          plain 
+          @click="showSaveConfigDialog"
+          :icon="'el-icon-document-add'"
+        >
+          {{ isMobile ? '保存' : '保存配置' }}
+        </el-button>
+      </div>
+    </div>
+
     <!-- 组合标的配置 -->
     <div class="config-section">
       <div class="section-header">
@@ -284,8 +310,14 @@
 </template>
 
 <script>
+import PortfolioConfigManager from './PortfolioConfigManager.vue'
+import portfolioConfigManager from '@/utils/portfolioConfigManager'
+
 export default {
   name: 'PortfolioConfigForm',
+  components: {
+    PortfolioConfigManager
+  },
   props: {
     portfolioItems: {
       type: Array,
@@ -344,7 +376,23 @@ export default {
       default: () => []
     }
   },
+  computed: {
+    currentConfig() {
+      return {
+        portfolioItems: this.portfolioItems,
+        rebalanceStrategy: this.rebalanceStrategy,
+        initialCapital: this.initialCapital,
+        monthlyWithdrawal: this.monthlyWithdrawal,
+        commissionRate: this.commissionRate,
+        dateRange: this.dateRange
+      }
+    }
+  },
   methods: {
+    showSaveConfigDialog() {
+      // 触发PortfolioConfigManager组件的保存对话框
+      this.$refs.configManager?.showSaveConfigDialog()
+    },
     getSearchResults(type) {
       if (type === 'stock') {
         return this.stockSearchResults
@@ -408,6 +456,33 @@ export default {
   /* 移除min-height: 100%，避免高度继承问题 */
   padding-bottom: 20px;
   width: 100%; /* 确保宽度正确 */
+}
+
+.config-toolbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 16px;
+  background: #f8fafc;
+  border-radius: 8px;
+  border: 1px solid #e2e8f0;
+}
+
+.toolbar-left {
+  display: flex;
+  align-items: center;
+}
+
+.form-title {
+  font-size: 16px;
+  font-weight: 600;
+  color: #1e293b;
+}
+
+.toolbar-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .config-section {
@@ -560,6 +635,25 @@ export default {
 @media (max-width: 768px) {
   .portfolio-config-form {
     gap: 16px;
+  }
+  
+  .config-toolbar {
+    flex-direction: column;
+    gap: 12px;
+    align-items: stretch;
+  }
+  
+  .toolbar-left {
+    justify-content: center;
+  }
+  
+  .toolbar-right {
+    justify-content: center;
+    flex-wrap: wrap;
+  }
+  
+  .form-title {
+    font-size: 14px;
   }
   
   .config-section {

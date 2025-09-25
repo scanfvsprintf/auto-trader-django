@@ -63,6 +63,7 @@
           @update:monthly-withdrawal="monthlyWithdrawal = $event"
           @update:commission-rate="commissionRate = $event"
           @update:date-range="dateRange = $event"
+          @load-config="loadConfig"
         />
       </div>
     </el-drawer>
@@ -345,6 +346,45 @@ export default {
       } finally {
         this.loading = false
       }
+    },
+    
+    // 加载配置
+    loadConfig(config) {
+      try {
+        // 加载组合标的
+        if (config.portfolioItems) {
+          this.portfolioItems = config.portfolioItems.map(item => ({
+            ...item,
+            // 确保每个项目都有必要的属性
+            weight: item.weight || 0,
+            type: item.type || 'stock',
+            code: item.code || '',
+            name: item.name || ''
+          }))
+        }
+        
+        // 加载其他配置
+        if (config.rebalanceStrategy) {
+          this.rebalanceStrategy = config.rebalanceStrategy
+        }
+        if (config.initialCapital !== undefined) {
+          this.initialCapital = config.initialCapital
+        }
+        if (config.monthlyWithdrawal !== undefined) {
+          this.monthlyWithdrawal = config.monthlyWithdrawal
+        }
+        if (config.commissionRate !== undefined) {
+          this.commissionRate = config.commissionRate
+        }
+        if (config.dateRange) {
+          this.dateRange = config.dateRange
+        }
+        
+        this.$message.success('配置加载成功')
+      } catch (error) {
+        console.error('加载配置失败:', error)
+        this.$message.error('配置加载失败')
+      }
     }
   }
 }
@@ -405,10 +445,7 @@ export default {
   min-height: calc(100vh - var(--bottom-nav-height, 60px));
 }
 
-/* 桌面端配置抽屉 */
-.desktop-config-drawer {
-  /* 桌面端50%宽度显示 */
-}
+/* 桌面端配置抽屉样式已通过class控制 */
 
 .desktop-config-content {
   height: 100%;

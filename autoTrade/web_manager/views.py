@@ -2487,7 +2487,9 @@ def _prepare_chart_data(results_df, portfolio_data):
     }
 
 def _calculate_holding_period_analysis(total_assets):
-    """计算持有期分析 - 参考ETF脚本逻辑"""
+    """计算持有期分析 - 参考ETF脚本逻辑，增强版包含中位数和平均收益"""
+    import numpy as np
+    
     # 计算回测区间时间长度的三分之一作为最大持有天数
     total_days = len(total_assets)
     max_days = min(max(1, total_days // 3), total_days - 1)  # 回测区间长度的三分之一，最少1天
@@ -2498,21 +2500,98 @@ def _calculate_holding_period_analysis(total_assets):
     logger = logging.getLogger(__name__)
     logger.info(f"持有期分析: 总数据长度={total_days}, 最大持有天数={max_days} (回测区间长度的1/3)")
     
+    # 分析total_assets序列的特征
+    logger.info(f"total_assets序列特征:")
+    logger.info(f"  最小值: {total_assets.min():.2f}")
+    logger.info(f"  最大值: {total_assets.max():.2f}")
+    logger.info(f"  平均值: {total_assets.mean():.2f}")
+    logger.info(f"  标准差: {total_assets.std():.2f}")
+    logger.info(f"  前5个值: {total_assets.head().tolist()}")
+    logger.info(f"  后5个值: {total_assets.tail().tolist()}")
+    
+    # 计算日收益率序列
+    daily_returns = total_assets.pct_change().dropna()
+    logger.info(f"日收益率特征:")
+    logger.info(f"  平均值: {daily_returns.mean():.6f}")
+    logger.info(f"  标准差: {daily_returns.std():.6f}")
+    logger.info(f"  最小值: {daily_returns.min():.6f}")
+    logger.info(f"  最大值: {daily_returns.max():.6f}")
+    
     for d in range(1, max_days + 1):
         # 计算持有d天的收益率序列 - 与ETF脚本完全一致
         returns_d = (total_assets / total_assets.shift(d)) - 1
         returns_d = returns_d.dropna()
         
         if not returns_d.empty:
+            # 计算胜率
+            win_rate = float((returns_d > 0).sum() / len(returns_d)) if len(returns_d) > 0 else 0.0
+            
+            # 计算各种收益指标
+            max_return = float(returns_d.max())
+            min_return = float(returns_d.min())
+            mean_return = float(returns_d.mean())  # 平均收益
+            median_return = float(returns_d.median())  # 中位数收益
+            
+            # 验证数据合理性
+            if d <= 10:  # 只对前10个持有期进行详细分析
+                logger.info(f"=== 持有{d}天详细分析 ===")
+                logger.info(f"  样本数量: {len(returns_d)}")
+                logger.info(f"  收益率范围: [{returns_d.min():.6f}, {returns_d.max():.6f}]")
+                logger.info(f"  收益率分布: 均值={returns_d.mean():.6f}, 中位数={returns_d.median():.6f}, 标准差={returns_d.std():.6f}")
+                logger.info(f"  前5个收益率: {returns_d.head().tolist()}")
+                logger.info(f"  后5个收益率: {returns_d.tail().tolist()}")
+                
+                # 检查是否有异常值
+                q25, q75 = returns_d.quantile([0.25, 0.75])
+                iqr = q75 - q25
+                outliers = returns_d[(returns_d < q25 - 1.5*iqr) | (returns_d > q75 + 1.5*iqr)]
+                logger.info(f"  异常值数量: {len(outliers)}")
+                if len(outliers) > 0:
+                    logger.info(f"  异常值: {outliers.tolist()}")
+            
+            # 调试信息：记录详细数据（减少日志量）
+            if d <= 10 or d % 100 == 0:
+                logger.info(f"持有{d}天: 样本数={len(returns_d)}")
+                logger.info(f"  原始收益率范围: {returns_d.min():.4f} 到 {returns_d.max():.4f}")
+                logger.info(f"  平均收益率: {mean_return:.4f}, 中位数收益率: {median_return:.4f}")
+                logger.info(f"  收益率标准差: {returns_d.std():.4f}")
+            
+            # 计算年化收益率 - 使用正确的公式
+            if d > 0 and mean_return > -1:  # 避免负数开方
+                # 正确的年化收益率公式：(1 + r)^(252/d) - 1
+                annualized_mean = float((1 + mean_return) ** (252 / d) - 1)
+            else:
+                annualized_mean = 0.0
+                
+            if d > 0 and median_return > -1:
+                annualized_median = float((1 + median_return) ** (252 / d) - 1)
+            else:
+                annualized_median = 0.0
+                
+            # 只在特定持有期输出日志，减少日志量
+            if d <= 10 or d % 100 == 0:
+                logger.info(f"  年化平均收益: {annualized_mean:.4f}, 年化中位数收益: {annualized_median:.4f}")
+            
             analysis_data.append({
                 'holding_days': d,
-                'max_return': float(returns_d.max()),
-                'min_return': float(returns_d.min()),
-                'win_rate': float((returns_d > 0).sum() / len(returns_d)) if len(returns_d) > 0 else 0.0
+                'max_return': max_return,
+                'min_return': min_return,
+                'mean_return': mean_return,  # 新增：平均收益
+                'median_return': median_return,  # 新增：中位数收益
+                'annualized_mean': annualized_mean,  # 新增：年化平均收益
+                'annualized_median': annualized_median,  # 新增：年化中位数收益
+                'win_rate': win_rate,
+                'sample_count': len(returns_d)  # 新增：样本数量，用于验证
             })
     
     logger.info(f"持有期分析完成: 生成了{len(analysis_data)}个数据点")
     if analysis_data:
         logger.info(f"前5个数据点: {analysis_data[:5]}")
+        # 分析平均收益的变化趋势
+        mean_returns = [item['mean_return'] for item in analysis_data]
+        logger.info(f"平均收益范围: {min(mean_returns):.4f} 到 {max(mean_returns):.4f}")
+        logger.info(f"平均收益标准差: {np.std(mean_returns):.4f}")
+        logger.info(f"前10个持有期的平均收益: {mean_returns[:10]}")
+        logger.info(f"后10个持有期的平均收益: {mean_returns[-10:]}")
     
     return analysis_data

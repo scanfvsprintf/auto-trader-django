@@ -55,50 +55,62 @@
       </div>
       <div class="layout-bottom-nav">
         <div class="bottom-nav">
-          <div class="bottom-item" :class="{active: activeBottom === '/selection'}" @click="$router.push('/selection')">选股管理</div>
+          <div class="bottom-nav-item-wrapper">
+            <div class="bottom-item" :class="{active: activeBottom === '/selection'}" @click="$router.push('/selection')">选股管理</div>
+          </div>
 
-          <el-popover placement="top" width="220" v-model="showDailyPop" popper-class="bottom-daily-pop" :append-to-body="true" trigger="manual">
-            <div class="daily-pop">
-              <div class="daily-item" @click="navigate('/daily/csi')">沪深300</div>
-              <div class="daily-item" @click="navigate('/daily/stock')">单股K线</div>
-              <div class="daily-item" @click="navigate('/daily/etf')">ETF K线</div>
-              <div class="daily-item" @click="navigate('/daily/backfill')">日线补拉</div>
-            </div>
-            <div slot="reference" class="bottom-item" :class="{active: activeBottom.indexOf('/daily')===0}" @click="toggleDaily">
-              <span>日线管理</span>
-            </div>
-          </el-popover>
+          <div class="bottom-nav-item-wrapper">
+            <el-popover placement="top" width="220" v-model="showDailyPop" popper-class="bottom-daily-pop" :append-to-body="true" trigger="manual">
+              <div class="daily-pop">
+                <div class="daily-item" @click="navigate('/daily/csi')">沪深300</div>
+                <div class="daily-item" @click="navigate('/daily/stock')">单股K线</div>
+                <div class="daily-item" @click="navigate('/daily/etf')">ETF K线</div>
+                <div class="daily-item" @click="navigate('/daily/backfill')">日线补拉</div>
+              </div>
+              <div slot="reference" class="bottom-item" :class="{active: activeBottom.indexOf('/daily')===0}" @click="toggleDaily">
+                日线管理
+              </div>
+            </el-popover>
+          </div>
 
-          <div class="bottom-item" :class="{active: activeBottom === '/factors'}" @click="$router.push('/factors')">因子管理</div>
+          <div class="bottom-nav-item-wrapper">
+            <div class="bottom-item" :class="{active: activeBottom === '/factors'}" @click="$router.push('/factors')">因子管理</div>
+          </div>
           
-          <el-popover placement="top" width="220" v-model="showAnalysisPop" popper-class="bottom-analysis-pop" :append-to-body="true" trigger="manual">
-            <div class="analysis-pop">
-              <div class="analysis-item" @click="navigate('/analysis/correlation')">相关性分析</div>
-            </div>
-            <div slot="reference" class="bottom-item" :class="{active: activeBottom.indexOf('/analysis')===0}" @click="toggleAnalysis">
-              <span>指标分析</span>
-            </div>
-          </el-popover>
+          <div class="bottom-nav-item-wrapper">
+            <el-popover placement="top" width="220" v-model="showAnalysisPop" popper-class="bottom-analysis-pop" :append-to-body="true" trigger="manual">
+              <div class="analysis-pop">
+                <div class="analysis-item" @click="navigate('/analysis/correlation')">相关性分析</div>
+              </div>
+              <div slot="reference" class="bottom-item" :class="{active: activeBottom.indexOf('/analysis')===0}" @click="toggleAnalysis">
+                指标分析
+              </div>
+            </el-popover>
+          </div>
           
-          <el-popover placement="top" width="220" v-model="showSystemPop" popper-class="bottom-system-pop" :append-to-body="true" trigger="manual">
-            <div class="system-pop">
-              <div class="system-item" @click="navigate('/system/schema')">Schema 管理</div>
-              <div class="system-item" @click="navigate('/ai-config')">AI 模型配置</div>
-            </div>
-            <div slot="reference" class="bottom-item" :class="{active: activeBottom.indexOf('/system')===0 || activeBottom === '/ai-config'}" @click="toggleSystem">
-              <span>系统管理</span>
-            </div>
-          </el-popover>
+          <div class="bottom-nav-item-wrapper">
+            <el-popover placement="top" width="220" v-model="showSystemPop" popper-class="bottom-system-pop" :append-to-body="true" trigger="manual">
+              <div class="system-pop">
+                <div class="system-item" @click="navigate('/system/schema')">Schema 管理</div>
+                <div class="system-item" @click="navigate('/ai-config')">AI 模型配置</div>
+              </div>
+              <div slot="reference" class="bottom-item" :class="{active: activeBottom.indexOf('/system')===0 || activeBottom === '/ai-config'}" @click="toggleSystem">
+                系统管理
+              </div>
+            </el-popover>
+          </div>
           
-          <el-popover placement="top" width="220" v-model="showBacktestPop" popper-class="bottom-backtest-pop" :append-to-body="true" trigger="manual">
-            <div class="backtest-pop">
-              <div class="backtest-item" @click="navigate('/backtest/stock')">个股回测记录</div>
-              <div class="backtest-item" @click="navigate('/backtest/portfolio')">组合回测</div>
-            </div>
-            <div slot="reference" class="bottom-item" :class="{active: activeBottom.indexOf('/backtest')===0}" @click="toggleBacktest">
-              <span>回测管理</span>
-            </div>
-          </el-popover>
+          <div class="bottom-nav-item-wrapper">
+            <el-popover placement="top" width="220" v-model="showBacktestPop" popper-class="bottom-backtest-pop" :append-to-body="true" trigger="manual">
+              <div class="backtest-pop">
+                <div class="backtest-item" @click="navigate('/backtest/stock')">个股回测记录</div>
+                <div class="backtest-item" @click="navigate('/backtest/portfolio')">组合回测</div>
+              </div>
+              <div slot="reference" class="bottom-item" :class="{active: activeBottom.indexOf('/backtest')===0}" @click="toggleBacktest">
+                回测管理
+              </div>
+            </el-popover>
+          </div>
         </div>
       </div>
     </div>
@@ -282,28 +294,44 @@ export default {
   height:100%; 
   display:flex; 
   align-items:center; 
-  justify-content:space-around; 
-  padding:0 4px; 
+  justify-content:space-between; 
+  padding:0 2px; 
+}
+
+/* 统一的菜单项包装器，确保等宽分布 */
+.bottom-nav-item-wrapper {
+  flex: 1;
+  width: 0;
+  flex-basis: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
 }
 .bottom-item{ 
-  flex:1; 
+  width: 100%;
+  height: 100%;
   display:flex; 
   align-items:center; 
   justify-content:center; 
   color:#374151; 
-  padding:0 1px; 
-  height:100%; 
+  padding:2px 1px; 
   line-height:1.2; 
-  font-size:10px; 
+  font-size:9px; 
   box-sizing:border-box; 
   -webkit-tap-highlight-color:transparent; 
   text-align:center; 
   white-space:nowrap; 
-  overflow:hidden; 
-  text-overflow:ellipsis;
-  min-width:0;
+  overflow:visible; 
+  text-overflow:unset;
 }
-.bottom-item.active{ color:#2563eb; font-weight:600 }
+.bottom-item.active{ 
+  color:#2563eb; 
+  font-weight:600;
+}
+.bottom-item:hover{ 
+  background-color: rgba(37, 99, 235, 0.05); 
+}
 /* 去除箭头占位 */
 .bottom-item .arrow{ display:none }
 
@@ -333,5 +361,83 @@ export default {
 .system-item:hover{ background:#f3f6ff; color:#1d4ed8; cursor:pointer }
 .backtest-item{ padding:8px 12px; font-size:13px; color:#374151; }
 .backtest-item:hover{ background:#f3f6ff; color:#1d4ed8; cursor:pointer }
+
+/* 移动端文字渲染优化 */
+@media (max-width: 768px) {
+  .bottom-item {
+    font-size: 10px;
+    line-height: 1.3;
+    padding: 3px 1px;
+  }
+  
+  .layout-bottom-nav .el-popover__reference .bottom-item {
+    font-size: 10px;
+    line-height: 1.3;
+    padding: 3px 1px;
+  }
+}
+
+/* 确保popover组件填充包装器 */
+.bottom-nav-item-wrapper .el-popover {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* 确保popover的reference元素填充popover */
+.bottom-nav-item-wrapper .el-popover__reference {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* 移动端优化 */
+@media (max-width: 768px) {
+  .bottom-item {
+    font-size: 10px;
+    line-height: 1.3;
+    padding: 3px 1px;
+  }
+}
+
+/* 确保popover的reference元素也能正确渲染 */
+.layout-bottom-nav .el-popover__reference {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.layout-bottom-nav .el-popover__reference .bottom-item {
+  width: 0;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #374151;
+  padding: 2px 1px;
+  line-height: 1.2;
+  font-size: 9px;
+  box-sizing: border-box;
+  -webkit-tap-highlight-color: transparent;
+  text-align: center;
+  white-space: nowrap;
+  overflow: visible;
+  text-overflow: unset;
+  min-width: 0;
+  max-width: none;
+  flex: 1;
+  flex-basis: 0;
+}
+
+.layout-bottom-nav .el-popover__reference .bottom-item.active {
+  color: #2563eb;
+  font-weight: 600;
+}
 </style>
 

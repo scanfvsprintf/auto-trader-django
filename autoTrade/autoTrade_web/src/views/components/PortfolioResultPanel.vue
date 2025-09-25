@@ -380,10 +380,15 @@ export default {
       // 转换为echarts需要的格式 [x, y]
       const maxReturns = analysisData.map(item => [item.holding_days, item.max_return])
       const minReturns = analysisData.map(item => [item.holding_days, item.min_return])
+      // 使用绝对收益率，这样变化更明显
+      const meanReturns = analysisData.map(item => [item.holding_days, item.mean_return])  // 绝对平均收益
+      const medianReturns = analysisData.map(item => [item.holding_days, item.median_return])  // 绝对中位数收益
       const winRates = analysisData.map(item => [item.holding_days, item.win_rate])
       
       console.log('原始数据样本:', analysisData.slice(0, 3))
       console.log('最大收益数据:', maxReturns.slice(0, 3))
+      console.log('平均收益数据:', meanReturns.slice(0, 3))
+      console.log('中位数收益数据:', medianReturns.slice(0, 3))
       console.log('胜率数据:', winRates.slice(0, 3))
       
       // 检查数据有效性
@@ -395,25 +400,45 @@ export default {
       
       checkData(maxReturns, '最大收益')
       checkData(minReturns, '最小收益')
+      checkData(meanReturns, '平均收益')
+      checkData(medianReturns, '中位数收益')
       checkData(winRates, '胜率')
       
       const option = {
         tooltip: {
-          trigger: 'axis'
+          trigger: 'axis',
+          formatter: (params) => {
+            if (!params || params.length === 0) return ''
+            const days = params[0].axisValue
+            let tooltip = `${days}天持有期<br/>`
+            params.forEach(param => {
+              const value = param.data && param.data[1]
+              if (param.seriesName === '胜率') {
+                tooltip += `${param.seriesName}: ${(value * 100).toFixed(1)}%<br/>`
+              } else {
+                tooltip += `${param.seriesName}: ${(value * 100).toFixed(2)}%<br/>`
+              }
+            })
+            return tooltip
+          }
         },
         legend: {
           top: 4,
           left: 8,
-          data: ['最大收益', '最小收益', '胜率'],
+          data: ['最大收益', '最小收益', '平均收益', '中位数收益', '胜率'],
           textStyle: {
             fontSize: this.isMobile ? 10 : 12
-          }
+          },
+          // 移动端优化：如果屏幕太小，使用垂直布局
+          orient: this.isMobile ? 'vertical' : 'horizontal',
+          right: this.isMobile ? 8 : 'auto',
+          top: this.isMobile ? 8 : 4
         },
         grid: {
-          left: '6%',
-          right: '12%',
-          top: 46,
-          bottom: 24,
+          left: this.isMobile ? '8%' : '6%',
+          right: this.isMobile ? '20%' : '12%',  // 移动端为图例留更多空间
+          top: this.isMobile ? 60 : 46,  // 移动端图例占用更多空间
+          bottom: this.isMobile ? 32 : 24,
           containLabel: true
         },
         xAxis: {
@@ -423,7 +448,9 @@ export default {
           axisLabel: {
             color: '#6b7280',
             fontSize: this.isMobile ? 10 : 12,
-            formatter: (value) => Math.round(value) + '天'
+            formatter: (value) => Math.round(value) + '天',
+            // 移动端减少标签密度
+            interval: this.isMobile ? 'auto' : 0
           },
           axisLine: {
             show: true,
@@ -447,7 +474,10 @@ export default {
             nameGap: 6,
             axisLabel: {
               color: '#6b7280',
-              formatter: (value) => (value * 100).toFixed(0) + '%'
+              fontSize: this.isMobile ? 10 : 12,
+              formatter: (value) => (value * 100).toFixed(0) + '%',
+              // 移动端减少标签密度
+              interval: this.isMobile ? 'auto' : 0
             },
             axisLine: {
               show: true,
@@ -470,7 +500,10 @@ export default {
             nameGap: 6,
             axisLabel: {
               color: '#7c3aed',
-              formatter: (value) => (value * 100).toFixed(0) + '%'
+              fontSize: this.isMobile ? 10 : 12,
+              formatter: (value) => (value * 100).toFixed(0) + '%',
+              // 移动端减少标签密度
+              interval: this.isMobile ? 'auto' : 0
             },
             axisLine: {
               show: true,
@@ -527,6 +560,29 @@ export default {
             }
           },
           {
+            name: '平均收益',
+            type: 'line',
+            data: meanReturns,
+            smooth: true,
+            showSymbol: false,
+            lineStyle: {
+              color: '#3b82f6',
+              width: this.isMobile ? 1.2 : 1.5
+            }
+          },
+          {
+            name: '中位数收益',
+            type: 'line',
+            data: medianReturns,
+            smooth: true,
+            showSymbol: false,
+            lineStyle: {
+              color: '#f59e0b',
+              width: this.isMobile ? 1.2 : 1.5,
+              type: 'dashed'
+            }
+          },
+          {
             name: '胜率',
             type: 'line',
             yAxisIndex: 1,
@@ -536,7 +592,7 @@ export default {
             lineStyle: {
               color: '#7c3aed',
               width: 1.2,
-              type: 'dashed'
+              type: 'dotted'
             }
           }
         ]
