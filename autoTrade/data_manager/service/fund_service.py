@@ -237,7 +237,7 @@ class FundService:
             try:
                 # 使用基金历史数据接口
                 df_normal = ak.fund_etf_hist_em(symbol=ak_code, period="daily", start_date=start_date_str, end_date=end_date_str, adjust="")
-                time.sleep(1.9) # 增加礼貌性延时，降低被封风险
+                time.sleep(2.9) # 增加礼貌性延时，降低被封风险
                 df_hfq = ak.fund_etf_hist_em(symbol=ak_code, period="daily", start_date=start_date_str, end_date=end_date_str, adjust="hfq")
                 
                 if df_normal.empty or df_hfq.empty:
@@ -260,7 +260,7 @@ class FundService:
                 success_count += 1
                 self._log_and_save(f"成功获取 {code} 数据，共 {len(df)} 条记录")
                 
-                time.sleep(2.1) # 增加礼貌性延时，降低被封风险
+                time.sleep(3.1) # 增加礼貌性延时，降低被封风险
  
             except Exception as e:
                 self._log_and_save(f"获取 {code} 日线行情失败: {e}", level=SystemLog.LogLevelChoices.WARNING)

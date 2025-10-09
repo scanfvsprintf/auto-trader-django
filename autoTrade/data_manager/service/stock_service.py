@@ -237,7 +237,7 @@ class StockService:
             logger.info(f"进度: [{i+1}/{len(target_codes)}] 正在获取 {code}...")
             try:
                 df_normal = ak.stock_zh_a_hist(symbol=ak_code, period="daily", start_date=start_date_str, end_date=end_date_str, adjust="")
-                time.sleep(2.1) # 增加礼貌性延时，降低被封风险
+                time.sleep(2.9) # 增加礼貌性延时，降低被封风险
                 df_hfq = ak.stock_zh_a_hist(symbol=ak_code, period="daily", start_date=start_date_str, end_date=end_date_str, adjust="hfq")
                 
                 if df_normal.empty or df_hfq.empty:
@@ -248,7 +248,7 @@ class StockService:
                 df['stock_code'] = code
                 batch_quotes_list.append(df)
                 
-                time.sleep(1.9) # 增加礼貌性延时，降低被封风险
+                time.sleep(3.1) # 增加礼貌性延时，降低被封风险
  
             except Exception as e:
                 self._log_and_save(f"获取 {code} 日线行情失败: {e}", level=SystemLog.LogLevelChoices.WARNING)
